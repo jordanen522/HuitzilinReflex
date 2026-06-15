@@ -86,8 +86,6 @@ Cuts all motors immediately regardless of flight mode.
 
 | Safety Claim | REQ ID |
 |---|---|
-| Drone stays within geofence | REQ-X |
-| System responds to link loss safely | REQ-X |
-| Kill-switch cuts motors immediately | REQ-X |
-| Camera privacy rules enforced | REQ-X |
-| All faults land in a safe state | REQ-X |
+| System responds to link loss safely | REQ-14 |
+| Kill-switch cuts motors immediately | REQ-16 |
+| All faults land in a safe state | REQ-17 |
