@@ -87,5 +87,5 @@ Cuts all motors immediately regardless of flight mode.
 | Safety Claim | REQ ID |
 |---|---|
 | System responds to link loss safely | REQ-14 |
-| Kill-switch cuts motors immediately | REQ-16 |
-| All faults land in a safe state | REQ-17 |
+| Kill-switch cuts motors immediately | REQ-15 |
+| All faults land in a safe state | REQ-16 |
