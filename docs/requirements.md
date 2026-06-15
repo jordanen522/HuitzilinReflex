@@ -28,6 +28,15 @@
 | REQ-12 | Compute: Raspberry Pi 5 4GB |
 | REQ-13 | Perception: OAK-D Lite fixed-focus, stereo depth computed on-chip |
 
+## Safety Criteria
+
+| ID | Requirement |
+|----|------------|
+| REQ-14 | System responds to link loss safely |
+| REQ-15 | Kill-switch cuts motors immediately |
+| REQ-16 | All faults land in a safe state |
+
+
 ## Non-Goals
 
 - No event camera
