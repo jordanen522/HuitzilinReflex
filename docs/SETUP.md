@@ -68,11 +68,14 @@ gz sim -s -r ~/ardupilot_gazebo/worlds/iris_runway.sdf
 ### Terminal 2 — SITL
 ```bash
 cd ~/ardupilot
-sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON --console --out udp:127.0.0.1:14551
+sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON --console \
+  --out udp:127.0.0.1:14551 \   # Week 1 script (first_flight.py) / QGC
+  --out udp:127.0.0.1:14552     # Week 2 ROS 2 bridge — its own port avoids contention
 ```
-Wait for "Received 1363 parameters" then force arm in the MAVProxy console:
+Wait for "Received 1363 parameters", then arm:
 
-arm throttle force
+- **Week 1 (manual):** in the MAVProxy console, `arm throttle force`.
+- **Week 2 (scripted):** the `huitzilin_sim` bridge arms programmatically after waiting for EKF/GPS-ready. For unattended runs, relax SITL pre-arm once with `param set ARMING_CHECK 0` rather than a manual force-arm. (Closes the Week 1 "automate the force arm" open question.)
 
 ### Terminal 3 — pymavlink flight script
 ```bash
@@ -81,14 +84,17 @@ python3 scripts/first_flight.py
 ```
 Expected output: Heartbeat received → Armed → Taking off → Holding position
 
-### Terminal 4 — ROS 2 MAVLink bridge (optional)
+### Terminal 4 — ROS 2 bridge / Week 2 stack
 ```bash
 source /opt/ros/jazzy/setup.bash
-source ~/huitzilin_ws/install/setup.bash
-ros2 run mavlink_bridge mavlink_bridge
+source ~/huitzilin_ws/install/setup.bash   # repo root = colcon workspace
+# Week 2 bridge (supersedes the Week 1 `mavlink_bridge` node), on its own port:
+ros2 run huitzilin_sim mav_bridge --ros-args -p connection:=udp:127.0.0.1:14552
+# …or bring up the whole Week 2 stack (bridge + patrol + telemetry logger):
+ros2 launch huitzilin_sim week2_sitl.launch.py
 ```
 
 ## Acceptance Criteria
 - `first_flight.py` prints "Holding position"
 - QGroundControl shows "Flying" and "Guided"
-- `ros2 run mavlink_bridge mavlink_bridge` prints "MAVLink heartbeat received"
+- **Week 2:** `ros2 run huitzilin_sim mav_bridge` connects and publishes `/huitzilin/odom`; `ros2 topic pub /huitzilin/cmd_vel …` moves the drone; `ros2 launch huitzilin_sim week2_sitl.launch.py` flies a closed patrol loop with logged telemetry

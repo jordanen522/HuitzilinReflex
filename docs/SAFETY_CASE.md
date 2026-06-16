@@ -9,6 +9,7 @@
 | Low battery | Insufficient charge | Motor cutout mid-flight | Voltage monitor | → RTL/LAND | Critical |
 | FC failsafe | ArduPilot internal fault | Loss of flight control | FC status message | → FAILSAFE | Critical |
 | Uncommanded flyaway | Software bug / bad command | Uncontrolled flight | Geofence breach | Kill-switch / RTL | Critical |
+| GUIDED setpoint stream loss | patrol/evasion node stalls or `cmd_vel` stops | Stale velocity setpoint → risk of coast/lunge | Bridge watchdog (`cmd_timeout_s`) | → zero-velocity hold; then mode → LOITER/RTL | High |
 | GPIO/payload fault | Wiring fault | LED/buzzer fails | Node error | Log + continue | Low |
 | Pi power brownout | Inference power spike (5V/5A) | Companion computer resets | Heartbeat loss | → FAILSAFE | High |
 
