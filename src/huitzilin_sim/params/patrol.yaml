@@ -1,0 +1,13 @@
+patrol:
+  ros__parameters:
+    # 5 m x 5 m square loop at 2 m altitude (d = -2.0). Keep it inside your world.
+    waypoints_ned: [5.0, 0.0, -2.0,
+                    5.0, 5.0, -2.0,
+                    0.0, 5.0, -2.0,
+                    0.0, 0.0, -2.0]
+    accept_radius_m: 0.6
+    cruise_speed_ms: 1.5
+    mode: "position"        # "position" (recommended first) | "velocity"
+    loop: true
+    autostart: true
+    connection: "udp:127.0.0.1:14550"

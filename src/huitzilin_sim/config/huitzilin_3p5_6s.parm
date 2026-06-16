@@ -1,0 +1,72 @@
+# HuitzilinReflex — ArduCopter SITL starting params for the 3.5" 6S ducted platform
+# Load via MAVProxy:  param load /path/to/huitzilin_3p5_6s.parm
+# Or via SITL flag:   --add-param-file=/path/to/huitzilin_3p5_6s.parm
+#
+# These are Pass-A (params-only) tuning targets from the Week 2 playbook §6 Day 2.
+# Pass-B (model SDF edits) runs in parallel — see models/huitzilin_duct/.
+#
+# IMPORTANT: SITL will learn/override some params during flight (e.g. MOT_THST_HOVER).
+# Treat these as starting points; re-save with "param save" after a stable hover.
+
+# --- Frame type (X-frame quad) -----------------------------------------------
+FRAME_CLASS,1
+FRAME_TYPE,1
+
+# --- Motor thrust curve (small fast motor/prop combo on 6S) ------------------
+# Expo 0.55 = moderately aggressive; linearizes the thrust curve for these motors.
+MOT_THST_EXPO,0.55
+# Let the flight controller auto-learn hover throttle during first hover.
+MOT_HOVER_LEARN,2
+# Initial estimate; will be overwritten by auto-learn (~0.18–0.30 for 6S 3.5").
+MOT_THST_HOVER,0.22
+
+# --- Gyro / accelerometer filter (small props spin fast) ---------------------
+# Higher cutoff than large-frame defaults — small 90mm props need it.
+INS_GYRO_FILTER,100
+INS_ACCEL_FILTER,50
+
+# --- Rate PIDs (conservative starting point; tune in sim first) --------------
+# Roll
+ATC_RAT_RLL_P,0.08
+ATC_RAT_RLL_I,0.08
+ATC_RAT_RLL_D,0.003
+ATC_RAT_RLL_FILT,80.0
+# Pitch
+ATC_RAT_PIT_P,0.08
+ATC_RAT_PIT_I,0.08
+ATC_RAT_PIT_D,0.003
+ATC_RAT_PIT_FILT,80.0
+# Yaw
+ATC_RAT_YAW_P,0.15
+ATC_RAT_YAW_I,0.015
+ATC_RAT_YAW_D,0.0
+ATC_RAT_YAW_FILT,10.0
+
+# --- Angle PIDs --------------------------------------------------------------
+ATC_ANG_RLL_P,6.0
+ATC_ANG_PIT_P,6.0
+ATC_ANG_YAW_P,4.5
+
+# --- Waypoint navigation speeds (keep the patrol loop calm) ------------------
+WPNAV_SPEED,150           # cm/s cruise (1.5 m/s)
+WPNAV_SPEED_UP,100        # cm/s ascent
+WPNAV_SPEED_DN,80         # cm/s descent
+WPNAV_ACCEL,100           # cm/s² — gentle for a small enclosed yard
+
+# --- Position controller ------------------------------------------------------
+PSC_POSXY_P,1.0
+PSC_VELXY_P,2.0
+PSC_VELXY_I,0.5
+PSC_VELXY_D,0.2
+PSC_POSZ_P,1.0
+
+# --- Arming checks (relax for SITL — GPS fix arrives quickly) ----------------
+ARMING_CHECK,1
+
+# --- Geofence / RTL failsafe (match the safety case) ------------------------
+FS_THR_ENABLE,1           # RC throttle failsafe -> RTL
+FS_GCS_ENABLE,1           # GCS heartbeat failsafe -> RTL
+RTL_ALT,500               # cm — climb to 5 m then return
+
+# --- Logging (keep defaults; rosbag handles our capture) ---------------------
+LOG_BITMASK,176126
