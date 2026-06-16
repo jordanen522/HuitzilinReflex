@@ -10,4 +10,4 @@ patrol:
     mode: "position"        # "position" (recommended first) | "velocity"
     loop: true
     autostart: true
-    connection: "udp:127.0.0.1:14550"
+    connection: "udpin:0.0.0.0:14553"   # patrol node needs its own port

@@ -1,6 +1,6 @@
 mav_bridge:
   ros__parameters:
-    connection: "udp:127.0.0.1:14550"   # fallback: "tcp:127.0.0.1:5760"
+    connection: "udpin:0.0.0.0:14552"   # SITL must send --out udp:127.0.0.1:14552
     cmd_rate_hz: 10.0                    # >5 Hz so AP never hits the ~3 s timeout
     cmd_timeout_s: 0.7                   # cmd_vel silence longer than this -> zero-hold
     takeoff_alt_m: 2.0

@@ -39,6 +39,7 @@ class MavBridgeNode(Node):
         self._last_cmd = (0.0, 0.0, 0.0, 0.0)
         self._last_cmd_t = self.get_clock().now()
         self._lock = threading.Lock()
+        self._cmd_ever_received = False   # don't send setpoints until patrol starts
 
         # --- ROS interfaces (contracts: see playbook §3) ---
         self.create_subscription(Twist, "/huitzilin/cmd_vel", self._on_cmd_vel, 10)
@@ -65,9 +66,13 @@ class MavBridgeNode(Node):
         with self._lock:
             self._last_cmd = (vx, vy, vz, yaw_rate)
             self._last_cmd_t = self.get_clock().now()
+            self._cmd_ever_received = True
 
     def _tick_setpoint(self):
-        """Stream the last command at a fixed rate; zero-hold if stale (fail-safe)."""
+        """Stream the last command at a fixed rate; zero-hold if stale (fail-safe).
+        Does nothing until the first cmd_vel arrives so takeoff/hover aren't disrupted."""
+        if not self._cmd_ever_received:
+            return
         now = self.get_clock().now()
         with self._lock:
             age = (now - self._last_cmd_t).nanoseconds * 1e-9
