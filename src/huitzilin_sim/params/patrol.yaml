@@ -9,5 +9,8 @@ patrol:
     cruise_speed_ms: 1.5
     mode: "position"        # "position" (recommended first) | "velocity"
     loop: true
-    autostart: true
+    autostart: false        # was true — patrol's 10 Hz SET_POSITION_TARGET_LOCAL_NED
+                            # setpoints kept overriding the GUIDED takeoff sub-mode,
+                            # so the drone never left the ground. Start patrol via
+                            # /huitzilin/start_patrol AFTER takeoff instead.
     connection: "udpin:0.0.0.0:14553"   # patrol node needs its own port

@@ -93,8 +93,13 @@ class MavBridge:
             print("[bridge] disarmed")
         return True
 
-    def takeoff(self, alt_m, timeout=30):
-        """GUIDED takeoff. Must be armed and in GUIDED first."""
+    def takeoff(self, alt_m, timeout=90):
+        """GUIDED takeoff. Must be armed and in GUIDED first.
+
+        NOTE: timeout is WALL-clock. Gazebo headless on Iris Xe runs at ~24%
+        real-time, so 90 s wall ≈ 22 s sim — enough for a slow climb to 2 m.
+        Returns as soon as altitude is reached, so the generous bound is free.
+        """
         self.master.mav.command_long_send(
             self.target_system, self.target_component,
             mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0,
