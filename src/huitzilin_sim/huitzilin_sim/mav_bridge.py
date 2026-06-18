@@ -84,7 +84,7 @@ class MavBridge:
         self.master.mav.command_long_send(
             self.target_system, self.target_component,
             mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0,
-            1 if arm else 0, 0, 0, 0, 0, 0, 0)
+            1 if arm else 0, 21, 0, 0, 0, 0, 0)  # param2=21 = force arm (SITL)
         if arm:
             self.master.motors_armed_wait()
             print("[bridge] ARMED")

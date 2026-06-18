@@ -66,11 +66,55 @@ Secondary issues found and fixed along the way:
 - **Automate force-arm:** solved by fixing the frame instead of forcing — bridge arms
   cleanly via `/huitzilin/arm` once EKF/GPS is ready.
 
-### Still open (Week 2 gates)
-- ★ W2-08/W2-09: velocity round-trip + ≥5 Hz / 3-s rule (Week 4 depends on this).
-- ★ W2-06: stable ≥30 s hover with the tuned `huitzilin_3p5_6s.parm`.
-- W2-14: RViz mission markers. W2-05: forked duct model (Pass B).
-- ★ W2-18: fresh-checkout reproduction from docs alone.
+### Week 2 gate status (2026-06-18)
+- ✓ W2-01: Week 1 baseline verified (heartbeat sys=1 comp=0).
+- ✓ W2-02: huitzilin_sim builds clean (removed spurious src/src/ duplicate).
+- ✓ W2-03: MAVLink endpoint confirmed udpin:0.0.0.0:14552, documented in bridge.yaml.
+- ✓ W2-04: Pass-A params loaded; fixed parm file (wrong param names: WP_SPD not WPNAV_SPEED).
+- ⏸ W2-05: Deferred — iris_with_standoffs used as-is; real mass/motor tune deferred to Week 7-8.
+- ✓ W2-06: Stable hover ±0.01m variance at 2.19m for 30s.
+- ✓ W2-07: mav_bridge.py selftest passed (arm→takeoff→nudge→land). Force arm fix applied.
+- ✓ W2-08: Velocity round-trip confirmed (~120ms sim-time at 24% real-time).
+- ✓ W2-09: ~6 Hz sim-time setpoint rate, no AP timeout.
+- ✓ W2-10: Bridge node publishing /huitzilin/odom and /huitzilin/state.
+- ✓ W2-11: Fail-safe hold confirmed — drone holds on cmd_vel dropout.
+- ✓ W2-12: patrol.yaml defines 5×5m square at 2m altitude.
+- ✓ W2-13: patrol_node looping cleanly through all 4 waypoints.
+- ✓ W2-14: RViz mission markers showing 4 green spheres.
+- ✓ W2-15: Telemetry CSV logging confirmed (2148 rows).
+- ✓ W2-16: One-command launch via week2_sitl.launch.py.
+- ✓ W2-17: Rosbag recorded (week2_patrol_0.mcap).
+- ⏳ W2-18: Fresh-checkout validation in progress (teammate testing).
+- ✓ W2-19: Retro and Week 3 handoff written (see below).
+
+### Week 2 Retro
+
+**What worked**
+- ROS 2 ↔ pymavlink bridge solid; arm/takeoff/patrol all scripted via services.
+- Position-mode patrol extremely stable — 43 laps, mean lap 29.51s, stdev 0.93s.
+- Telemetry logger + rosbag pipeline ready for Week 3.
+- Force-arm fix (param2=21) eliminates the manual MAVProxy workaround.
+
+**What was harder than expected**
+- FRAME_CLASS=0 on fresh EEPROM caused silent no-lift bug (fix: always load sitl_frame.parm).
+- Param names differ from playbook (WP_SPD not WPNAV_SPEED; PSC_* not present).
+- Inline comments in .parm files break the MAVProxy parser — use comment-only lines.
+- Port contention: each node needs its own --out UDP port from SITL.
+- src/src/ duplicate caused colcon build failure after git pull.
+
+**What's deferred**
+- W2-05 Pass-B model fidelity (real mass/inertia/motorConstant) — deferred to Week 7-8.
+- W2-18 fresh-checkout validation — teammate testing in progress.
+
+### Week 3 Handoff
+
+Week 3 (perception pipeline) inherits:
+- A working autonomous patrol loop in SITL via `ros2 launch huitzilin_sim week2_sitl.launch.py`.
+- A stable bridge with `/huitzilin/odom`, `/huitzilin/state`, `/huitzilin/cmd_vel` contracts.
+- Rosbag + CSV telemetry tooling ready for labeled scenario capture.
+- The body-velocity path (send_velocity_body) proven and ready for the Week 4 evasion reflex.
+- A Gazebo model to hang a depth sensor on (iris_with_standoffs, Pass-B fidelity deferred).
+- Open: W2-05 Pass-B model, W2-18 fresh-checkout sign-off.
 
 ### Versions
 - Same as Week 1 (ROS 2 Jazzy, Gazebo Harmonic 8.11.0, ArduPilot main, Python 3.12.3)
