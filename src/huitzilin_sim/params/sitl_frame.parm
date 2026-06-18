@@ -1,0 +1,17 @@
+# HuitzilinReflex — SITL airframe parameters
+#
+# Load at SITL startup with:
+#   sim_vehicle.py ... --add-param-file=$HOME/huitzilin_ws/src/huitzilin_sim/params/sitl_frame.parm
+#
+# Why this file exists:
+#   On a fresh EEPROM (or after `sim_vehicle.py -w`), ArduPilot boots with
+#   FRAME_CLASS=0. Arming "succeeds" but the motors are never mixed for a quad,
+#   so throttle maxes out with zero lift and pre-arm reports:
+#       PreArm: Motors: Check frame class and type
+#   Loading these on every boot guarantees a correct airframe — no manual
+#   `param set` + reboot needed.
+#
+# FRAME_CLASS  1 = Quad
+# FRAME_TYPE   1 = X configuration
+FRAME_CLASS 1
+FRAME_TYPE 1

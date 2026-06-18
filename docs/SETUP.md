@@ -69,13 +69,33 @@ gz sim -s -r ~/ardupilot_gazebo/worlds/iris_runway.sdf
 ```bash
 cd ~/ardupilot
 sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON --console \
-  --out udp:127.0.0.1:14551 \   # Week 1 script (first_flight.py) / QGC
-  --out udp:127.0.0.1:14552     # Week 2 ROS 2 bridge — its own port avoids contention
+  --add-param-file=$HOME/huitzilin_ws/src/huitzilin_sim/params/sitl_frame.parm \
+  --out udp:127.0.0.1:14552 \   # Week 2 ROS 2 bridge   (matches bridge.yaml)
+  --out udp:127.0.0.1:14553     # Week 2 patrol node    (matches patrol.yaml)
 ```
-Wait for "Received 1363 parameters", then arm:
+Wait for "Received 1363 parameters".
 
-- **Week 1 (manual):** in the MAVProxy console, `arm throttle force`.
-- **Week 2 (scripted):** the `huitzilin_sim` bridge arms programmatically after waiting for EKF/GPS-ready. For unattended runs, relax SITL pre-arm once with `param set ARMING_CHECK 0` rather than a manual force-arm. (Closes the Week 1 "automate the force arm" open question.)
+**Port mapping (must match the YAMLs):** MAVProxy fans the MAVLink stream out to
+each consumer's own UDP port. `bridge.yaml` listens on `udpin:0.0.0.0:14552`,
+`patrol.yaml` on `udpin:0.0.0.0:14553`. The `--out` ports above must match, or the
+nodes get `TimeoutError: no heartbeat`. (MAVProxy's own default `--out …:14550`
+still carries the Week 1 `first_flight.py` / QGC link.)
+
+**Airframe (critical):** `--add-param-file=…/sitl_frame.parm` sets
+`FRAME_CLASS=1` (Quad) / `FRAME_TYPE=1` (X) on every boot. Without it, a fresh
+EEPROM boots with `FRAME_CLASS=0` — arming "succeeds" but the motors never spin
+as a quad (throttle maxes out, zero lift, `PreArm: Motors: Check frame class and
+type`). This was the actual takeoff blocker; do **not** paper over it with
+`ARMING_CHECK 0` — that only hides the pre-arm message while the airframe stays
+unmixed. If you ever set the frame by hand instead: `param set FRAME_CLASS 1`,
+`param set FRAME_TYPE 1`, then `reboot` (the FC link drops for a few seconds and
+reconnects — that's normal).
+
+Then arm:
+
+- **Week 1 (manual):** in the MAVProxy console, `arm throttle`.
+- **Week 2 (scripted):** the `huitzilin_sim` bridge arms programmatically via the
+  `/huitzilin/arm` service after waiting for EKF/GPS-ready.
 
 ### Terminal 3 — pymavlink flight script
 ```bash
