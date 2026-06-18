@@ -30,17 +30,17 @@ INS_ACCEL_FILTER,50
 ATC_RAT_RLL_P,0.08
 ATC_RAT_RLL_I,0.08
 ATC_RAT_RLL_D,0.003
-ATC_RAT_RLL_FILT,80.0
+# ATC_RAT_RLL_FILT,80.0  # not present in this ArduPilot build
 # Pitch
 ATC_RAT_PIT_P,0.08
 ATC_RAT_PIT_I,0.08
 ATC_RAT_PIT_D,0.003
-ATC_RAT_PIT_FILT,80.0
+# ATC_RAT_PIT_FILT,80.0  # not present in this ArduPilot build
 # Yaw
 ATC_RAT_YAW_P,0.15
 ATC_RAT_YAW_I,0.015
 ATC_RAT_YAW_D,0.0
-ATC_RAT_YAW_FILT,10.0
+# ATC_RAT_YAW_FILT,10.0  # not present in this ArduPilot build
 
 # --- Angle PIDs --------------------------------------------------------------
 ATC_ANG_RLL_P,6.0
@@ -48,25 +48,18 @@ ATC_ANG_PIT_P,6.0
 ATC_ANG_YAW_P,4.5
 
 # --- Waypoint navigation speeds (keep the patrol loop calm) ------------------
-WPNAV_SPEED,150           # cm/s cruise (1.5 m/s)
-WPNAV_SPEED_UP,100        # cm/s ascent
-WPNAV_SPEED_DN,80         # cm/s descent
-WPNAV_ACCEL,100           # cm/s² — gentle for a small enclosed yard
+WP_SPD,1.5
+WP_SPD_UP,1.0
+WP_SPD_DN,0.8
+WP_ACC,1.0
 
-# --- Position controller ------------------------------------------------------
-PSC_POSXY_P,1.0
-PSC_VELXY_P,2.0
-PSC_VELXY_I,0.5
-PSC_VELXY_D,0.2
-PSC_POSZ_P,1.0
-
-# --- Arming checks (relax for SITL — GPS fix arrives quickly) ----------------
-ARMING_CHECK,1
+# --- Position controller (param names vary by ArduPilot version) --------------
+# PSC_* not present in this build — position tuning via WPNAV_* above
 
 # --- Geofence / RTL failsafe (match the safety case) ------------------------
-FS_THR_ENABLE,1           # RC throttle failsafe -> RTL
-FS_GCS_ENABLE,1           # GCS heartbeat failsafe -> RTL
-RTL_ALT,500               # cm — climb to 5 m then return
+FS_THR_ENABLE,1
+FS_GCS_ENABLE,1
+RTL_ALT,500
 
 # --- Logging (keep defaults; rosbag handles our capture) ---------------------
 LOG_BITMASK,176126
