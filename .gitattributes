@@ -1,0 +1,37 @@
+# Line-ending normalization for HuitzilinReflex.
+#
+# This repo is developed on BOTH native Ubuntu (the PC) and WSL2 (the laptop).
+# Without this file, a Windows-side editor reintroduces CRLF and every touched
+# file shows as "modified" (a whole-file diff that is pure line-ending noise).
+# Rule: the repo and every checkout use LF. Binaries are never touched.
+
+# Default: treat everything as text, store LF, check out LF.
+* text=auto eol=lf
+
+# Explicit text types (ROS 2 / Python / sim configs) — always LF.
+*.py        text eol=lf
+*.sh        text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.xml       text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.parm      text eol=lf
+*.sdf       text eol=lf
+*.world     text eol=lf
+*.urdf      text eol=lf
+*.xacro     text eol=lf
+*.launch.py text eol=lf
+
+# Binary — never normalize or diff as text.
+*.docx      binary
+*.pdf       binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.mcap      binary
+*.bag       binary
+*.db3       binary
