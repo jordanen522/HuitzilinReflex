@@ -3,3 +3,5 @@ build/
 install/
 log/
 *.log
+# Unrelated separately-cloned tool plugin marketplace (untracked)
+ECC/
