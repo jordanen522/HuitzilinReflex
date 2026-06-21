@@ -5,7 +5,15 @@
       "Bash(unzip -o -q \"HuitzilinReflex_Week3_Playbook.docx\" -d /tmp/w3docx)",
       "Read(//tmp/w3docx/**)",
       "Bash(sed -e 's/<[^>]*>//g')",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(python -m py_compile src/huitzilin_perception/huitzilin_perception/detector_node.py src/huitzilin_perception/huitzilin_perception/score_bags.py src/huitzilin_perception/huitzilin_perception/spawn_projectile.py src/huitzilin_perception/launch/week3_perception.launch.py)",
+      "Bash(python -m py_compile src/huitzilin_perception/launch/week3_perception.launch.py)",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(git --no-pager diff)",
+      "Bash(git rev-parse *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git --no-pager log --oneline -3)"
     ]
   }
 }
