@@ -7,7 +7,7 @@ roadmap, BOM, topic tables) live in `docs/` and `HuitzilinReflex_v2.md`.
 
 3.5″ ducted micro-quadrotor that patrols, signals, and reflexively dodges projectiles.
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink · Python 3.12 · Ubuntu 24.04.
-**Current phase: Week 3 (perception) — not yet coded.** Week 2 (autonomous patrol loop) is complete.
+**Current phase: Week 3 (perception) — scaffolded, detection node not yet written.** Week 2 (autonomous patrol loop) is complete.
 
 ## Build & run (inside WSL or native Ubuntu)
 
@@ -61,3 +61,4 @@ Preflight check: `./scripts/preflight_check.sh`
 | `docs/SETUP.md` | Full install + run/acceptance |
 | `docs/JOURNAL.md` | Week-by-week log — best source for "why is it this way" |
 | `HuitzilinReflex_Week3_Playbook.docx` | Week 3 perception task cards (W3-01…W3-22) |
+| `docs/WEEK3_PLAN.md` | Week 3 reconciled plan — playbook vs. actual repo state |

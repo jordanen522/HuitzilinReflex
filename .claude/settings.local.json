@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /tmp/w3docx)",
+      "Bash(unzip -o -q \"HuitzilinReflex_Week3_Playbook.docx\" -d /tmp/w3docx)",
+      "Read(//tmp/w3docx/**)",
+      "Bash(sed -e 's/<[^>]*>//g')",
+      "Read(//tmp/**)"
+    ]
+  }
+}
