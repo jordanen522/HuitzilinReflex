@@ -53,7 +53,11 @@ from launch.actions import (
 )
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    EqualsSubstitution,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -107,10 +111,8 @@ def generate_launch_description() -> LaunchDescription:
         arguments=["/gz/oak/depth"],
         remappings=[("/gz/oak/depth", "/oak/depth")],
         parameters=[{"use_sim_time": use_sim_time}],
-        condition=IfCondition(
-            # Only in live mode — scoring replays bags that already have /oak topics
-            _eq_condition(mode, "live")
-        ),
+        # Only in live mode — scoring replays bags that already have /oak topics
+        condition=_eq_condition(mode, "live"),
     )
 
     # ── 2. ros_gz_bridge — point cloud + camera_info ──────────────────────────
@@ -130,7 +132,7 @@ def generate_launch_description() -> LaunchDescription:
             ("/gz/oak/depth/camera_info",  "/oak/camera_info"),
         ],
         parameters=[{"use_sim_time": use_sim_time}],
-        condition=IfCondition(_eq_condition(mode, "live")),
+        condition=_eq_condition(mode, "live"),
     )
 
     # ── 3+4. Static TF: base_link → camera_link → camera_optical_frame ────────
@@ -192,7 +194,7 @@ def generate_launch_description() -> LaunchDescription:
             "recall_floor":     LaunchConfiguration("recall_floor"),
             "output_file":      LaunchConfiguration("score_output"),
         }],
-        condition=IfCondition(_eq_condition(mode, "score")),
+        condition=_eq_condition(mode, "score"),
     )
 
     # ── Optional: Week 2 patrol stack ─────────────────────────────────────────
@@ -217,11 +219,10 @@ def generate_launch_description() -> LaunchDescription:
 
 
 # ── Helper: string equality condition ─────────────────────────────────────────
-# LaunchConfiguration comparison not natively available as a simple bool.
-# Use PythonExpression as a workaround.
+# Returns a ready-to-use Condition (do NOT wrap the result in IfCondition again).
+# EqualsSubstitution + IfCondition is the supported Jazzy pattern; the older
+# LaunchConfigurationEquals is deprecated and slated for removal.
 
-from launch.conditions import LaunchConfigurationEquals  # noqa: E402
 
-
-def _eq_condition(lc: LaunchConfiguration, value: str):
-    return LaunchConfigurationEquals(lc, value)
+def _eq_condition(lc: LaunchConfiguration, value: str) -> IfCondition:
+    return IfCondition(EqualsSubstitution(lc, value))
