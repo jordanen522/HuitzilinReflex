@@ -13,7 +13,12 @@
       "Bash(git rev-parse *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git --no-pager log --oneline -3)"
+      "Bash(git --no-pager log --oneline -3)",
+      "Bash(grep -n \"pycache\\\\|pyc\\\\|install/\\\\|build/\\\\|log/\" .gitignore)",
+      "Bash(ls -la .gitignore)",
+      "PowerShell($d1=\"src\\\\huitzilin_perception\\\\huitzilin_perception\\\\__pycache__\"; $d2=\"src\\\\huitzilin_perception\\\\launch\\\\__pycache__\"; foreach\\($d in @\\($d1,$d2\\)\\){ if\\(Test-Path $d\\){ Remove-Item -Recurse -Force $d; Write-Output \"removed $d\" } else { Write-Output \"absent $d\" } })",
+      "Bash(git push *)",
+      "Bash(git --no-pager log --oneline -4)"
     ]
   }
 }
