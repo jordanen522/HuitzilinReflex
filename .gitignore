@@ -3,5 +3,7 @@ build/
 install/
 log/
 *.log
+__pycache__/
+*.py[cod]
 # Unrelated separately-cloned tool plugin marketplace (untracked)
 ECC/
