@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>huitzilin_perception</name>
+  <version>0.3.0</version>
+  <description>HuitzilinReflex — Week 3: depth camera bridge, TF, projectile detection node, scenario tools.</description>
+  <maintainer email="j602eng1z@gmail.com">Jordan</maintainer>
+  <license>MIT</license>
+
+  <!-- ROS core -->
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <!-- TF -->
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+
+  <!-- Gazebo bridge (depth image + point cloud) -->
+  <depend>ros_gz_image</depend>
+  <depend>ros_gz_bridge</depend>
+
+  <!-- Point cloud processing (numpy-only path; open3d optional) -->
+  <depend>sensor_msgs_py</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

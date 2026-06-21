@@ -1,0 +1,41 @@
+# perception_bridge.yaml
+# ros_gz_bridge parameter file for Week 3 perception topics.
+#
+# Loaded by week3_perception.launch.py via the ros_gz_bridge node.
+#
+# QoS notes:
+#   - depth image + point cloud: best_effort, keep_last 1  (lossy sensor data)
+#   - camera_info: reliable, keep_last 10
+#   - /clock: must be reliable so sim time is never missed
+#
+# Frame mapping: Gazebo uses camera_optical_frame (set in model SDF).
+# The static TF publisher in the launch file wires this into the robot frame tree.
+
+/**:
+  ros__parameters:
+    # Bridge direction: GZ_TO_ROS (sensor data flows from Gazebo into ROS 2)
+    config:
+      # Depth image (sensor_msgs/Image, 32-bit float meters)
+      - ros_topic_name: "/oak/depth"
+        gz_topic_name: "/gz/oak/depth"
+        ros_type_name: "sensor_msgs/msg/Image"
+        gz_type_name: "gz.msgs.Image"
+        direction: GZ_TO_ROS
+        lazy: false
+
+      # Camera info (sensor_msgs/CameraInfo)
+      - ros_topic_name: "/oak/camera_info"
+        gz_topic_name: "/gz/oak/depth/camera_info"
+        ros_type_name: "sensor_msgs/msg/CameraInfo"
+        gz_type_name: "gz.msgs.CameraInfo"
+        direction: GZ_TO_ROS
+        lazy: false
+
+      # Point cloud (sensor_msgs/PointCloud2)
+      # Gazebo depth_camera auto-generates a point cloud topic at <topic>/points
+      - ros_topic_name: "/oak/points"
+        gz_topic_name: "/gz/oak/depth/points"
+        ros_type_name: "sensor_msgs/msg/PointCloud2"
+        gz_type_name: "gz.msgs.PointCloudPacked"
+        direction: GZ_TO_ROS
+        lazy: false

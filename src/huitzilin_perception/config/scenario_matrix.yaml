@@ -1,0 +1,259 @@
+# scenario_matrix.yaml — Week 3, W3-09
+#
+# Enumerated set of scenarios for the labeled rosbag library.
+# Each entry drives spawn_projectile.py and labels the resulting rosbag.
+#
+# FIELDS
+# ------
+# id           : unique string ID (used as bag filename prefix + label key)
+# label        : "positive" | "negative"
+# description  : human-readable summary
+# speed_mps    : projectile speed (m/s); 0 for negative scenarios
+# approach_angle_deg : 0 = head-on, positive = from right, negative = from left
+# miss_distance_m    : lateral miss at drone altitude (0 = direct hit)
+# offset_forward_m   : spawn distance ahead of drone
+# size_class   : "small" | "medium" (set by model radius; currently always medium)
+# closest_approach_m : expected closest approach (for ground-truth labeling)
+# time_to_closest_s  : estimated time from spawn to closest approach (sim time)
+# notes        : anything the detector needs to watch out for
+#
+# COVERAGE DESIGN
+# ---------------
+# Positives (should trigger /threat/centroid):
+#   - Speed: slow (4 m/s), medium (8 m/s), fast (14 m/s)
+#   - Angle: head-on (0°), oblique left (−30°), oblique right (+30°)
+#   - Miss: direct hit (0 m), near-miss (0.5 m), far-miss (1.5 m)
+#   All three variables crossed gives 3×3×3 = 27 positives; reduced to 12 below
+#   to keep the first capture session tractable.
+#
+# Negatives (should NOT trigger /threat/centroid):
+#   - No object, drone patrolling normally
+#   - Drone executing a turn (egomotion-induced depth change)
+#   - Object spawned behind the drone (outside FOV)
+#   - Object far below glide path (outside ROI range gate)
+#   Budget ≥ 25% negatives to keep false-positive rate meaningful.
+#
+# ROSBAG NAMING CONVENTION
+# ------------------------
+# week3_<id>_<YYYYMMDD_HHMMSS>.mcap
+# Label sidecar: week3_<id>.label.yaml (same directory)
+
+scenarios:
+
+  # ── POSITIVES: head-on, varying speed ────────────────────────────────────
+  - id: S01
+    label: positive
+    description: "Head-on, slow (4 m/s), direct hit"
+    speed_mps: 4.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.0
+    time_to_closest_s: 1.5
+    notes: "Baseline slow direct-hit — must detect at all speeds."
+
+  - id: S02
+    label: positive
+    description: "Head-on, medium (8 m/s), direct hit"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.0
+    time_to_closest_s: 0.75
+    notes: "Primary design-point speed."
+
+  - id: S03
+    label: positive
+    description: "Head-on, fast (14 m/s), direct hit"
+    speed_mps: 14.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.0
+    time_to_closest_s: 0.43
+    notes: "Fast object — will cross the frame quickly; fewer frames to cluster."
+
+  # ── POSITIVES: oblique approach ──────────────────────────────────────────
+  - id: S04
+    label: positive
+    description: "Oblique right (+30°), medium speed, direct hit"
+    speed_mps: 8.0
+    approach_angle_deg: 30.0
+    miss_distance_m: 0.0
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.0
+    time_to_closest_s: 0.75
+    notes: "Lateral component; watch for ROI frustum clipping the approach."
+
+  - id: S05
+    label: positive
+    description: "Oblique left (−30°), medium speed, direct hit"
+    speed_mps: 8.0
+    approach_angle_deg: -30.0
+    miss_distance_m: 0.0
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.0
+    time_to_closest_s: 0.75
+    notes: "Mirror of S04."
+
+  - id: S06
+    label: positive
+    description: "Oblique right (+30°), fast (14 m/s), direct hit"
+    speed_mps: 14.0
+    approach_angle_deg: 30.0
+    miss_distance_m: 0.0
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.0
+    time_to_closest_s: 0.43
+    notes: "Worst-case oblique fast; widest ROI half-angle may be needed."
+
+  # ── POSITIVES: near-miss (dangerous — must detect) ────────────────────────
+  - id: S07
+    label: positive
+    description: "Head-on, medium, near-miss (0.5 m)"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.5
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.5
+    time_to_closest_s: 0.75
+    notes: "Still dangerous — within evasion radius. Must trigger centroid."
+
+  - id: S08
+    label: positive
+    description: "Head-on, fast, near-miss (0.5 m)"
+    speed_mps: 14.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.5
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.5
+    time_to_closest_s: 0.43
+    notes: "Fast near-miss — hardest detection window."
+
+  # ── POSITIVES: wider miss (should detect, Week 4 decides to dodge) ────────
+  - id: S09
+    label: positive
+    description: "Head-on, medium, wide miss (1.5 m)"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 1.5
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 1.5
+    time_to_closest_s: 0.75
+    notes: "Cluster still within camera FOV; detection node should still flag it."
+
+  - id: S10
+    label: positive
+    description: "Slow oblique, wide miss"
+    speed_mps: 4.0
+    approach_angle_deg: -20.0
+    miss_distance_m: 1.2
+    offset_forward_m: 5.0
+    size_class: medium
+    closest_approach_m: 1.2
+    time_to_closest_s: 1.25
+    notes: "Edge-of-regime: slow + oblique + wide miss. Still positive label."
+
+  # ── TRAIN/TEST SPLIT POSITIVE (held-out) ─────────────────────────────────
+  - id: S11
+    label: positive
+    description: "Head-on, medium speed, direct hit — held-out test set"
+    speed_mps: 8.0
+    approach_angle_deg: 5.0
+    miss_distance_m: 0.1
+    offset_forward_m: 7.0
+    size_class: medium
+    closest_approach_m: 0.1
+    time_to_closest_s: 0.875
+    notes: "Slight offset from S02 — part of held-out test set. Do not tune on this bag."
+
+  - id: S12
+    label: positive
+    description: "Fast oblique left, near-miss — held-out test set"
+    speed_mps: 12.0
+    approach_angle_deg: -25.0
+    miss_distance_m: 0.4
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 0.4
+    time_to_closest_s: 0.5
+    notes: "Held-out. Challenges oblique detection at high speed."
+
+  # ── NEGATIVES: no object ─────────────────────────────────────────────────
+  - id: N01
+    label: negative
+    description: "No object spawned, drone patrolling normally"
+    speed_mps: 0.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    offset_forward_m: 0.0
+    size_class: none
+    closest_approach_m: 999
+    time_to_closest_s: 0
+    notes: "Clean negative. No spawn command issued. Detector must be silent."
+
+  - id: N02
+    label: negative
+    description: "No object, drone executing a patrol turn"
+    speed_mps: 0.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    offset_forward_m: 0.0
+    size_class: none
+    closest_approach_m: 999
+    time_to_closest_s: 0
+    notes: "Capture waypoint-transition manoeuvre. Egomotion compensation must suppress false trigger."
+
+  - id: N03
+    label: negative
+    description: "Object spawned behind the drone (outside camera FOV)"
+    speed_mps: 8.0
+    approach_angle_deg: 180.0
+    miss_distance_m: 0.0
+    offset_forward_m: -6.0
+    size_class: medium
+    closest_approach_m: 999
+    time_to_closest_s: 0
+    notes: "Object flies away from camera; FOV gate should suppress. Spawn offset_forward_m is negative."
+
+  - id: N04
+    label: negative
+    description: "Object well below glide path (outside range gate, ~10 m below)"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 10.0
+    offset_forward_m: 6.0
+    size_class: medium
+    closest_approach_m: 10.0
+    time_to_closest_s: 0
+    notes: "Should be rejected by ROI range/frustum gate. Use vertical miss_distance via spawn_z offset."
+
+  - id: N05
+    label: negative
+    description: "No object — held-out test set negative"
+    speed_mps: 0.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    offset_forward_m: 0.0
+    size_class: none
+    closest_approach_m: 999
+    time_to_closest_s: 0
+    notes: "Held-out. 60-second clean patrol segment. FP rate measured here."
+
+# ── TRAIN / TEST SPLIT ────────────────────────────────────────────────────────
+# Train (tune thresholds on these): S01–S10, N01–N04
+# Test  (report final metrics on these): S11, S12, N05
+# Do NOT tune detector params against S11/S12/N05.
+split:
+  train: [S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, N01, N02, N03, N04]
+  test:  [S11, S12, N05]

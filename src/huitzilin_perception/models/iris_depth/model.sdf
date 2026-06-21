@@ -1,0 +1,115 @@
+<?xml version="1.0" ?>
+<!--
+  iris_depth — iris_with_standoffs + simulated OAK-D Lite depth camera.
+
+  USAGE
+  -----
+  Set GZ_SIM_RESOURCE_PATH to include this model's parent directory, then
+  reference <uri>model://iris_depth</uri> in your world SDF instead of
+  <uri>model://iris_with_standoffs</uri>.
+
+  This SDF re-includes the upstream ardupilot_gazebo iris_with_standoffs
+  model verbatim via <include> and appends the depth sensor as a nested model
+  merged into the drone link tree.  The ArduPilot JSON FDM plugin and all
+  standard motor/IMU sensors are inherited unchanged.
+
+  SENSOR SPECS (OAK-D Lite approximation)
+  ----------------------------------------
+  Resolution : 640 × 480
+  DFOV       : ~73 ° diagonal  →  HFOV ≈ 67.3°, VFOV ≈ 52.7°
+  Frame rate : 30 fps
+  Range      : 0.2 – 19 m  (reliable working band used in ROI: 0.3 – 8 m)
+  Noise      : Gaussian σ = 0.01 m (1 cm)
+
+  FRAMES
+  ------
+  base_link
+    └── camera_link          (mount offset: 0.10 m forward, 0.02 m up from CG)
+          └── camera_optical_frame   (standard optical rotation: roll=-90°, yaw=-90°)
+
+  The static TF for base_link→camera_link and camera_link→camera_optical_frame
+  is published by the perception launch file (NOT by this SDF).  The sensor
+  frame name here must match those TF frames exactly.
+-->
+<sdf version="1.9">
+  <model name="iris_depth">
+
+    <!-- ── Inherit the full iris_with_standoffs model ── -->
+    <include merge="true">
+      <uri>model://iris_with_standoffs</uri>
+    </include>
+
+    <!-- ── Camera mount link ── -->
+    <link name="camera_link">
+      <pose relative_to="base_link">0.10 0.0 0.02 0 0 0</pose>
+      <inertial>
+        <mass>0.030</mass>  <!-- 30 g (OAK-D Lite) -->
+        <inertia>
+          <ixx>1.0e-5</ixx><iyy>1.0e-5</iyy><izz>1.0e-5</izz>
+          <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <visual name="camera_visual">
+        <geometry>
+          <box><size>0.060 0.020 0.020</size></box>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+          <diffuse>0.1 0.1 0.1 1</diffuse>
+        </material>
+      </visual>
+      <collision name="camera_collision">
+        <geometry>
+          <box><size>0.060 0.020 0.020</size></box>
+        </geometry>
+      </collision>
+
+      <!-- ── Depth sensor (RGBD / depth_camera) ── -->
+      <!--
+        Gazebo Harmonic sensor type "depth_camera" publishes a depth image.
+        The gz_ros2_bridge maps this to sensor_msgs/Image on /oak/depth and
+        sensor_msgs/PointCloud2 on /oak/points (see params/bridge.yaml).
+
+        Frame is set to camera_optical_frame so the point cloud is already
+        in the optical convention (Z-forward, X-right, Y-down).
+      -->
+      <sensor name="oak_d_lite_depth" type="depth_camera">
+        <pose>0 0 0 0 0 0</pose>
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <visualize>false</visualize>
+
+        <camera name="depth">
+          <!-- 640×480 @ ~67.3° HFOV -->
+          <horizontal_fov>1.1745</horizontal_fov>  <!-- 67.3° in radians -->
+          <image>
+            <width>640</width>
+            <height>480</height>
+            <format>R_FLOAT32</format>
+          </image>
+          <clip>
+            <near>0.2</near>
+            <far>19.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>  <!-- 1 cm sigma -->
+          </noise>
+          <!-- Optical frame: Z-forward (Gazebo default for depth cameras) -->
+          <optical_frame_id>camera_optical_frame</optical_frame_id>
+        </camera>
+
+        <topic>/gz/oak/depth</topic>
+        <gz_frame_id>camera_optical_frame</gz_frame_id>
+      </sensor>
+    </link>
+
+    <!-- Rigidly attach camera_link to base_link -->
+    <joint name="camera_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>camera_link</child>
+    </joint>
+
+  </model>
+</sdf>

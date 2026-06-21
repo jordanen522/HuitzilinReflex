@@ -118,3 +118,29 @@ Week 3 (perception pipeline) inherits:
 
 ### Versions
 - Same as Week 1 (ROS 2 Jazzy, Gazebo Harmonic 8.11.0, ArduPilot main, Python 3.12.3)
+---
+
+## Week 3 — 2026-06-21
+
+### Carry-over close-out (W3-02)
+
+**W2-18 (fresh-checkout sign-off):** No second machine / teammate available for a formal
+sign-off run. Logging the gap explicitly: the week2_sitl.launch.py bring-up procedure is
+fully documented in `docs/SETUP.md`; the acceptance evidence (43 laps, mean 29.51 s) is in
+`docs/week2_patrol_evidence.md`. W2-18 is parked as "evidence documented, formal sign-off
+deferred to Week 4 when the native Dell box runs the perception stack end-to-end."
+
+**W2-05 (Pass-B model fidelity):** Decision confirmed — depth sensor is hung on the stock
+`iris_with_standoffs` Gazebo model as-is. Real mass / inertia / motorConstant tuning stays
+in Week 7–8. The detection algorithm must not depend on exact airframe dynamics.
+
+### Week 3 goal
+
+Detection node flags ≥ 95% of simulated incoming clusters with a quantified false-positive
+rate, scored repeatably against a labeled rosbag library, reproducible from a fresh checkout.
+
+### Environment reminder
+
+All depth-sensor rendering done on the native Dell Inspiron 3670 (i5-8400, UHD 630,
+native Ubuntu 24.04). WSL2 / Iris Xe box cannot render Gazebo depth at rate. All timing
+gates measured in sim time via `/clock` and message stamps — never wall-clock.

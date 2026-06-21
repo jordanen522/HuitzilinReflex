@@ -1,0 +1,37 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="projectile">
+    <pose>0 0 0 0 0 0</pose>
+    <link name="link">
+      <inertial>
+        <mass>0.150</mass>  <!-- 150 g — baseball-class -->
+        <inertia>
+          <!-- Solid sphere: I = 2/5 * m * r^2 = 2/5 * 0.15 * 0.04^2 -->
+          <ixx>9.6e-5</ixx><iyy>9.6e-5</iyy><izz>9.6e-5</izz>
+          <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+        </inertia>
+      </inertial>
+
+      <collision name="collision">
+        <geometry>
+          <sphere><radius>0.040</radius></sphere>  <!-- 80 mm diameter -->
+        </geometry>
+        <surface>
+          <contact><ode/></contact>
+          <friction><ode><mu>0.5</mu><mu2>0.5</mu2></ode></friction>
+        </surface>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <sphere><radius>0.040</radius></sphere>
+        </geometry>
+        <material>
+          <ambient>0.8 0.1 0.1 1</ambient>
+          <diffuse>0.8 0.1 0.1 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

@@ -1,0 +1,54 @@
+# detector.yaml
+# All detection thresholds for detector_node.py (W3-11 – W3-15).
+# Tune against the bag library (W3-15); commit the sweep that justifies any change.
+#
+# NO magic numbers in detector_node.py — every tunable lives here.
+
+detector:
+  ros__parameters:
+    use_sim_time: true
+
+    # ── ROI / range gate (W3-12) ──────────────────────────────────────────────
+    # Keep only points within this depth range (metres).
+    # Reliable OAK-D Lite working band; clip edges that are too noisy.
+    roi_min_range_m: 0.30
+    roi_max_range_m: 8.00
+
+    # Forward half-angle of the ROI frustum (degrees).
+    # Points outside this cone ahead of the camera are discarded.
+    roi_half_angle_deg: 40.0
+
+    # ── Voxel downsampling (W3-12) ────────────────────────────────────────────
+    # Leaf size for voxel grid downsampling (metres).
+    # Larger = faster but misses small objects.
+    voxel_leaf_m: 0.05
+
+    # ── Background model / frame differencing (W3-13) ────────────────────────
+    # Number of past frames to keep in the rolling background buffer.
+    bg_history_frames: 5
+
+    # Minimum per-voxel depth change (metres) to count as "foreground".
+    diff_threshold_m: 0.15
+
+    # ── Euclidean clustering (W3-13) ──────────────────────────────────────────
+    # Points within this radius (metres) are merged into the same cluster.
+    cluster_tolerance_m: 0.20
+
+    # Reject clusters outside this size range (number of voxel-downsampled points).
+    cluster_min_points: 5
+    cluster_max_points: 500
+
+    # ── Centroid publishing (W3-14) ───────────────────────────────────────────
+    # Minimum confidence score [0–1] to publish a centroid.
+    # (Score = normalised cluster size; keeps the largest coherent blob.)
+    min_publish_score: 0.3
+
+    # ── Output topic ──────────────────────────────────────────────────────────
+    threat_centroid_topic: "/threat/centroid"
+    marker_topic: "/threat/marker"
+
+    # ── Egomotion compensation (W3-13) ────────────────────────────────────────
+    # Subscribe /huitzilin/odom to reject apparent depth change from drone motion.
+    # Set false to disable (useful for debugging the raw differencer).
+    compensate_egomotion: true
+    odom_topic: "/huitzilin/odom"
