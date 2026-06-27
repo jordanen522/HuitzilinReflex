@@ -20,7 +20,7 @@ gz sim -s -r ~/ardupilot_gazebo/worlds/iris_runway.sdf
 
 sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON \
   --add-param-file=$HOME/huitzilin_ws/src/huitzilin_sim/params/sitl_frame.parm \
-  --out udp:127.0.0.1:14552 --out udp:127.0.0.1:14553
+  --out udp:127.0.0.1:14551 --out udp:127.0.0.1:14552 --out udp:127.0.0.1:14553
 
 ros2 launch huitzilin_sim week2_sitl.launch.py
 ```
