@@ -58,6 +58,8 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 ### Remaining — requires live Gazebo on the native Dell box
 
 > **Run first:** `colcon build --symlink-install` from `~/huitzilin_ws` — the new `huitzilin_perception` package must be picked up before any launch works.
+>
+> **Full step-by-step procedure:** see `docs/week3_capture_runbook.md` — covers every row below plus the per-scenario `spawn_projectile` params and `.label.yaml` sidecar format that `score_bags.py` requires (not previously documented).
 
 | Task | What |
 |------|------|
