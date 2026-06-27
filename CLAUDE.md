@@ -25,7 +25,12 @@ sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON \
 ros2 launch huitzilin_sim week2_sitl.launch.py
 ```
 
-After takeoff: call `/huitzilin/arm` → `/huitzilin/takeoff` → `/huitzilin/start_patrol`.
+After takeoff — service types matter, all three use SetBool or Trigger exactly as below:
+```bash
+ros2 service call /huitzilin/arm std_srvs/srv/SetBool '{data: true}'
+ros2 service call /huitzilin/takeoff std_srvs/srv/Trigger
+ros2 service call /huitzilin/start_patrol std_srvs/srv/SetBool '{data: true}'
+```
 Preflight check: `./scripts/preflight_check.sh`
 
 ## Frame convention (critical)
