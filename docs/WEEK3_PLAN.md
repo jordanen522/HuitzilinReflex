@@ -31,7 +31,7 @@ Week **3 of 9**, Phase A (Foundations & Simulation) — the first week the camer
 
 Work top to bottom — later tasks assume earlier ones are done. Six work areas. Status legend: `[x]` done · `[~]` partial (code done, live tuning pending) · `[ ]` pending (Dell box).
 
-1. **Inherited State & Setup** — `[ ]` W3-01 (regression gate, Dell) → `[x]` W3-02 (close Wk2 carry-overs) → `[x]` W3-03 (scaffold `huitzilin_perception`)
+1. **Inherited State & Setup** — `[x]` W3-01 (regression gate, Dell — clean lap confirmed 2026-06-30) → `[x]` W3-02 (close Wk2 carry-overs) → `[x]` W3-03 (scaffold `huitzilin_perception`)
 2. **Simulated Depth Sensor (Gazebo)** — `[x]` W3-04 (add sensor to SDF + world) → `[x]` W3-05 (bridge to ROS 2) → `[x]` W3-06 (camera TF) → `[ ]` W3-07 (verify in RViz, Dell)
 3. **Synthetic Threat Scenarios** — `[x]` W3-08 (projectile spawner) → `[x]` W3-09 (scenario matrix + labels) → `[ ]` W3-10 (record labeled rosbag library, Dell)
 4. **Detection Node** — `[x]` W3-11 (skeleton) → `[x]` W3-12 (ROI/filter) → `[x]` W3-13 (differential clustering) → `[x]` W3-14 (centroid + publish) → `[~]` W3-15 (tune thresholds — params exposed, operating point pending sweep)
@@ -55,6 +55,11 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 - **W3-18 (code)** — `scripts/run_regression.sh`: one-command regression. *(Library not yet wired to recorded bags — see remaining list.)*
 - **W3-20** — `launch/week3_perception.launch.py`: depth bridge + TF + detector in one command.
 
+### Closed this session (2026-06-30, Dell)
+
+- **W3-01** — Baseline patrol lap confirmed clean on the Dell box before touching perception. Sharp edges found and fixed in `CLAUDE.md` (pushed): `start_patrol` is `SetBool` not `Trigger`; `sim_vehicle.py` needs all three `--out` ports (14551/14552/14553); `max_step_size` must stay `0.001` (1000Hz) — `0.004` causes a SITL "Main loop slow" PreArm failure. Dell holds ~80% real-time at `0.001`.
+- Next up: **W3-04 verify / W3-07** (depth stream verify) — see `docs/week3_capture_runbook.md` §1.
+
 ### Remaining — requires live Gazebo on the native Dell box
 
 > **Run first:** `colcon build --symlink-install` from `~/huitzilin_ws` — the new `huitzilin_perception` package must be picked up before any launch works.
@@ -63,7 +68,6 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 
 | Task | What |
 |------|------|
-| **W3-01** | `colcon build && ros2 launch huitzilin_sim week2_sitl.launch.py` — confirm a clean lap before touching perception. |
 | **W3-04 verify** | Export `GZ_SIM_RESOURCE_PATH` to include the `models/` install path, launch with `huitzilin_runway.sdf`. |
 | **W3-07** | RViz: add PointCloud2 on `/oak/points` (best-effort QoS), fly a patrol lap, confirm depth stream stable. |
 | **W3-10** | Record labeled bags per scenario matrix: `ros2 bag record -s mcap /oak/depth /oak/points /clock /huitzilin/odom`. |
@@ -76,12 +80,4 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 ## 5. What stays out of scope this week
 
 - No real OAK-D hardware (Week 6).
-- No Kalman filter / intercept prediction / dodge command (Week 4) — `/threat/intercept` and `/cmd/evade` stay provisional.
-- No Pass-B airframe fidelity work (Week 7-8) — depth hangs on the stock `iris_with_standoffs` model as-is.
-
-## 6. Evidence & doc trail
-
-- Numbers go in `docs/week3_detection_evidence.md` (new, mirroring `docs/week2_patrol_evidence.md`).
-- Contract updates (`/oak/*` provisional → active) land in `docs/architecture.md` in the **same commit** as the code that implements them (W3-19, pending).
-- TF additions get verified against `docs/frames.md`.
-- Retro + Week 4 handoff appended to `docs/JOURNAL.md` at W3-22.
+- No Kalman filter / intercept prediction / dodge command (Week 4) — `/threat/intercept` and 
