@@ -135,6 +135,22 @@ def generate_launch_description() -> LaunchDescription:
         condition=_eq_condition(mode, "live"),
     )
 
+    # ── 2b. Clock bridge — gz /clock → ROS /clock (sim time source) ──────────
+    # Without this, every use_sim_time node (both bridges, both TF publishers,
+    # detector) blocks on a /clock that never advances (frozen at t=0), so the
+    # detector never fires /threat/centroid and /clock is absent from recorded
+    # bags (breaks score_bags sim-time math). No use_sim_time here on purpose:
+    # a clock *source* must run on wall time. Live mode only; bag replay already
+    # carries /clock inside the bag.
+    clock_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="clock_bridge",
+        output="screen",
+        arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
+        condition=_eq_condition(mode, "live"),
+    )
+
     # ── 3+4. Static TF: base_link → camera_link → camera_optical_frame ────────
     #
     # camera_link: forward + up of base_link (provisional mount offset)
@@ -209,6 +225,7 @@ def generate_launch_description() -> LaunchDescription:
         args + [
             depth_image_bridge,
             gz_bridge,
+            clock_bridge,
             tf_base_to_camera,
             tf_camera_to_optical,
             detector,
