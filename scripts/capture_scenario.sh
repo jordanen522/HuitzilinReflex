@@ -1,26 +1,22 @@
 #!/usr/bin/env bash
 # capture_scenario.sh <SCENARIO_ID> — record one labeled Week 3 rosbag (W3-10).
 #
-# Prereqs (all already running, drone AIRBORNE and patrolling):
-#   T1 gz sim  ·  T2 sim_vehicle.py  ·  T3 week3_perception.launch.py with_patrol:=true
-#   and THIS shell sourced:  source /opt/ros/jazzy/setup.bash && source ~/huitzilin_ws/install/setup.bash
+# Prereqs (all running, drone AIRBORNE and patrolling):
+#   T1 gz sim · T2 sim_vehicle.py · T3 week3_perception.launch.py with_patrol:=true
+#   and THIS shell sourced (ros2 jazzy + workspace overlay).
 #
-# Records the 5 topics for RECORD_SECONDS (default 10), spawning the projectile
-# ~3 s in for scenarios with speed>0, then stops the recorder via `timeout
-# --signal=INT` (robust; cannot hang like a manual kill/wait) and writes the label.
+# Writes the label, fires the projectile ~SPAWN_LEAD s in, then hands the
+# recorder to YOUR terminal in the foreground. rosbag2 only flushes cleanly on
+# an interactive Ctrl-C, so:  >>> press Ctrl-C ~8-10 s after the spawn <<<  to
+# stop and save. The label sidecar is already on disk before recording starts.
 #
-# Env overrides:  RECORD_SECONDS (default 10; use 60 for N05)
-#
-# Manual cases (see docs/week3_capture_runbook.md):
-#   N04 — needs a vertical-offset spawn this script can't do; it refuses N04.
-#   N02 — negative "patrol turn"; recorded here as a normal patrol window.
+# Env: RECORD_SECONDS is only advisory here (you stop with Ctrl-C). N05 = long run.
 set -euo pipefail
 
 ID="${1:?usage: capture_scenario.sh <SCENARIO_ID>  (e.g. S02)}"
 BAG_DIR="/data/huitzilin_bags"
 MATRIX="$HOME/huitzilin_ws/src/huitzilin_perception/config/scenario_matrix.yaml"
-RECORD_SECONDS="${RECORD_SECONDS:-10}"
-SPAWN_LEAD=3   # seconds into the recording before spawning
+SPAWN_LEAD=3
 
 if [ "$ID" = "N04" ]; then
   echo "N04 needs a vertical-offset spawn this script can't do — capture it by hand (runbook)."; exit 2
@@ -46,36 +42,10 @@ print(f'SPAWN={"yes" if speed > 0 else "no"}')
 PY
 )"
 
-echo "[$ID] label=$LABEL spawn=$SPAWN speed=$SPEED angle=$ANGLE miss=$MISS offset=$OFFSET record=${RECORD_SECONDS}s"
 BAG="$BAG_DIR/week3_${ID}"
 rm -rf "$BAG"
 
-# Spawn (if any) fires in the background ~SPAWN_LEAD s into the recording.
-SPAWN_BG=""
-if [ "$SPAWN" = "yes" ]; then
-  ( sleep "$SPAWN_LEAD"
-    echo "[$ID] spawning projectile..."
-    ros2 run huitzilin_perception spawn_projectile --ros-args \
-      -p scenario_id:="$ID" -p speed_mps:="$SPEED" -p approach_angle_deg:="$ANGLE" \
-      -p miss_distance_m:="$MISS" -p offset_forward_m:="$OFFSET" \
-      || echo "[$ID] (spawn returned nonzero — usually just the gz confirm timeout; continuing)"
-  ) &
-  SPAWN_BG=$!
-else
-  echo "[$ID] negative scenario — no spawn; recording a clean patrol window."
-fi
-
-# Record in the FOREGROUND; timeout sends SIGINT after the window so rosbag2
-# flushes cleanly. --kill-after force-kills if it ever refuses to stop.
-TOTAL=$(( RECORD_SECONDS + SPAWN_LEAD ))
-echo "[$ID] recording ${TOTAL}s (spawn at +${SPAWN_LEAD}s)..."
-timeout --signal=INT --kill-after=20 "$TOTAL" \
-  ros2 bag record -s mcap -o "$BAG" \
-  --topics /oak/depth /oak/points /clock /huitzilin/odom /threat/centroid \
-  || true   # timeout exits 124, SIGINT-stopped rosbag exits nonzero — both expected
-
-[ -n "$SPAWN_BG" ] && { wait "$SPAWN_BG" 2>/dev/null || true; }
-
+# Label first — exists regardless of how you stop the recorder.
 cat > "$BAG_DIR/week3_${ID}.label.yaml" <<YAML
 scenario_id: $ID
 label: $LABEL
@@ -84,5 +54,25 @@ time_to_closest_s: $TTC
 detection_window_s: 4.0
 YAML
 
-echo "[$ID] done — bag: $BAG   label: $BAG_DIR/week3_${ID}.label.yaml"
-ros2 bag info "$BAG" | grep -E 'Duration|Count:' || true
+echo "[$ID] label=$LABEL spawn=$SPAWN speed=$SPEED angle=$ANGLE miss=$MISS offset=$OFFSET"
+echo "[$ID] label written -> $BAG_DIR/week3_${ID}.label.yaml"
+
+# Spawn fires SPAWN_LEAD s into the recording (background; survives the exec).
+if [ "$SPAWN" = "yes" ]; then
+  ( sleep "$SPAWN_LEAD"
+    echo "[$ID] >>> spawning projectile now <<<"
+    ros2 run huitzilin_perception spawn_projectile --ros-args \
+      -p scenario_id:="$ID" -p speed_mps:="$SPEED" -p approach_angle_deg:="$ANGLE" \
+      -p miss_distance_m:="$MISS" -p offset_forward_m:="$OFFSET" \
+      || echo "[$ID] (spawn returned nonzero — usually just the gz confirm timeout)"
+  ) &
+  disown
+  echo "[$ID] recording... projectile spawns at +${SPAWN_LEAD}s."
+else
+  echo "[$ID] negative scenario — no spawn; recording a clean patrol window."
+fi
+
+echo "[$ID] >>> PRESS Ctrl-C ~8-10 s after the spawn to stop & save the bag. <<<"
+# exec so Ctrl-C goes straight to rosbag2 as an interactive SIGINT (clean flush).
+exec ros2 bag record -s mcap -o "$BAG" \
+  --topics /oak/depth /oak/points /clock /huitzilin/odom /threat/centroid
