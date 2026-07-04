@@ -5,33 +5,31 @@
 #   T1 gz sim  ·  T2 sim_vehicle.py  ·  T3 week3_perception.launch.py with_patrol:=true
 #   and THIS shell sourced:  source /opt/ros/jazzy/setup.bash && source ~/huitzilin_ws/install/setup.bash
 #
-# Reads the scenario's params from scenario_matrix.yaml, records the 5 topics,
-# spawns the projectile (scenarios with speed>0 only), stops, writes the label.
+# Records the 5 topics for RECORD_SECONDS (default 10), spawning the projectile
+# ~3 s in for scenarios with speed>0, then stops the recorder via `timeout
+# --signal=INT` (robust; cannot hang like a manual kill/wait) and writes the label.
 #
 # Env overrides:  RECORD_SECONDS (default 10; use 60 for N05)
 #
-# NOTE — two scenarios need manual handling (see docs/week3_capture_runbook.md):
-#   N02  negative "patrol turn" — no spawn; just record while it flies a turn (this
-#        script records a normal 10 s patrol window, which is usually fine).
-#   N04  negative "far below glide path" — needs a VERTICAL offset spawn_projectile
-#        can't do. This script will refuse N04; capture it by hand per the runbook.
+# Manual cases (see docs/week3_capture_runbook.md):
+#   N04 — needs a vertical-offset spawn this script can't do; it refuses N04.
+#   N02 — negative "patrol turn"; recorded here as a normal patrol window.
 set -euo pipefail
 
 ID="${1:?usage: capture_scenario.sh <SCENARIO_ID>  (e.g. S02)}"
 BAG_DIR="/data/huitzilin_bags"
 MATRIX="$HOME/huitzilin_ws/src/huitzilin_perception/config/scenario_matrix.yaml"
 RECORD_SECONDS="${RECORD_SECONDS:-10}"
+SPAWN_LEAD=3   # seconds into the recording before spawning
 
 if [ "$ID" = "N04" ]; then
-  echo "N04 needs a vertical-offset spawn this script can't do — capture it by hand (runbook §2)."; exit 2
+  echo "N04 needs a vertical-offset spawn this script can't do — capture it by hand (runbook)."; exit 2
 fi
 mkdir -p "$BAG_DIR"
 
-# Pull this scenario's fields from the matrix.
 eval "$(python3 - "$MATRIX" "$ID" <<'PY'
 import sys, yaml
-matrix, sid = sys.argv[1], sys.argv[2]
-d = yaml.safe_load(open(matrix))
+d = yaml.safe_load(open(sys.argv[1])); sid = sys.argv[2]
 try:
     r = next(s for s in d["scenarios"] if s["id"] == sid)
 except StopIteration:
@@ -52,28 +50,32 @@ echo "[$ID] label=$LABEL spawn=$SPAWN speed=$SPEED angle=$ANGLE miss=$MISS offse
 BAG="$BAG_DIR/week3_${ID}"
 rm -rf "$BAG"
 
-ros2 bag record -s mcap -o "$BAG" \
-  --topics /oak/depth /oak/points /clock /huitzilin/odom /threat/centroid &
-REC_PID=$!
-sleep 3   # let the recorder subscribe (incl. /clock)
-
+# Spawn (if any) fires in the background ~SPAWN_LEAD s into the recording.
+SPAWN_BG=""
 if [ "$SPAWN" = "yes" ]; then
-  echo "[$ID] spawning projectile..."
-  ros2 run huitzilin_perception spawn_projectile --ros-args \
-    -p scenario_id:="$ID" -p speed_mps:="$SPEED" -p approach_angle_deg:="$ANGLE" \
-    -p miss_distance_m:="$MISS" -p offset_forward_m:="$OFFSET" || \
-    echo "[$ID] (spawn_projectile returned nonzero — often just the gz confirm timeout; continuing)"
+  ( sleep "$SPAWN_LEAD"
+    echo "[$ID] spawning projectile..."
+    ros2 run huitzilin_perception spawn_projectile --ros-args \
+      -p scenario_id:="$ID" -p speed_mps:="$SPEED" -p approach_angle_deg:="$ANGLE" \
+      -p miss_distance_m:="$MISS" -p offset_forward_m:="$OFFSET" \
+      || echo "[$ID] (spawn returned nonzero — usually just the gz confirm timeout; continuing)"
+  ) &
+  SPAWN_BG=$!
 else
   echo "[$ID] negative scenario — no spawn; recording a clean patrol window."
 fi
 
-sleep "$RECORD_SECONDS"
-echo "[$ID] stopping recorder..."
-kill -INT "$REC_PID" 2>/dev/null || true
-wait "$REC_PID" 2>/dev/null || true
+# Record in the FOREGROUND; timeout sends SIGINT after the window so rosbag2
+# flushes cleanly. --kill-after force-kills if it ever refuses to stop.
+TOTAL=$(( RECORD_SECONDS + SPAWN_LEAD ))
+echo "[$ID] recording ${TOTAL}s (spawn at +${SPAWN_LEAD}s)..."
+timeout --signal=INT --kill-after=20 "$TOTAL" \
+  ros2 bag record -s mcap -o "$BAG" \
+  --topics /oak/depth /oak/points /clock /huitzilin/odom /threat/centroid \
+  || true   # timeout exits 124, SIGINT-stopped rosbag exits nonzero — both expected
 
-# Label sidecar (bag_start_sim_t omitted on purpose: score_bags then counts any
-# detection in the bag as the signal — correct for one-threat-per-bag capture).
+[ -n "$SPAWN_BG" ] && { wait "$SPAWN_BG" 2>/dev/null || true; }
+
 cat > "$BAG_DIR/week3_${ID}.label.yaml" <<YAML
 scenario_id: $ID
 label: $LABEL
@@ -82,6 +84,5 @@ time_to_closest_s: $TTC
 detection_window_s: 4.0
 YAML
 
-echo "[$ID] done."
-ros2 bag info "$BAG" | sed -n '1,6p'
-grep -c . "$BAG_DIR/week3_${ID}.label.yaml" >/dev/null && echo "[$ID] label written: $BAG_DIR/week3_${ID}.label.yaml"
+echo "[$ID] done — bag: $BAG   label: $BAG_DIR/week3_${ID}.label.yaml"
+ros2 bag info "$BAG" | grep -E 'Duration|Count:' || true
