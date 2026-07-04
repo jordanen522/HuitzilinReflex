@@ -21,7 +21,7 @@ detector:
     # ── Voxel downsampling (W3-12) ────────────────────────────────────────────
     # Leaf size for voxel grid downsampling (metres).
     # Larger = faster but misses small objects.
-    voxel_leaf_m: 0.05
+    voxel_leaf_m: 0.02   # W3-15: 0.05 m voxels are COARSER than the 80 mm projectile -> it collapsed to 1-2 pts. 0.02 m resolves it into ~10-20 pts.
 
     # ── Background model / frame differencing (W3-13) ────────────────────────
     # Number of past frames to keep in the rolling background buffer.
@@ -35,13 +35,13 @@ detector:
     cluster_tolerance_m: 0.20
 
     # Reject clusters outside this size range (number of voxel-downsampled points).
-    cluster_min_points: 5
+    cluster_min_points: 3     # W3-15: was 5; small/distant/fast projectile blobs are 3-10 downsampled pts.
     cluster_max_points: 500
 
     # ── Centroid publishing (W3-14) ───────────────────────────────────────────
     # Minimum confidence score [0–1] to publish a centroid.
     # (Score = normalised cluster size; keeps the largest coherent blob.)
-    min_publish_score: 0.02   # W3-15: was 0.3, which required >=150-pt clusters (size/cluster_max_points); unreachable for real projectile blobs -> 0% recall. 0.02 ~= 10 pts.
+    min_publish_score: 0.006  # W3-15: ~3 pts; let cluster_min_points be the size floor, not the score gate.
 
     # ── Output topic ──────────────────────────────────────────────────────────
     threat_centroid_topic: "/threat/centroid"
