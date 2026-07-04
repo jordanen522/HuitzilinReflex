@@ -9,11 +9,14 @@
 #
 # Requires: ROS 2 Jazzy sourced, huitzilin_perception built.
 
-set -euo pipefail
+set -eo pipefail
 
+# ROS/ament setup.bash reference unbound vars (e.g. AMENT_TRACE_SETUP_FILES),
+# so enable -u only AFTER sourcing them.
 source /opt/ros/jazzy/setup.bash
-source "$(dirname "$0")/../install/setup.bash" 2>/dev/null || \
-  (echo "ERROR: workspace not built — run 'colcon build' first" && exit 1)
+source "$(dirname "$0")/../install/setup.bash" 2>/dev/null || {
+  echo "ERROR: workspace not built — run 'colcon build' first"; exit 1; }
+set -u
 
 BAG_DIR="${1:-/data/huitzilin_bags}"
 SPLIT="${2:-test}"
