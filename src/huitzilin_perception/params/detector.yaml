@@ -41,7 +41,7 @@ detector:
     # ── Centroid publishing (W3-14) ───────────────────────────────────────────
     # Minimum confidence score [0–1] to publish a centroid.
     # (Score = normalised cluster size; keeps the largest coherent blob.)
-    min_publish_score: 0.3
+    min_publish_score: 0.02   # W3-15: was 0.3, which required >=150-pt clusters (size/cluster_max_points); unreachable for real projectile blobs -> 0% recall. 0.02 ~= 10 pts.
 
     # ── Output topic ──────────────────────────────────────────────────────────
     threat_centroid_topic: "/threat/centroid"
