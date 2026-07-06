@@ -37,6 +37,11 @@ detector:
     # Minimum per-voxel depth change (metres) to count as "foreground".
     diff_threshold_m: 0.15
 
+    # Skip the frame entirely if more foreground points than this survive
+    # differencing: whole-scene change = egomotion flood (patrol turn), not a
+    # projectile. Also bounds clustering cost.
+    fg_max_points: 5000
+
     # ── Euclidean clustering (W3-13) ──────────────────────────────────────────
     # Points within this radius (metres) are merged into the same cluster.
     cluster_tolerance_m: 0.20

@@ -44,6 +44,8 @@ from sensor_msgs_py import point_cloud2 as pc2
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 
+from scipy.spatial import cKDTree
+
 import tf2_ros
 import tf2_geometry_msgs  # noqa: F401  (registers PointStamped transform support)
 
@@ -90,12 +92,15 @@ def euclidean_cluster(pts: np.ndarray, tol: float,
     Greedy radius-based Euclidean clustering on (N, 3) float32 xyz.
     Returns a list of (k, 3) arrays, each being one cluster.
 
-    Complexity: O(N²) — acceptable for down-sampled clouds of ~100–2 000 pts.
-    If clouds grow larger, swap for scipy.spatial.cKDTree.
+    Uses scipy cKDTree — O(N log N)-ish. The old pure-numpy O(N²) version
+    computed a full-array norm per BFS pop, which crawled (and the matching
+    O(N·M) foreground mask OOM-killed the node) once the W3-15 axis fix let
+    real ~30k-point clouds through the ROI for the first time.
     """
     if pts.shape[0] == 0:
         return []
 
+    tree = cKDTree(pts)
     assigned = np.zeros(len(pts), dtype=bool)
     clusters: list[np.ndarray] = []
 
@@ -103,17 +108,16 @@ def euclidean_cluster(pts: np.ndarray, tol: float,
         if assigned[seed_idx]:
             continue
         # BFS from this seed
+        assigned[seed_idx] = True
         queue = [seed_idx]
         members = []
         while queue:
             idx = queue.pop()
-            if assigned[idx]:
-                continue
-            assigned[idx] = True
             members.append(idx)
-            dists = np.linalg.norm(pts - pts[idx], axis=1)
-            neighbours = np.where((dists < tol) & (~assigned))[0]
-            queue.extend(neighbours.tolist())
+            for nb in tree.query_ball_point(pts[idx], tol):
+                if not assigned[nb]:
+                    assigned[nb] = True
+                    queue.append(nb)
         if min_pts <= len(members) <= max_pts:
             clusters.append(pts[np.array(members)])
 
@@ -150,6 +154,7 @@ class DetectorNode(Node):
         self.declare_parameter("odom_topic", "/huitzilin/odom")
         self.declare_parameter("debug_funnel", False)  # W3-15 diagnostic: log per-stage counts
         self.declare_parameter("cloud_convention", "gz_flu")  # gz_flu | optical (see detector.yaml)
+        self.declare_parameter("fg_max_points", 5000)  # skip frame if foreground explodes (egomotion flood)
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
@@ -220,6 +225,7 @@ class DetectorNode(Node):
             "odom_topic":         self.get_parameter("odom_topic").value,
             "debug_funnel":       self.get_parameter("debug_funnel").value,
             "cloud_convention":   self.get_parameter("cloud_convention").value,
+            "fg_max_points":      self.get_parameter("fg_max_points").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
@@ -312,6 +318,16 @@ class DetectorNode(Node):
                     throttle_duration_sec=1.0)
             return
 
+        if fg_pts.shape[0] > self._p["fg_max_points"]:
+            # Whole-scene depth change (patrol turn / aggressive egomotion) —
+            # not a projectile signature. Skip rather than cluster 10k+ points.
+            if dbg:
+                self.get_logger().info(
+                    f"funnel: fg={n_fg} > fg_max_points={self._p['fg_max_points']} "
+                    "-> egomotion flood, skip frame",
+                    throttle_duration_sec=1.0)
+            return
+
         clusters = euclidean_cluster(
             fg_pts,
             tol=self._p["cluster_tolerance_m"],
@@ -365,12 +381,11 @@ class DetectorNode(Node):
         """
         if background.shape[0] == 0:
             return np.ones(len(current), dtype=bool)
-        # Vectorised pairwise min-distance: (N,) array
-        # For each current point, compute dist to all bg points, take min.
-        min_dists = np.min(
-            np.linalg.norm(current[:, None, :] - background[None, :, :], axis=2),
-            axis=1,
-        )
+        # cKDTree NN query. The old broadcast (N, M, 3) pairwise-distance array
+        # was ~40 GB at 30k current x 120k bg points -> kernel OOM-killed the
+        # node the moment the W3-15 axis remap let real clouds through.
+        tree = cKDTree(background)
+        min_dists, _ = tree.query(current, k=1, workers=-1)
         return min_dists > threshold
 
     def _transform_to_base_link(

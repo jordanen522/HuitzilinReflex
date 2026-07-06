@@ -29,6 +29,13 @@ echo "    Split   : $SPLIT"
 echo "    Output  : $OUTPUT"
 echo ""
 
+# Reap orphans from previous runs. 'kill $DETECTOR_PID' only kills the
+# 'ros2 run' wrapper; its python child survives, keeps subscribing, and spams
+# stale-code logs / competing /threat/centroid publishes into the next run.
+pkill -f "huitzilin_perception/detector" 2>/dev/null || true
+pkill -f "ros2 run huitzilin_perception detector" 2>/dev/null || true
+pkill -f "static_transform_publisher.*child-frame-id camera" 2>/dev/null || true
+
 # Static TF chain base_link -> camera_link -> camera_optical_frame.
 # The bags do NOT record /tf_static, and this harness bypasses
 # week3_perception.launch.py (which normally publishes these), so without them
@@ -55,7 +62,13 @@ ros2 run huitzilin_perception detector \
   -p use_sim_time:=true \
   -p debug_funnel:="${DEBUG_FUNNEL:-false}" &
 DETECTOR_PID=$!
-trap "kill $DETECTOR_PID $TF1_PID $TF2_PID 2>/dev/null" EXIT
+# Kill wrappers AND their orphan-prone python/TF children on exit.
+cleanup() {
+  kill "$DETECTOR_PID" "$TF1_PID" "$TF2_PID" 2>/dev/null || true
+  pkill -f "huitzilin_perception/detector" 2>/dev/null || true
+  pkill -f "static_transform_publisher.*child-frame-id camera" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 sleep 2  # give detector + TF publishers time to start
 
