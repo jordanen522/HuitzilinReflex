@@ -18,9 +18,6 @@ BAG_DIR="/data/huitzilin_bags"
 MATRIX="$HOME/huitzilin_ws/src/huitzilin_perception/config/scenario_matrix.yaml"
 SPAWN_LEAD=3
 
-if [ "$ID" = "N04" ]; then
-  echo "N04 needs a vertical-offset spawn this script can't do — capture it by hand (runbook)."; exit 2
-fi
 mkdir -p "$BAG_DIR"
 
 eval "$(python3 - "$MATRIX" "$ID" <<'PY'
@@ -36,11 +33,31 @@ print(f'SPEED={speed}')
 print(f'ANGLE={r.get("approach_angle_deg",0.0)}')
 print(f'MISS={r.get("miss_distance_m",0.0)}')
 print(f'OFFSET={r.get("offset_forward_m",6.0)}')
+print(f'OFFSET_V={r.get("offset_vertical_m",0.0) or 0.0}')
 print(f'CLOSEST={r.get("closest_approach_m",0.0)}')
 print(f'TTC={r.get("time_to_closest_s",0.0)}')
 print(f'SPAWN={"yes" if speed > 0 else "no"}')
 PY
 )"
+
+# Vertical-offset scenarios (N04): the spawn point must stay above ground,
+# so the drone has to be flying high enough BEFORE we start recording.
+# N04 = -10 m offset -> needs altitude >= ~10.5 m (e.g. takeoff_alt_m: 12.0).
+if awk "BEGIN{exit !($OFFSET_V < 0)}"; then
+  # '|| true': set -e + pipefail must not kill the script before our error msg
+  DZ=$(timeout 10 ros2 topic echo --once --field pose.pose.position.z /huitzilin/odom 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+  if [ -z "$DZ" ]; then
+    echo "[$ID] ERROR: no /huitzilin/odom — is the sim/bridge stack up?"; exit 3
+  fi
+  SPAWN_Z=$(awk "BEGIN{printf \"%.2f\", $DZ + $OFFSET_V}")
+  if awk "BEGIN{exit !($SPAWN_Z < 0.5)}"; then
+    echo "[$ID] ERROR: spawn would be at z=${SPAWN_Z} m (drone z=${DZ} m, offset ${OFFSET_V} m)."
+    echo "[$ID]        Fly higher first — need altitude >= $(awk "BEGIN{printf \"%.1f\", 0.5 - ($OFFSET_V)}") m"
+    echo "[$ID]        (e.g. takeoff_alt_m: 12.0 in bridge.yaml, or a GUIDED climb), then rerun."
+    exit 3
+  fi
+  echo "[$ID] vertical offset ${OFFSET_V} m OK (drone z=${DZ} m -> spawn z=${SPAWN_Z} m)"
+fi
 
 BAG="$BAG_DIR/week3_${ID}"
 rm -rf "$BAG"
@@ -64,6 +81,7 @@ if [ "$SPAWN" = "yes" ]; then
     ros2 run huitzilin_perception spawn_projectile --ros-args \
       -p scenario_id:="$ID" -p speed_mps:="$SPEED" -p approach_angle_deg:="$ANGLE" \
       -p miss_distance_m:="$MISS" -p offset_forward_m:="$OFFSET" \
+      -p offset_vertical_m:="$OFFSET_V" \
       || echo "[$ID] (spawn returned nonzero — usually just the gz confirm timeout)"
   ) &
   disown

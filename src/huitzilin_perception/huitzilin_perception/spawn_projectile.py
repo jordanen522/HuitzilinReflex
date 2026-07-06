@@ -11,7 +11,8 @@ USAGE (CLI):
       -p speed_mps:=8.0 \
       -p approach_angle_deg:=0.0 \
       -p miss_distance_m:=0.0 \
-      -p offset_forward_m:=6.0
+      -p offset_forward_m:=6.0 \
+      -p offset_vertical_m:=0.0
 
 USAGE (from scenario_matrix.yaml via launch file):
   See week3_perception.launch.py — the scenario runner iterates the matrix
@@ -53,6 +54,11 @@ RELIABLE_QOS = QoSProfile(
     depth=10,
 )
 
+# Never spawn below this world z (m) — keeps the ball out of the ground plane.
+# Vertical-offset scenarios (N04) therefore require the drone to fly high
+# enough that drone_z + offset_vertical_m >= MIN_SPAWN_Z.
+MIN_SPAWN_Z = 0.3
+
 
 class SpawnProjectileNode(Node):
     """
@@ -69,6 +75,7 @@ class SpawnProjectileNode(Node):
         self.declare_parameter("approach_angle_deg", 0.0)   # 0° = head-on from front
         self.declare_parameter("miss_distance_m", 0.0)      # 0 = direct hit
         self.declare_parameter("offset_forward_m", 6.0)     # spawn distance ahead
+        self.declare_parameter("offset_vertical_m", 0.0)    # relative to drone; negative = below (N04)
         self.declare_parameter("world_name", "huitzilin_runway")
         self.declare_parameter("model_uri", "model://projectile")
 
@@ -77,6 +84,7 @@ class SpawnProjectileNode(Node):
         self._angle_deg    = self.get_parameter("approach_angle_deg").value
         self._miss_dist    = self.get_parameter("miss_distance_m").value
         self._offset_fwd   = self.get_parameter("offset_forward_m").value
+        self._offset_vert  = self.get_parameter("offset_vertical_m").value
         self._world        = self.get_parameter("world_name").value
         self._model_uri    = self.get_parameter("model_uri").value
 
@@ -122,7 +130,17 @@ class SpawnProjectileNode(Node):
         angle_rad = math.radians(self._angle_deg)
         spawn_x = dx + self._offset_fwd * math.cos(yaw) + self._miss_dist * math.sin(yaw)
         spawn_y = dy + self._offset_fwd * math.sin(yaw) - self._miss_dist * math.cos(yaw)
-        spawn_z = dz  # same altitude as drone
+        spawn_z = dz + self._offset_vert  # 0 = drone altitude; negative = below (N04)
+
+        if spawn_z < MIN_SPAWN_Z:
+            self.get_logger().error(
+                f"NOT spawning: z={spawn_z:.2f} m is below ground clearance "
+                f"({MIN_SPAWN_Z} m) — drone z={dz:.2f}, "
+                f"offset_vertical_m={self._offset_vert}. Fly higher first "
+                f"(need altitude >= {MIN_SPAWN_Z - self._offset_vert:.1f} m, "
+                f"e.g. raise takeoff_alt_m) and rerun."
+            )
+            return
 
         # Velocity: toward the drone (opposite of spawn direction)
         # approach_angle tilts the trajectory off head-on

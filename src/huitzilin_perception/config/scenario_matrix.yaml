@@ -12,6 +12,7 @@
 # approach_angle_deg : 0 = head-on, positive = from right, negative = from left
 # miss_distance_m    : lateral miss at drone altitude (0 = direct hit)
 # offset_forward_m   : spawn distance ahead of drone
+# offset_vertical_m  : vertical spawn offset relative to drone (m); negative = below. Default 0.
 # size_class   : "small" | "medium" (set by model radius; currently always medium)
 # closest_approach_m : expected closest approach (for ground-truth labeling)
 # time_to_closest_s  : estimated time from spawn to closest approach (sim time)
@@ -231,12 +232,13 @@ scenarios:
     description: "Object well below glide path (outside range gate, ~10 m below)"
     speed_mps: 8.0
     approach_angle_deg: 0.0
-    miss_distance_m: 10.0
+    miss_distance_m: 0.0
     offset_forward_m: 6.0
+    offset_vertical_m: -10.0
     size_class: medium
     closest_approach_m: 10.0
     time_to_closest_s: 0
-    notes: "Should be rejected by ROI range/frustum gate. Use vertical miss_distance via spawn_z offset."
+    notes: "CAPTURE AT ALTITUDE: drone must fly >= ~10.5 m (e.g. takeoff_alt_m: 12.0) or the spawn lands underground and capture_scenario.sh aborts. Ball passes ~10 m below -> camera range >= 10 m > roi_max_range_m (8.0) -> range gate must reject."
 
   - id: N05
     label: negative
