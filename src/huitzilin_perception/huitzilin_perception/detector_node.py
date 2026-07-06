@@ -148,6 +148,7 @@ class DetectorNode(Node):
         self.declare_parameter("marker_topic", "/threat/marker")
         self.declare_parameter("compensate_egomotion", True)
         self.declare_parameter("odom_topic", "/huitzilin/odom")
+        self.declare_parameter("debug_funnel", False)  # W3-15 diagnostic: log per-stage counts
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
@@ -216,6 +217,7 @@ class DetectorNode(Node):
             "marker_topic":       self.get_parameter("marker_topic").value,
             "compensate_egomotion": self.get_parameter("compensate_egomotion").value,
             "odom_topic":         self.get_parameter("odom_topic").value,
+            "debug_funnel":       self.get_parameter("debug_funnel").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
@@ -227,89 +229,110 @@ class DetectorNode(Node):
 
     def _cloud_cb(self, msg: PointCloud2) -> None:
         t0 = time.monotonic()
+        dbg = self._p.get("debug_funnel", False)
 
-        # 1. Unpack to (N, 3) float32 xyz; drop NaNs
         raw = pc2.read_points_numpy(msg, field_names=("x", "y", "z"), skip_nans=True)
         if raw is None or raw.shape[0] == 0:
+            if dbg:
+                self.get_logger().info("funnel: raw=0 (empty cloud)", throttle_duration_sec=1.0)
             return
         pts = raw.astype(np.float32)
+        n_raw = pts.shape[0]
+        if dbg:
+            self.get_logger().info(
+                f"funnel: raw={n_raw} "
+                f"x[{pts[:,0].min():.2f},{pts[:,0].max():.2f}] "
+                f"y[{pts[:,1].min():.2f},{pts[:,1].max():.2f}] "
+                f"z[{pts[:,2].min():.2f},{pts[:,2].max():.2f}]",
+                throttle_duration_sec=1.0)
 
-        # 2. ROI / range gate ─────────────────────────────────────────────────
-        # In camera_optical_frame: Z is depth (forward), X is right, Y is down.
         depth = pts[:, 2]
         range_mask = (depth >= self._p["roi_min_range_m"]) & \
                      (depth <= self._p["roi_max_range_m"])
         pts = pts[range_mask]
+        n_range = pts.shape[0]
         if pts.shape[0] == 0:
+            if dbg:
+                self.get_logger().info(
+                    f"funnel: raw={n_raw} range=0 "
+                    f"(nothing on Z in {self._p['roi_min_range_m']}-{self._p['roi_max_range_m']} m)",
+                    throttle_duration_sec=1.0)
             return
 
-        # Frustum: lateral angle gate (half_angle around Z axis)
         half_angle_rad = math.radians(self._p["roi_half_angle_deg"])
         lateral = np.sqrt(pts[:, 0] ** 2 + pts[:, 1] ** 2)
         angle_mask = np.arctan2(lateral, pts[:, 2]) < half_angle_rad
         pts = pts[angle_mask]
+        n_angle = pts.shape[0]
         if pts.shape[0] == 0:
+            if dbg:
+                self.get_logger().info(f"funnel: raw={n_raw} range={n_range} angle=0",
+                                       throttle_duration_sec=1.0)
             return
 
-        # 3. Voxel downsample ─────────────────────────────────────────────────
         pts = voxel_downsample(pts, self._p["voxel_leaf_m"])
+        n_voxel = pts.shape[0]
         if pts.shape[0] == 0:
             return
 
-        # 4. Update background buffer ─────────────────────────────────────────
         self._bg_buffer.append(pts.copy())
         if len(self._bg_buffer) < 2:
-            # Need at least 2 frames to difference
             return
 
-        # 5. Frame differencing ───────────────────────────────────────────────
-        # Build background as the union of all buffered frames (excluding current).
-        # For each current point, find the nearest background point.
-        # Points with minimum distance > diff_threshold are "foreground".
-        bg_all = np.vstack(list(self._bg_buffer)[:-1])  # all frames except current
+        bg_all = np.vstack(list(self._bg_buffer)[:-1])
         current = self._bg_buffer[-1]
-
-        fg_mask = self._foreground_mask(current, bg_all,
-                                        self._p["diff_threshold_m"])
+        fg_mask = self._foreground_mask(current, bg_all, self._p["diff_threshold_m"])
         fg_pts = current[fg_mask]
+        n_fg = fg_pts.shape[0]
         if fg_pts.shape[0] == 0:
+            if dbg:
+                self.get_logger().info(
+                    f"funnel: raw={n_raw} range={n_range} angle={n_angle} "
+                    f"voxel={n_voxel} bg={len(self._bg_buffer)} fg=0",
+                    throttle_duration_sec=1.0)
             return
 
-        # 6. Euclidean clustering ─────────────────────────────────────────────
         clusters = euclidean_cluster(
             fg_pts,
             tol=self._p["cluster_tolerance_m"],
             min_pts=self._p["cluster_min_points"],
             max_pts=self._p["cluster_max_points"],
         )
+        if dbg:
+            sizes = sorted((c.shape[0] for c in clusters), reverse=True)[:5]
+            self.get_logger().info(
+                f"funnel: raw={n_raw} range={n_range} angle={n_angle} voxel={n_voxel} "
+                f"fg={n_fg} clusters={len(clusters)} sizes={sizes}",
+                throttle_duration_sec=1.0)
         if not clusters:
             return
 
-        # 7. Pick best cluster (largest) and extract centroid ─────────────────
         best_cluster = max(clusters, key=lambda c: c.shape[0])
         score = best_cluster.shape[0] / self._p["cluster_max_points"]
         if score < self._p["min_publish_score"]:
+            if dbg:
+                self.get_logger().info(
+                    f"funnel: best={best_cluster.shape[0]} score={score:.3f} "
+                    f"< min_publish={self._p['min_publish_score']} -> reject",
+                    throttle_duration_sec=1.0)
             return
 
-        centroid_cam = best_cluster.mean(axis=0)  # (3,) in camera_optical_frame
-
-        # 8. Transform centroid into base_link ────────────────────────────────
+        centroid_cam = best_cluster.mean(axis=0)
         centroid_bl = self._transform_to_base_link(
             centroid_cam, msg.header.stamp, msg.header.frame_id
         )
         if centroid_bl is None:
+            if dbg:
+                self.get_logger().info("funnel: TF to base_link FAILED",
+                                       throttle_duration_sec=1.0)
             return
 
-        # 9. Publish ──────────────────────────────────────────────────────────
         self._publish_centroid(centroid_bl, msg.header.stamp)
         self._publish_marker(centroid_bl, msg.header.stamp)
-
-        dt_ms = (time.monotonic() - t0) * 1e3
-        self.get_logger().debug(
-            f"detection: cluster {best_cluster.shape[0]} pts "
-            f"centroid_bl=({centroid_bl[0]:.2f}, {centroid_bl[1]:.2f}, {centroid_bl[2]:.2f}) "
-            f"score={score:.2f} dt={dt_ms:.1f} ms"
-        )
+        if dbg:
+            self.get_logger().info(
+                f"funnel: *** PUBLISHED *** best={best_cluster.shape[0]} score={score:.3f}",
+                throttle_duration_sec=0.5)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
