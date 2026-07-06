@@ -37,17 +37,26 @@ import numpy as np
 import rclpy
 from geometry_msgs.msg import PointStamped, TransformStamped
 from nav_msgs.msg import Odometry
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.time import Time
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2 as pc2
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 
-from scipy.spatial import cKDTree
-
 import tf2_ros
 import tf2_geometry_msgs  # noqa: F401  (registers PointStamped transform support)
+
+from huitzilin_perception.cloud_geometry import (
+    apply_transform,
+    euclidean_cluster,
+    foreground_mask,
+    is_valid_quat,
+    make_transform,
+    voxel_downsample,
+)
 
 
 # ── QoS profiles ──────────────────────────────────────────────────────────────
@@ -63,65 +72,6 @@ RELIABLE_QOS = QoSProfile(
     history=QoSHistoryPolicy.KEEP_LAST,
     depth=10,
 )
-
-
-# ── Voxel grid (pure-numpy, no PCL / open3d dep) ─────────────────────────────
-
-def voxel_downsample(pts: np.ndarray, leaf: float) -> np.ndarray:
-    """
-    Down-sample an (N, 3) float32 xyz array to one point per voxel.
-    Returns an (M, 3) array with M ≤ N.
-    """
-    if pts.shape[0] == 0:
-        return pts
-    keys = np.floor(pts / leaf).astype(np.int32)
-    # unique voxels → take centroid of points in each
-    unique_keys, inv = np.unique(keys, axis=0, return_inverse=True)
-    centroids = np.zeros((len(unique_keys), 3), dtype=np.float32)
-    counts = np.bincount(inv, minlength=len(unique_keys)).reshape(-1, 1)
-    np.add.at(centroids, inv, pts)
-    centroids /= counts
-    return centroids
-
-
-# ── Euclidean clustering (pure-numpy, single-linkage radius) ─────────────────
-
-def euclidean_cluster(pts: np.ndarray, tol: float,
-                      min_pts: int, max_pts: int) -> list[np.ndarray]:
-    """
-    Greedy radius-based Euclidean clustering on (N, 3) float32 xyz.
-    Returns a list of (k, 3) arrays, each being one cluster.
-
-    Uses scipy cKDTree — O(N log N)-ish. The old pure-numpy O(N²) version
-    computed a full-array norm per BFS pop, which crawled (and the matching
-    O(N·M) foreground mask OOM-killed the node) once the W3-15 axis fix let
-    real ~30k-point clouds through the ROI for the first time.
-    """
-    if pts.shape[0] == 0:
-        return []
-
-    tree = cKDTree(pts)
-    assigned = np.zeros(len(pts), dtype=bool)
-    clusters: list[np.ndarray] = []
-
-    for seed_idx in range(len(pts)):
-        if assigned[seed_idx]:
-            continue
-        # BFS from this seed
-        assigned[seed_idx] = True
-        queue = [seed_idx]
-        members = []
-        while queue:
-            idx = queue.pop()
-            members.append(idx)
-            for nb in tree.query_ball_point(pts[idx], tol):
-                if not assigned[nb]:
-                    assigned[nb] = True
-                    queue.append(nb)
-        if min_pts <= len(members) <= max_pts:
-            clusters.append(pts[np.array(members)])
-
-    return clusters
 
 
 # ── Main node ─────────────────────────────────────────────────────────────────
@@ -156,6 +106,7 @@ class DetectorNode(Node):
         self.declare_parameter("cloud_convention", "gz_flu")  # gz_flu | optical (see detector.yaml)
         self.declare_parameter("fg_max_points", 5000)  # skip frame if foreground explodes (egomotion flood)
         self.declare_parameter("cluster_max_extent_m", 0.35)  # reject clusters physically larger than the projectile
+        self.declare_parameter("fixed_frame", "odom")  # frame for egomotion-compensated differencing
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
@@ -169,8 +120,13 @@ class DetectorNode(Node):
             maxlen=self._p["bg_history_frames"]
         )
 
-        # ── Latest odom (for egomotion compensation) ─────────────────────────
-        self._latest_odom: Optional[Odometry] = None
+        # ── Egomotion compensation state (W3-13) ─────────────────────────────
+        # Odom is folded into the tf buffer (odom -> base_link) so clouds can
+        # be re-expressed in the fixed odom frame before differencing.
+        # _bg_mode tracks which frame the bg buffer currently holds; the two
+        # frames must never be mixed in one buffer.
+        self._bg_mode: str = "camera"
+        self._warned_no_attitude = False
 
         # ── Subscribers ──────────────────────────────────────────────────────
         self._cloud_sub = self.create_subscription(
@@ -228,12 +184,33 @@ class DetectorNode(Node):
             "cloud_convention":   self.get_parameter("cloud_convention").value,
             "fg_max_points":      self.get_parameter("fg_max_points").value,
             "cluster_max_extent_m": self.get_parameter("cluster_max_extent_m").value,
+            "fixed_frame":        self.get_parameter("fixed_frame").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
 
     def _odom_cb(self, msg: Odometry) -> None:
-        self._latest_odom = msg
+        q = msg.pose.pose.orientation
+        if not is_valid_quat(q.x, q.y, q.z, q.w):
+            # Bags recorded before mav_bridge published attitude carry the
+            # all-zero message default; without orientation the cloud cannot
+            # be re-expressed in odom, so compensation stays off for them.
+            if not self._warned_no_attitude:
+                self._warned_no_attitude = True
+                self.get_logger().warn(
+                    "odom carries no valid orientation — egomotion compensation "
+                    "OFF (re-capture bags with the attitude-publishing mav_bridge)")
+            return
+        t = TransformStamped()
+        t.header.stamp = msg.header.stamp
+        t.header.frame_id = msg.header.frame_id or "odom"
+        t.child_frame_id = msg.child_frame_id or "base_link"
+        p = msg.pose.pose.position
+        t.transform.translation.x = p.x
+        t.transform.translation.y = p.y
+        t.transform.translation.z = p.z
+        t.transform.rotation = q
+        self._tf_buffer.set_transform(t, "mav_bridge_odom")
 
     # ── Main cloud callback ───────────────────────────────────────────────────
 
@@ -303,13 +280,33 @@ class DetectorNode(Node):
         if pts.shape[0] == 0:
             return
 
+        # ── Egomotion compensation (W3-13; 2026-07-06 recall root cause) ─────
+        # Difference in the fixed odom frame, not the moving camera frame: at
+        # patrol speed the whole scene shifts ~diff_threshold per frame in
+        # camera coords, so uncompensated differencing floods and the
+        # fg_max_points guard discards the very frames containing the ball.
+        # Needs odom with a valid quaternion; old bags fall back to camera mode.
+        T_fixed_cam = None
+        if self._p["compensate_egomotion"]:
+            T_fixed_cam = self._lookup_matrix(
+                self._p["fixed_frame"], msg.header.frame_id, msg.header.stamp)
+        mode = "fixed" if T_fixed_cam is not None else "camera"
+        if mode != self._bg_mode:
+            self._bg_buffer.clear()  # never mix frames inside one bg buffer
+            self.get_logger().info(
+                f"differencing frame -> {mode} "
+                f"({'odom TF available' if mode == 'fixed' else 'no odom TF — uncompensated'})")
+            self._bg_mode = mode
+        if mode == "fixed":
+            pts = apply_transform(T_fixed_cam, pts)
+
         self._bg_buffer.append(pts.copy())
         if len(self._bg_buffer) < 2:
             return
 
         bg_all = np.vstack(list(self._bg_buffer)[:-1])
         current = self._bg_buffer[-1]
-        fg_mask = self._foreground_mask(current, bg_all, self._p["diff_threshold_m"])
+        fg_mask = foreground_mask(current, bg_all, self._p["diff_threshold_m"])
         fg_pts = current[fg_mask]
         n_fg = fg_pts.shape[0]
         if fg_pts.shape[0] == 0:
@@ -367,10 +364,17 @@ class DetectorNode(Node):
                     throttle_duration_sec=1.0)
             return
 
-        centroid_cam = best_cluster.mean(axis=0)
-        centroid_bl = self._transform_to_base_link(
-            centroid_cam, msg.header.stamp, msg.header.frame_id
-        )
+        centroid = best_cluster.mean(axis=0)
+        if self._bg_mode == "fixed":
+            # cluster lives in the fixed odom frame
+            T_bl_fixed = self._lookup_matrix(
+                "base_link", self._p["fixed_frame"], msg.header.stamp)
+            centroid_bl = (apply_transform(T_bl_fixed, centroid[None, :])[0]
+                           if T_bl_fixed is not None else None)
+        else:
+            centroid_bl = self._transform_to_base_link(
+                centroid, msg.header.stamp, msg.header.frame_id
+            )
         if centroid_bl is None:
             if dbg:
                 self.get_logger().info("funnel: TF to base_link FAILED",
@@ -386,21 +390,24 @@ class DetectorNode(Node):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _foreground_mask(current: np.ndarray, background: np.ndarray,
-                         threshold: float) -> np.ndarray:
+    def _lookup_matrix(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         """
-        Return bool mask of current points that are farther than `threshold`
-        from any background point.  O(N*M) — fine for downsampled clouds.
+        4x4 target<-source transform at `stamp`. Falls back to the latest
+        available transform (≤1 odom period stale — cm-level at patrol speed)
+        when the exact stamp isn't bracketed yet, e.g. the newest cloud always
+        arrives before the odom sample that would bracket it.
+        Returns None if the chain isn't available at all.
         """
-        if background.shape[0] == 0:
-            return np.ones(len(current), dtype=bool)
-        # cKDTree NN query. The old broadcast (N, M, 3) pairwise-distance array
-        # was ~40 GB at 30k current x 120k bg points -> kernel OOM-killed the
-        # node the moment the W3-15 axis remap let real clouds through.
-        tree = cKDTree(background)
-        min_dists, _ = tree.query(current, k=1, workers=-1)
-        return min_dists > threshold
+        try:
+            ts = self._tf_buffer.lookup_transform(target, source,
+                                                  Time.from_msg(stamp))
+        except tf2_ros.TransformException:
+            try:
+                ts = self._tf_buffer.lookup_transform(target, source, Time())
+            except tf2_ros.TransformException:
+                return None
+        tr, q = ts.transform.translation, ts.transform.rotation
+        return make_transform((tr.x, tr.y, tr.z), (q.x, q.y, q.z, q.w))
 
     def _transform_to_base_link(
         self, xyz_cam: np.ndarray, stamp, frame_id: str
@@ -464,11 +471,14 @@ def main(args=None) -> None:
     node = DetectorNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # SIGTERM/SIGINT already shut the context down; a second shutdown
+        # raises RCLError (seen as a traceback after every regression run).
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

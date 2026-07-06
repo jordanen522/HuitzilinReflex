@@ -4,5 +4,5 @@ mav_bridge:
     cmd_rate_hz: 10.0                    # >5 Hz so AP never hits the ~3 s timeout
     cmd_timeout_s: 0.7                   # cmd_vel silence longer than this -> zero-hold
     takeoff_alt_m: 2.0
-    stream_rate_hz: 10.0
+    stream_rate_hz: 30.0   # odom must outpace the 15 Hz depth cloud: the detector's egomotion compensation uses latest-available odom TF (W3-13)
     mode: "GUIDED"

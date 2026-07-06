@@ -80,4 +80,12 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 ## 5. What stays out of scope this week
 
 - No real OAK-D hardware (Week 6).
-- No Kalman filter / intercept prediction / dodge command (Week 4) — `/threat/intercept` and 
+- No Kalman filter / intercept prediction / dodge command (Week 4) — `/threat/intercept` and `/cmd/evade` stay provisional.
+- No Pass-B airframe fidelity work (Week 7-8) — depth hangs on the stock `iris_with_standoffs` model as-is.
+
+## 6. Evidence & doc trail
+
+- Numbers go in `docs/week3_detection_evidence.md` (new, mirroring `docs/week2_patrol_evidence.md`).
+- Contract updates (`/oak/*` provisional → active) land in `docs/architecture.md` in the **same commit** as the code that implements them (W3-19, pending).
+- TF additions get verified against `docs/frames.md`.
+- Retro + Week 4 handoff appended to `docs/JOURNAL.md` at W3-22.

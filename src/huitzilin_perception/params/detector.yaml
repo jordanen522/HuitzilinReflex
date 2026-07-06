@@ -66,7 +66,12 @@ detector:
     marker_topic: "/threat/marker"
 
     # ── Egomotion compensation (W3-13) ────────────────────────────────────────
-    # Subscribe /huitzilin/odom to reject apparent depth change from drone motion.
+    # Fold /huitzilin/odom into TF and difference clouds in the fixed frame
+    # below instead of the moving camera frame. Requires odom with a valid
+    # orientation quaternion (mav_bridge ≥ the 2026-07-06 attitude fix);
+    # bags without it fall back to camera-frame differencing, which floods
+    # under patrol motion and was the cause of the 60%-recall regression.
     # Set false to disable (useful for debugging the raw differencer).
     compensate_egomotion: true
     odom_topic: "/huitzilin/odom"
+    fixed_frame: "odom"

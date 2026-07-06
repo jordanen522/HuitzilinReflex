@@ -54,7 +54,10 @@ class MavBridgeNode(Node):
 
         # --- timers ---
         self.create_timer(1.0 / self.cmd_rate, self._tick_setpoint)   # watchdog/stream
-        self.create_timer(1.0 / 10.0, self._tick_telemetry)
+        # Telemetry tick follows stream_rate_hz: odom must be >= the 15 Hz
+        # depth-cloud rate or the detector's latest-TF fallback goes stale.
+        self.create_timer(1.0 / float(self.get_parameter("stream_rate_hz").value),
+                          self._tick_telemetry)
         self.get_logger().info("mav_bridge up: cmd_vel in, odom/state out")
 
     # -- cmd_vel: ROS body FLU (x fwd, y left, z up) -> AP body NED (x fwd, y right, z down)
@@ -92,6 +95,17 @@ class MavBridgeNode(Node):
             od.pose.pose.position.x = x
             od.pose.pose.position.y = y
             od.pose.pose.position.z = z
+            # Orientation is REQUIRED by the detector's egomotion compensation
+            # (W3-13): without it, bags carry the all-zero default quaternion
+            # and background differencing falls back to the flood-prone
+            # camera-frame mode (the 2026-07-06 60%-recall root cause).
+            if {"roll", "pitch", "yaw"} <= s.keys():
+                qx, qy, qz, qw = MavBridge.ned_rpy_to_enu_quat(
+                    s["roll"], s["pitch"], s["yaw"])
+                od.pose.pose.orientation.x = qx
+                od.pose.pose.orientation.y = qy
+                od.pose.pose.orientation.z = qz
+                od.pose.pose.orientation.w = qw
             if {"vn", "ve", "vd"} <= s.keys():
                 vx, vy, vz = MavBridge.ned_to_enu(s["vn"], s["ve"], s["vd"])
                 od.twist.twist.linear.x = vx

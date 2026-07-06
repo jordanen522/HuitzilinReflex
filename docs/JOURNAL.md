@@ -144,3 +144,52 @@ rate, scored repeatably against a labeled rosbag library, reproducible from a fr
 All depth-sensor rendering done on the native Dell Inspiron 3670 (i5-8400, UHD 630,
 native Ubuntu 24.04). WSL2 / Iris Xe box cannot render Gazebo depth at rate. All timing
 gates measured in sim time via `/clock` and message stamps — never wall-clock.
+
+---
+
+## Week 3 — 2026-07-06: 60%-recall regression root-caused (egomotion)
+
+Train-split regression on the Dell: recall 60% (S01/S04/S07/S08 FN), floor 95%.
+DEBUG_FUNNEL showed ~half of all frames dying at `fg > fg_max_points=5000`.
+
+### Root causes (three independent defects)
+
+1. **`compensate_egomotion` was declared but never implemented.** The detector
+   subscribed `/huitzilin/odom`, stored the message, and never read it. Background
+   differencing therefore ran in the *moving camera frame*: at ~2 m/s patrol the
+   whole scene shifts ≈ `diff_threshold_m` (0.15 m) per frame, plus metres under
+   pitch/yaw, so the entire cloud became "foreground" and the flood guard threw
+   away the very frames containing the ball. Detection succeeded only when the
+   ball coincided with a momentarily steady camera — which is exactly why the
+   slow (S01), oblique (S04), and near-miss (S07/S08) scenarios failed.
+   **Fix:** odom is folded into the tf buffer (`odom → base_link`) and clouds are
+   re-expressed in `odom` before differencing (`fixed_frame` param). Pure math
+   extracted to `cloud_geometry.py` with unit tests proving camera-frame
+   differencing floods (>20% fg from egomotion alone) while odom-frame stays <1%.
+
+2. **`/huitzilin/odom` carried no orientation** (all-zero quaternion — the ROS
+   message default) and only 10 Hz. `mav_bridge` already received `ATTITUDE` from
+   SITL but never packed it. **Fix:** `MavBridge.ned_rpy_to_enu_quat()` (NED/FRD →
+   ENU/FLU, unit-tested), `get_state()` caches last-known telemetry (recv_match is
+   lossy), `stream_rate_hz` 10 → 30 so odom outpaces the 15 Hz depth cloud.
+   **Consequence: all existing bags lack attitude → the detector detects the
+   invalid quaternion and falls back to the old camera-frame mode. The bag
+   library must be re-captured with the new mav_bridge before the regression can
+   pass.**
+
+3. **`score_bags` booked a missing bag as a false positive.** N04 (never captured
+   — needs a ≥ 12 m flight) produced "FP=1 / FP rate 25%" on a run with zero
+   actual false positives. **Fix:** missing bags are now harness errors, excluded
+   from the confusion matrix, and fail the run explicitly.
+
+Also fixed: `rcl_shutdown already called` traceback on every harness teardown
+(guard `rclpy.ok()` + catch `ExternalShutdownException`), and a booby-trapped git
+index on the Windows box (stale pre-W3-13 file versions staged — a blind commit
+would have reverted the detector; defused with `git reset`).
+
+### Verification
+- 12 unit tests green (`test_cloud_geometry.py`, `test_frames.py`) — run on the
+  Windows box without ROS; they run under `colcon test` too.
+- Live regression still requires the Dell: rebuild, re-capture S01–S10/N01–N03
+  with attitude-bearing odom, capture N04 at `takeoff_alt_m: 12.0`, re-run
+  `./scripts/run_regression.sh /data/huitzilin_bags train`.

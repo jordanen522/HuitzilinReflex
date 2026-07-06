@@ -29,6 +29,7 @@ class MavBridge:
         self.master = mavutil.mavlink_connection(connect, source_system=source_system)
         self.target_system = 0
         self.target_component = 0
+        self._state = {}   # last-known telemetry (recv_match is lossy per tick)
 
     # -- lifecycle -------------------------------------------------------------
     def connect(self, timeout=30):
@@ -143,15 +144,20 @@ class MavBridge:
 
     # -- telemetry -------------------------------------------------------------
     def get_state(self):
-        """Non-blocking snapshot of pose + velocity in NED."""
+        """Non-blocking snapshot of pose + attitude + velocity in NED.
+
+        Cached: recv_match(type=X) silently discards non-X messages it scans
+        past, so in any single tick ATTITUDE or LOCAL_POSITION_NED may be
+        missing — the cache keeps the last known value (≤1 stream period old).
+        """
         lp = self.master.recv_match(type="LOCAL_POSITION_NED", blocking=False)
         att = self.master.recv_match(type="ATTITUDE", blocking=False)
-        state = {}
         if lp:
-            state.update(dict(n=lp.x, e=lp.y, d=lp.z, vn=lp.vx, ve=lp.vy, vd=lp.vz))
+            self._state.update(dict(n=lp.x, e=lp.y, d=lp.z,
+                                    vn=lp.vx, ve=lp.vy, vd=lp.vz))
         if att:
-            state.update(dict(roll=att.roll, pitch=att.pitch, yaw=att.yaw))
-        return state
+            self._state.update(dict(roll=att.roll, pitch=att.pitch, yaw=att.yaw))
+        return dict(self._state)
 
     # -- frame helpers (NED <-> ENU) used by the ROS node ---------------------
     @staticmethod
@@ -161,6 +167,29 @@ class MavBridge:
     @staticmethod
     def enu_to_ned(x, y, z):
         return (y, x, -z)
+
+    @staticmethod
+    def ned_rpy_to_enu_quat(roll, pitch, yaw):
+        """ArduPilot ATTITUDE (NED/FRD roll-pitch-yaw, rad) -> ENU/FLU body
+        quaternion (x, y, z, w) per REP-103.
+
+        Equivalent Euler mapping: yaw' = pi/2 - yaw, pitch' = -pitch,
+        roll' = roll, composed ZYX. (NED yaw 0 = North = ENU yaw 90°;
+        NED nose-up pitch is positive, ENU/FLU nose-up pitch is negative.)
+        Unit-tested in test/test_frames.py.
+        """
+        hy = (math.pi / 2.0 - yaw) / 2.0
+        hp = -pitch / 2.0
+        hr = roll / 2.0
+        cy, sy = math.cos(hy), math.sin(hy)
+        cp, sp = math.cos(hp), math.sin(hp)
+        cr, sr = math.cos(hr), math.sin(hr)
+        return (
+            sr * cp * cy - cr * sp * sy,   # x
+            cr * sp * cy + sr * cp * sy,   # y
+            cr * cp * sy - sr * sp * cy,   # z
+            cr * cp * cy + sr * sp * sy,   # w
+        )
 
 
 # --- standalone self-test: arm, takeoff, nudge, land --------------------------

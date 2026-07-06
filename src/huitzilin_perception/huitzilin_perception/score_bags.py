@@ -176,9 +176,13 @@ class ScorerNode(Node):
         # Find bag file
         bag_path = self._find_bag(sid)
         if bag_path is None:
+            # A missing bag is a harness error, NOT a detection result: it
+            # must not enter the confusion matrix (counting N04 as FP put
+            # "FP rate 25%" on a run with zero actual false positives).
             return {
                 "id": sid, "label": label, "detected": False,
-                "pass": False, "note": "BAG NOT FOUND",
+                "pass": False, "error": True,
+                "note": "BAG MISSING — capture it (scripts/capture_scenario.sh)",
             }
 
         # Load sidecar
@@ -257,8 +261,10 @@ class ScorerNode(Node):
     # ── Reporting ──────────────────────────────────────────────────────────────
 
     def _report(self, results: list[dict]) -> int:
-        positives = [r for r in results if r["label"] == "positive"]
-        negatives = [r for r in results if r["label"] == "negative"]
+        errors    = [r for r in results if r.get("error")]
+        scored    = [r for r in results if not r.get("error")]
+        positives = [r for r in scored if r["label"] == "positive"]
+        negatives = [r for r in scored if r["label"] == "negative"]
 
         tp = sum(1 for r in positives if r["pass"])
         fn = sum(1 for r in positives if not r["pass"])
@@ -286,16 +292,23 @@ class ScorerNode(Node):
                 f"{'✓' if r['pass'] else '✗':4s}  "
                 f"{r.get('note','')}"
             )
+        passed = recall >= self._floor and not errors
+        verdict = "PASS ✓"
+        if errors:
+            verdict = f"FAIL ✗ — {len(errors)} bag(s) missing (excluded from metrics)"
+        elif not passed:
+            verdict = "FAIL ✗ — recall below floor"
         lines += [
             "",
             "  ─" + "─" * 55,
-            f"  TP={tp}  FN={fn}  TN={tn}  FP={fp}",
+            f"  TP={tp}  FN={fn}  TN={tn}  FP={fp}"
+            + (f"  MISSING={len(errors)}" if errors else ""),
             f"  Recall (TP rate): {recall*100:.1f}%  "
             f"(floor: {self._floor*100:.0f}%)",
             f"  Precision:        {precision*100:.1f}%",
             f"  FP rate:          {fp_rate*100:.1f}%",
             "",
-            f"  {'PASS ✓' if recall >= self._floor else 'FAIL ✗ — recall below floor'}",
+            f"  {verdict}",
             "═" * 60,
             "",
         ]
@@ -310,7 +323,7 @@ class ScorerNode(Node):
         except Exception as e:
             self.get_logger().warn(f"Could not write report: {e}")
 
-        return 0 if recall >= self._floor else 1
+        return 0 if passed else 1
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
