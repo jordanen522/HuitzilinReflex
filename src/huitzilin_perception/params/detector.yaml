@@ -8,6 +8,13 @@ detector:
   ros__parameters:
     use_sim_time: true
 
+    # ── Input cloud axis convention (W3-15) ───────────────────────────────────
+    # gz-sim PointCloudPacked stays in the gz sensor body frame (X fwd, Y left,
+    # Z up); <optical_frame_id> renames the header only. "gz_flu" remaps points
+    # to REP-103 optical at ingest. Set "optical" for a real OAK-D (DepthAI
+    # already outputs optical-convention clouds).
+    cloud_convention: "gz_flu"
+
     # ── ROI / range gate (W3-12) ──────────────────────────────────────────────
     # Keep only points within this depth range (metres).
     # Reliable OAK-D Lite working band; clip edges that are too noisy.

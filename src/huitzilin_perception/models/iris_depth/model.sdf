@@ -70,8 +70,9 @@
         The gz_ros2_bridge maps this to sensor_msgs/Image on /oak/depth and
         sensor_msgs/PointCloud2 on /oak/points (see params/bridge.yaml).
 
-        Frame is set to camera_optical_frame so the point cloud is already
-        in the optical convention (Z-forward, X-right, Y-down).
+        NOTE (W3-15): optical_frame_id only sets the header frame NAME.
+        The point DATA stays in the gz sensor body frame (X-fwd, Y-left,
+        Z-up) — the detector remaps to optical (cloud_convention: gz_flu).
       -->
       <sensor name="oak_d_lite_depth" type="depth_camera">
         <pose>0 0 0 0 0 0</pose>

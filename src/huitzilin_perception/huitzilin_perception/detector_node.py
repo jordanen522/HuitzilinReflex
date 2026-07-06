@@ -149,6 +149,7 @@ class DetectorNode(Node):
         self.declare_parameter("compensate_egomotion", True)
         self.declare_parameter("odom_topic", "/huitzilin/odom")
         self.declare_parameter("debug_funnel", False)  # W3-15 diagnostic: log per-stage counts
+        self.declare_parameter("cloud_convention", "gz_flu")  # gz_flu | optical (see detector.yaml)
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
@@ -218,6 +219,7 @@ class DetectorNode(Node):
             "compensate_egomotion": self.get_parameter("compensate_egomotion").value,
             "odom_topic":         self.get_parameter("odom_topic").value,
             "debug_funnel":       self.get_parameter("debug_funnel").value,
+            "cloud_convention":   self.get_parameter("cloud_convention").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
@@ -237,6 +239,24 @@ class DetectorNode(Node):
                 self.get_logger().info("funnel: raw=0 (empty cloud)", throttle_duration_sec=1.0)
             return
         pts = raw.astype(np.float32)
+
+        # W3-15 root cause of 0% recall: gz-sim fills PointCloudPacked in the
+        # gz sensor BODY frame (X fwd, Y left, Z up). <optical_frame_id> in the
+        # SDF only renames the header frame — it does NOT rotate the data.
+        # Remap to REP-103 optical (X right, Y down, Z fwd) so the depth gate,
+        # frustum angle, and TF into base_link all see what they expect.
+        # cloud_convention: "optical" = passthrough (real OAK-D via DepthAI).
+        if self._p["cloud_convention"] == "gz_flu":
+            pts = np.stack((-pts[:, 1], -pts[:, 2], pts[:, 0]), axis=1)
+
+        # Drop non-finite returns: sky pixels are +inf, which skip_nans keeps.
+        pts = pts[np.isfinite(pts).all(axis=1)]
+        if pts.shape[0] == 0:
+            if dbg:
+                self.get_logger().info("funnel: raw>0 but finite=0 (all inf)",
+                                       throttle_duration_sec=1.0)
+            return
+
         n_raw = pts.shape[0]
         if dbg:
             self.get_logger().info(
