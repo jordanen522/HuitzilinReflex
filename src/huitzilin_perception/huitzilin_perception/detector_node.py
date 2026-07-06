@@ -155,6 +155,7 @@ class DetectorNode(Node):
         self.declare_parameter("debug_funnel", False)  # W3-15 diagnostic: log per-stage counts
         self.declare_parameter("cloud_convention", "gz_flu")  # gz_flu | optical (see detector.yaml)
         self.declare_parameter("fg_max_points", 5000)  # skip frame if foreground explodes (egomotion flood)
+        self.declare_parameter("cluster_max_extent_m", 0.35)  # reject clusters physically larger than the projectile
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
@@ -226,6 +227,7 @@ class DetectorNode(Node):
             "debug_funnel":       self.get_parameter("debug_funnel").value,
             "cloud_convention":   self.get_parameter("cloud_convention").value,
             "fg_max_points":      self.get_parameter("fg_max_points").value,
+            "cluster_max_extent_m": self.get_parameter("cluster_max_extent_m").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
@@ -334,16 +336,28 @@ class DetectorNode(Node):
             min_pts=self._p["cluster_min_points"],
             max_pts=self._p["cluster_max_points"],
         )
+        # Physical-size gate: an 80 mm ball voxelized at 0.02 m can never span
+        # more than ~0.15 m, while the dominant FP mode ("scene-entry" blobs —
+        # a near wall/ground patch enters the ROI where the bg buffer had
+        # nothing, so fg==voxel and the whole patch clusters) spans metres.
+        # Point-count caps can't separate them (ball 3-50 pts overlaps patch
+        # 42-500 pts); metric extent separates them cleanly.
+        max_ext = self._p["cluster_max_extent_m"]
+        ball_sized = [c for c in clusters
+                      if float(np.max(c.max(axis=0) - c.min(axis=0))) <= max_ext]
         if dbg:
-            sizes = sorted((c.shape[0] for c in clusters), reverse=True)[:5]
+            desc = sorted(
+                ((c.shape[0], round(float(np.max(c.max(axis=0) - c.min(axis=0))), 2))
+                 for c in clusters), reverse=True)[:5]
             self.get_logger().info(
                 f"funnel: raw={n_raw} range={n_range} angle={n_angle} voxel={n_voxel} "
-                f"fg={n_fg} clusters={len(clusters)} sizes={sizes}",
+                f"fg={n_fg} clusters={len(clusters)} ball_sized={len(ball_sized)} "
+                f"(size,extent)={desc}",
                 throttle_duration_sec=1.0)
-        if not clusters:
+        if not ball_sized:
             return
 
-        best_cluster = max(clusters, key=lambda c: c.shape[0])
+        best_cluster = max(ball_sized, key=lambda c: c.shape[0])
         score = best_cluster.shape[0] / self._p["cluster_max_points"]
         if score < self._p["min_publish_score"]:
             if dbg:

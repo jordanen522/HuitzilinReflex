@@ -50,6 +50,12 @@ detector:
     cluster_min_points: 3     # W3-15: was 5; small/distant/fast projectile blobs are 3-10 downsampled pts.
     cluster_max_points: 500
 
+    # Reject clusters whose max axis extent exceeds this (metres). The 80 mm
+    # ball spans <= ~0.15 m after 0.02 m voxelization; scene-entry blobs (near
+    # ground/wall patches entering the ROI, fg==voxel) span metres. This is the
+    # primary FP gate — point-count ranges overlap, metric size does not.
+    cluster_max_extent_m: 0.35
+
     # ── Centroid publishing (W3-14) ───────────────────────────────────────────
     # Minimum confidence score [0–1] to publish a centroid.
     # (Score = normalised cluster size; keeps the largest coherent blob.)
