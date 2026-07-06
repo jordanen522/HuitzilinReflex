@@ -32,7 +32,7 @@ Week **3 of 9**, Phase A (Foundations & Simulation) — the first week the camer
 Work top to bottom — later tasks assume earlier ones are done. Six work areas. Status legend: `[x]` done · `[~]` partial (code done, live tuning pending) · `[ ]` pending (Dell box).
 
 1. **Inherited State & Setup** — `[x]` W3-01 (regression gate, Dell — clean lap confirmed 2026-06-30) → `[x]` W3-02 (close Wk2 carry-overs) → `[x]` W3-03 (scaffold `huitzilin_perception`)
-2. **Simulated Depth Sensor (Gazebo)** — `[x]` W3-04 (add sensor to SDF + world) → `[x]` W3-05 (bridge to ROS 2) → `[x]` W3-06 (camera TF) → `[ ]` W3-07 (verify in RViz, Dell)
+2. **Simulated Depth Sensor (Gazebo)** — `[x]` W3-04 (add sensor to SDF + world) → `[x]` W3-05 (bridge to ROS 2) → `[x]` W3-06 (camera TF) → `[x]` W3-07 (depth stream verified 2026-07-06, Dell — 15 Hz sim, metronome-stable at rest + in flight)
 3. **Synthetic Threat Scenarios** — `[x]` W3-08 (projectile spawner) → `[x]` W3-09 (scenario matrix + labels) → `[ ]` W3-10 (record labeled rosbag library, Dell)
 4. **Detection Node** — `[x]` W3-11 (skeleton) → `[x]` W3-12 (ROI/filter) → `[x]` W3-13 (differential clustering) → `[x]` W3-14 (centroid + publish) → `[~]` W3-15 (tune thresholds — params exposed, operating point pending sweep)
 5. **Rosbag Library & Regression** — `[x]` W3-16 (offline harness) → `[ ]` W3-17 (quantify TP/FP on held-out set, Dell) → `[~]` W3-18 (regression-proof — harness committed, library wiring pending bags)
@@ -58,22 +58,30 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 ### Closed this session (2026-06-30, Dell)
 
 - **W3-01** — Baseline patrol lap confirmed clean on the Dell box before touching perception. Sharp edges found and fixed in `CLAUDE.md` (pushed): `start_patrol` is `SetBool` not `Trigger`; `sim_vehicle.py` needs all three `--out` ports (14551/14552/14553); `max_step_size` must stay `0.001` (1000Hz) — `0.004` causes a SITL "Main loop slow" PreArm failure. Dell holds ~80% real-time at `0.001`.
-- Next up: **W3-04 verify / W3-07** (depth stream verify) — see `docs/week3_capture_runbook.md` §1.
+
+### Closed 2026-07-06 (Dell) — depth-stream verify
+
+- **W3-01 (re-confirmed)** — clean baseline lap in the Week 2 world post-b0eedd5 rebuild.
+- **W3-04 verify** — `huitzilin_runway.sdf` flies; SITL healthy (`Frame: QUAD/X`, EKF3+GPS), **no `No JSON sensor message`** → flight plugins confirmed live in `iris_depth`.
+- **W3-07** — `/oak/points` at **15.15 Hz sim, metronome-stable** (66 ms spacing, zero dropouts) at rest *and* in flight; odom attitude quaternion valid; detector confirmed differencing in the `odom` fixed frame (egomotion fix live). Wall-clock ~5 Hz is the Dell's ~0.33 RTF under depth rendering, not a sensor fault. Full detail in `docs/JOURNAL.md` (2026-07-06 evening entry).
+- New helper scripts: `scripts/week3_world.sh` (T1) and `scripts/week3_flyup.sh` (T4).
+- **Next up: W3-10** (bag capture) — see `docs/week3_capture_runbook.md` §2.
 
 ### Remaining — requires live Gazebo on the native Dell box
 
-> **Run first:** `colcon build --symlink-install` from `~/huitzilin_ws` — the new `huitzilin_perception` package must be picked up before any launch works.
+> **Run first (once per checkout):** `colcon build --symlink-install` from `~/huitzilin_ws`.
 >
-> **Full step-by-step procedure:** see `docs/week3_capture_runbook.md` — covers every row below plus the per-scenario `spawn_projectile` params and `.label.yaml` sidecar format that `score_bags.py` requires (not previously documented).
+> **Bring-up (4 terminals, each sourced):** T1 `./scripts/week3_world.sh` · T2 `sim_vehicle.py … --out …14551/14552/14553` · T3 `ros2 launch huitzilin_perception week3_perception.launch.py with_patrol:=true` · T4 `./scripts/week3_flyup.sh`.
+>
+> **Full step-by-step procedure:** see `docs/week3_capture_runbook.md` — covers every row below plus the per-scenario capture command and `.label.yaml` sidecar format that `score_bags.py` requires.
 
 | Task | What |
 |------|------|
-| **W3-04 verify** | Export `GZ_SIM_RESOURCE_PATH` to include the `models/` install path, launch with `huitzilin_runway.sdf`. |
-| **W3-07** | RViz: add PointCloud2 on `/oak/points` (best-effort QoS), fly a patrol lap, confirm depth stream stable. |
-| **W3-10** | Record labeled bags per scenario matrix: `ros2 bag record -s mcap /oak/depth /oak/points /clock /huitzilin/odom`. |
+| **W3-10** | Record labeled bags per scenario: `./scripts/capture_scenario.sh <ID>` for S01–S12, N01, N02, N03, N05 (Ctrl-C ~8–10 s after each spawn). N04 needs `takeoff_alt_m: 12.0` first. |
 | **W3-15 (tune)** | Sweep `detector.yaml` thresholds against train-set bags; commit the chosen operating point. |
 | **W3-17** | Run `./scripts/run_regression.sh /data/huitzilin_bags test` on held-out scenarios. |
 | **W3-18 (wire)** | Point the harness at the recorded bag library so a detection-hurting change fails CI automatically. |
+| **W3-19** | Promote `/oak/*` + `/threat/centroid` from provisional → active in `docs/architecture.md`. |
 | **W3-21** | Clean-shell end-to-end acceptance run; record RViz + bag as evidence. |
 | **W3-22** | Retro + journal update. |
 

@@ -193,3 +193,54 @@ would have reverted the detector; defused with `git reset`).
 - Live regression still requires the Dell: rebuild, re-capture S01–S10/N01–N03
   with attitude-bearing odom, capture N04 at `takeoff_alt_m: 12.0`, re-run
   `./scripts/run_regression.sh /data/huitzilin_bags train`.
+
+---
+
+## Week 3 — 2026-07-06 (evening): depth-stream verify PASSED on the Dell (W3-01 / W3-04v / W3-07)
+
+First live bring-up of the perception world on the native Dell box *after* the
+egomotion + attitude fix (b0eedd5). Every go/no-go gate green:
+
+- **Rebuild clean** — 3 packages, workspace on b0eedd5 (`git pull` = up to date).
+- **W3-01** — baseline patrol lap clean in the Week 2 world before touching perception.
+- **W3-04 verify** — `huitzilin_runway.sdf` flies: SITL healthy (`Frame: QUAD/X`,
+  EKF3 using GPS, origin set), and critically **no `No JSON sensor message` /
+  `link 1 down`** → the flight plugins are correctly ported into `iris_depth`
+  (79c2e9b holds on this box).
+- **Attitude fix live** — `/huitzilin/odom` now carries a *valid* orientation
+  quaternion (z≈0.707, w≈0.707 at the 90° patrol heading), not the old all-zero
+  default that forced the camera-frame fallback.
+- **Egomotion fix live** — detector logs `differencing frame -> fixed (odom TF
+  available)`; it is NOT falling back to camera-frame mode.
+- **W3-07** — `/oak/points` verified at **15.15 Hz in sim time, metronome-stable**
+  (consecutive header stamps exactly 66 ms apart, zero dropouts) both at rest AND
+  while flying the patrol square. Wall-clock read ~5 Hz with up to 0.83 s gaps —
+  that is purely the Dell at ~0.33 RTF during 640×480 depth rendering, NOT a
+  sensor problem (recorded bags are sim-stamped, so the data is pristine). This
+  is exactly why timing is judged in sim time, never wall-clock.
+
+Detector operating defaults confirmed loaded: ROI 0.3–8.0 m, voxel 0.02 m,
+diff_thresh 0.15 m.
+
+New this session: `scripts/week3_world.sh` (T1 world bring-up with the
+`GZ_SIM_RESOURCE_PATH` export baked in) and `scripts/week3_flyup.sh`
+(arm→takeoff→patrol, odom-polled climb, beats auto-disarm).
+
+### Next session — resume at W3-10 (bag capture)
+
+Bring-up (4 terminals, each `source /opt/ros/jazzy/setup.bash && source
+~/huitzilin_ws/install/setup.bash`):
+- **T1** `./scripts/week3_world.sh`
+- **T2** `sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON --add-param-file=$HOME/huitzilin_ws/src/huitzilin_sim/params/sitl_frame.parm --out udp:127.0.0.1:14551 --out udp:127.0.0.1:14552 --out udp:127.0.0.1:14553`
+- **T3** `ros2 launch huitzilin_perception week3_perception.launch.py with_patrol:=true`
+- **T4** `./scripts/week3_flyup.sh`
+
+Then the capture loop, one command per scenario (Ctrl-C ~8–10 s after each spawn):
+`./scripts/capture_scenario.sh <ID>` for S01–S12, N01, N02, N03, N05.
+- **N02**: no spawn — time the Ctrl-C so the window spans a `reached WP` transition.
+- **N04**: set `takeoff_alt_m: 12.0` in `bridge.yaml` first (script aborts below
+  ~10.5 m), then restore 2 m.
+
+After capture: **W3-15** tune `detector.yaml` on train → **W3-17**
+`./scripts/run_regression.sh /data/huitzilin_bags test` → evidence doc →
+**W3-19** contracts → **W3-21** acceptance → **W3-22** retro.

@@ -8,6 +8,13 @@ Xe box cannot render Gazebo depth at rate (`CLAUDE.md` sharp edges).
 All timing in this runbook is **sim time** (via `/clock` and message stamps), never
 wall-clock, per the same sharp-edge note.
 
+> **▶ RESUME (2026-07-06):** §0 (W3-01) and §1 (W3-04 verify / W3-07) are **DONE** —
+> the depth stream is verified 15 Hz sim, metronome-stable at rest and in flight
+> (see `docs/JOURNAL.md`). **Start at §2 (W3-10 bag capture).** Bring-up is now two
+> helper scripts: **T1** `./scripts/week3_world.sh`, **T4** `./scripts/week3_flyup.sh`
+> (T2 `sim_vehicle.py …`, T3 `ros2 launch … week3_perception.launch.py
+> with_patrol:=true` unchanged). Then loop `./scripts/capture_scenario.sh <ID>`.
+
 ---
 
 ## 0. Pre-flight (W3-01)
