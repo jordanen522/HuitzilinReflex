@@ -29,15 +29,35 @@ echo "    Split   : $SPLIT"
 echo "    Output  : $OUTPUT"
 echo ""
 
-# Launch detector in background (needs use_sim_time so bags drive the clock)
+# Static TF chain base_link -> camera_link -> camera_optical_frame.
+# The bags do NOT record /tf_static, and this harness bypasses
+# week3_perception.launch.py (which normally publishes these), so without them
+# the detector's final transform-to-base_link fails on EVERY frame and no
+# centroid is ever published -> 0% recall no matter what the thresholds are.
+# Offsets must match the launch-file defaults (camera_link_x/y/z, optical rot).
+ros2 run tf2_ros static_transform_publisher \
+  --x 0.10 --y 0 --z 0.02 --roll 0 --pitch 0 --yaw 0 \
+  --frame-id base_link --child-frame-id camera_link \
+  --ros-args -p use_sim_time:=true >/dev/null 2>&1 &
+TF1_PID=$!
+ros2 run tf2_ros static_transform_publisher \
+  --x 0 --y 0 --z 0 --roll -1.5707963 --pitch 0 --yaw -1.5707963 \
+  --frame-id camera_link --child-frame-id camera_optical_frame \
+  --ros-args -p use_sim_time:=true >/dev/null 2>&1 &
+TF2_PID=$!
+
+# Launch detector in background (needs use_sim_time so bags drive the clock).
+# DEBUG_FUNNEL=true ./scripts/run_regression.sh ... enables per-stage funnel
+# logging (raw/range/angle/voxel/fg/cluster counts + early-return reason).
 ros2 run huitzilin_perception detector \
   --ros-args --params-file \
   "$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/params/detector.yaml" \
-  -p use_sim_time:=true &
+  -p use_sim_time:=true \
+  -p debug_funnel:="${DEBUG_FUNNEL:-false}" &
 DETECTOR_PID=$!
-trap "kill $DETECTOR_PID 2>/dev/null" EXIT
+trap "kill $DETECTOR_PID $TF1_PID $TF2_PID 2>/dev/null" EXIT
 
-sleep 2  # give detector time to start
+sleep 2  # give detector + TF publishers time to start
 
 # Run scorer (replays bags, scores, exits with code)
 ros2 run huitzilin_perception score_bags \
