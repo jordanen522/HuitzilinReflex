@@ -1,8 +1,7 @@
 # Setup Guide — Project HuitzilinReflex
 
 ## Prerequisites
-- Windows 11 with WSL2 (Ubuntu 24.04)
-- IntelliJ IDEA Ultimate with Remote Development connected to WSL
+- Ubuntu 24.04 — native (Dell box; required for depth rendering) or WSL2 (flight/SITL only)
 
 ## 1. ROS 2 Jazzy
 ```bash
@@ -39,17 +38,13 @@ echo 'export GZ_SIM_RESOURCE_PATH=$HOME/ardupilot_gazebo/models:$HOME/ardupilot_
 source ~/.bashrc
 ```
 
-## 5. ROS-Gazebo Bridge
+## 5. ROS-Gazebo Bridge + pymavlink
 ```bash
 sudo apt install ros-jazzy-ros-gz
-```
-
-## 6. pymavlink
-```bash
 sudo pip install pymavlink --break-system-packages
 ```
 
-## 7. Clone & Build the Project
+## 6. Clone & Build the Project
 ```bash
 git clone <your-repo-url> ~/huitzilin_ws
 cd ~/huitzilin_ws
@@ -60,61 +55,22 @@ source install/setup.bash
 
 ## Running the Simulation
 
-### Terminal 1 — Gazebo (headless)
-```bash
-gz sim -s -r ~/ardupilot_gazebo/worlds/iris_runway.sdf
-```
+Flight-stack bring-up (3 terminals — Gazebo, SITL, launch) and the
+arm/takeoff/start_patrol service calls are in `CLAUDE.md` "Build & run". Two rules that
+bite (full detail in `CLAUDE.md` sharp edges):
 
-### Terminal 2 — SITL
-```bash
-cd ~/ardupilot
-sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON --console \
-  --add-param-file=$HOME/huitzilin_ws/src/huitzilin_sim/params/sitl_frame.parm \
-  --out udp:127.0.0.1:14552 \   # Week 2 ROS 2 bridge   (matches bridge.yaml)
-  --out udp:127.0.0.1:14553     # Week 2 patrol node    (matches patrol.yaml)
-```
-Wait for "Received 1363 parameters".
+- **Always pass `--add-param-file=…/sitl_frame.parm`** to `sim_vehicle.py` — without it
+  a fresh EEPROM has `FRAME_CLASS=0` and the drone arms but never lifts.
+- **`--out` ports must match the YAMLs**: `bridge.yaml` listens on `:14552`,
+  `patrol.yaml` on `:14553`; MAVProxy's own `:14550` serves `first_flight.py` / QGC.
 
-**Port mapping (must match the YAMLs):** MAVProxy fans the MAVLink stream out to
-each consumer's own UDP port. `bridge.yaml` listens on `udpin:0.0.0.0:14552`,
-`patrol.yaml` on `udpin:0.0.0.0:14553`. The `--out` ports above must match, or the
-nodes get `TimeoutError: no heartbeat`. (MAVProxy's own default `--out …:14550`
-still carries the Week 1 `first_flight.py` / QGC link.)
+Optional smoke test: `python3 scripts/first_flight.py` (heartbeat → armed → takeoff →
+"Holding position", on `:14550`).
 
-**Airframe (critical):** `--add-param-file=…/sitl_frame.parm` sets
-`FRAME_CLASS=1` (Quad) / `FRAME_TYPE=1` (X) on every boot. Without it, a fresh
-EEPROM boots with `FRAME_CLASS=0` — arming "succeeds" but the motors never spin
-as a quad (throttle maxes out, zero lift, `PreArm: Motors: Check frame class and
-type`). This was the actual takeoff blocker; do **not** paper over it with
-`ARMING_CHECK 0` — that only hides the pre-arm message while the airframe stays
-unmixed. If you ever set the frame by hand instead: `param set FRAME_CLASS 1`,
-`param set FRAME_TYPE 1`, then `reboot` (the FC link drops for a few seconds and
-reconnects — that's normal).
-
-Then arm:
-
-- **Week 1 (manual):** in the MAVProxy console, `arm throttle`.
-- **Week 2 (scripted):** the `huitzilin_sim` bridge arms programmatically via the
-  `/huitzilin/arm` service after waiting for EKF/GPS-ready.
-
-### Terminal 3 — pymavlink flight script
-```bash
-cd ~/huitzilin_ws
-python3 scripts/first_flight.py
-```
-Expected output: Heartbeat received → Armed → Taking off → Holding position
-
-### Terminal 4 — ROS 2 bridge / Week 2 stack
-```bash
-source /opt/ros/jazzy/setup.bash
-source ~/huitzilin_ws/install/setup.bash   # repo root = colcon workspace
-# Week 2 bridge (supersedes the Week 1 `mavlink_bridge` node), on its own port:
-ros2 run huitzilin_sim mav_bridge --ros-args -p connection:=udp:127.0.0.1:14552
-# …or bring up the whole Week 2 stack (bridge + patrol + telemetry logger):
-ros2 launch huitzilin_sim week2_sitl.launch.py
-```
+Perception stack (depth world, detector, bag capture — Dell box only):
+`docs/week3_capture_runbook.md`.
 
 ## Acceptance Criteria
-- `first_flight.py` prints "Holding position"
-- QGroundControl shows "Flying" and "Guided"
-- **Week 2:** `ros2 run huitzilin_sim mav_bridge` connects and publishes `/huitzilin/odom`; `ros2 topic pub /huitzilin/cmd_vel …` moves the drone; `ros2 launch huitzilin_sim week2_sitl.launch.py` flies a closed patrol loop with logged telemetry
+- `ros2 launch huitzilin_sim week2_sitl.launch.py` + the three service calls fly a
+  closed patrol loop with logged telemetry (`/huitzilin/odom` publishing throughout).
+- Perception: `/oak/points` stable at 15 Hz sim; `run_regression.sh … test` exits 0.

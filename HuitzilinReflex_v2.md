@@ -2,207 +2,155 @@
 
 ### Autonomous Agile Patrol & Projectile-Evasion Drone — Summer 2026
 
-> A 9-week development project building a compact, agile, ducted micro-drone that patrols a designated area, signals with light/sound, and autonomously dodges incoming projectiles using an onboard stereoscopic depth stack. Vlogged weekly.
+9-week project: a 3.5″ ducted micro-drone that patrols a designated area, signals with
+light/sound, and autonomously dodges incoming projectiles using an onboard stereo depth
+stack. Vlogged weekly. **v2 — as-built:** hardware list reflects parts actually
+purchased; the one structural change from v1 is that the airframe's stock Betaflight
+F722 flight controller is **replaced** with an ArduPilot-capable H7 board (Week 5).
 
-> **v2 — as-built.** This revision replaces the placeholder hardware choices with the parts actually purchased, and re-points the roadmap at those parts. The one structural change from v1: the airframe's stock flight controller (a Betaflight-class F722) is **replaced** with an ArduPilot-capable H7 board, because the autonomy depends on it. See §2 and Week 5.
-
----
-
-## On the Name
-
-**Huitzilin** (Classical Nahuatl, *huītzilin*) means **"hummingbird."** It's the root of *Huitzilopochtli* — "Hummingbird of the South / Left" — the Aztec sun-and-war deity. In Aztec belief the bird carried far more weight than its size suggests: warriors who fell in battle were said to accompany the sun across the sky and, in time, to return to the world reborn as hummingbirds. The hummingbird *was* the fallen soldier — small, relentless, and back on the wing. Naming the platform after it frames the drone as something that stands a post, takes the hit, and keeps flying.
-
-The bird is also a near-perfect behavioral mascot. It is the only bird that can hover in place, fly straight backward, and reverse direction in a fraction of a second; its wingbeats and reaction times are among the fastest of any vertebrate. That combination — **persistent hovering presence plus explosive, omnidirectional darting** — is exactly the profile the drone targets: loiter calmly on patrol, then snap into a sharp evasive maneuver the microsecond a threat vector appears.
-
-**Reflex** names the second half of the system, and it's meant literally. A reflex is not a decision — it's the response that fires before thought catches up, the way a hand snaps back from a flame before the brain registers the heat. The drone doesn't deliberate over an incoming rock, brick, bottle, or can. It doesn't classify the object, weigh options, or run a plan. The sense → dodge loop is wired tight enough that the maneuver happens as a reaction, not a choice. It just does. So the project name reads, plainly, as *"Hummingbird Reflex."*
+**Name:** *Huitzilin* (Classical Nahuatl) = "hummingbird" — the only bird that hovers in
+place and darts omnidirectionally in a fraction of a second; in Aztec belief, fallen
+warriors returned as hummingbirds. *Reflex* is literal: the sense → dodge loop fires as a
+reaction, not a decision. "Hummingbird Reflex" — loiter like a hover, dodge like a dart.
 
 ---
 
 ## 1. Overview & Objectives
 
-HuitzilinReflex is a 3.5-inch ducted micro-development platform that retains full CS/robotics mathematical complexity (perception, state estimation, control) while staying physically safe to test indoors and out. Thick integrated ducts fully isolate the props, so rapid projectile-evasion test cycles can be run without exposed spinning blades.
+3.5-inch ducted micro-platform keeping full CS/robotics complexity (perception, state
+estimation, control) while staying physically safe: integrated ducts fully isolate the
+props, so rapid evasion test cycles run without exposed blades.
 
-**Primary objectives**
+1. **Autonomous patrol & signaling** — persistent pathing with strobe + siren payload.
+2. **Kinematic evasion** — low-latency detection → intercept prediction → sharp dodge.
 
-1. **Autonomous patrol & signaling** — persistent pathing and target tracking, with an integrated strobe + siren warning payload.
-2. **Kinematic evasion** — a low-latency trajectory engine that detects an incoming projectile, predicts its intercept point, and commands a sharp dodge.
-
-**Design philosophy:** simulate first, fly last — and *integrate, don't fabricate*. The expensive, fragile parts (the airframe, the depth stack) are pre-assembled, plug-and-play hardware, so effort concentrates where the engineering risk actually lives: the perception + evasion loop. Almost all of that can be developed and de-risked in simulation before a single real propeller spins. The one piece of real fabrication is a single flight-controller swap (Week 5), needed to put ArduPilot on the aircraft. The roadmap below reflects that.
+**Philosophy:** simulate first, fly last; *integrate, don't fabricate*. The fragile parts
+(airframe, depth stack) are plug-and-play hardware; effort concentrates on the
+perception + evasion loop, de-risked in sim. The one fabrication step is the FC swap.
 
 ---
 
 ## 2. Hardware Base & Payload (as purchased)
 
-| Subsystem | Part purchased | Notes |
+| Subsystem | Part | Notes |
 |---|---|---|
-| **Airframe** | **GEPRC CineLog35 V2 HD** (RunCam Wasp / DJI HD), 3.5" ducted, 6S, **BNF — ELRS 2.4 GHz** | 142 mm wheelbase; integrated ducts isolate the blades for safe rapid-evasion testing. Ships bind-and-fly with a **GEPRC ELRS 2.4 GHz receiver already installed**, and includes 2 spare prop pairs. |
-| **Propulsion** (stock, on airframe) | **SPEEDX2 2105.5** motors, **HQProp D-T90** props, 6S | Comes assembled; leaves ~150–200 g payload overhead. The stock 8-bit 45 A 4-in-1 ESC is integrated into the AIO board that gets replaced (see flight controller). |
-| **Flight controller** *(replacement — see Week 5)* | **MicoAir H743 V2 AIO** — STM32**H743** + integrated **4-in-1 45 A AM32 ESC**, 2–6S | **Swapped in for the stock GEP F722-45A AIO.** The stock board runs Betaflight and cannot run ArduPilot; the H743 is the required **H7-class** board, runs ArduPilot, and is driven by **pymavlink** over USB/UART. Same **25.5 × 25.5 mm** mount and 45 A rating as the stock board, so it's a like-for-like board swap. Integrated ESC = no separate ESC needed. |
-| **Companion computer** | **Raspberry Pi 5 (4 GB)** + official **Active Cooler** + **64 GB SanDisk Extreme** microSD | Runs ROS 2 (native workspace) + the evasion node; depth arrives pre-computed, so CPU stays free for the Kalman loop. Active Cooler prevents thermal throttling under sustained inference. |
-| **Bench power (Pi)** | Official **Raspberry Pi 27 W USB-C PSU** | Desk power for the Pi during Phases A–B (SITL/dev and bench bring-up). |
-| **Flight power (Pi)** | **Pololu 5 V / 5 A step-down regulator (D24V50F5)** | Steps the 6S flight battery down to a clean **5 V / 5 A** for the Pi *in flight*. Wired to the Pi's 5 V / GND GPIO pins with `usb_max_current_enable=1` set (see §4). Replaces drawing power from the FC rail. |
-| **Depth sensor** | **Luxonis OAK-D Lite** + **USB-C ↔ USB-A 3.1 Gen 2 (10 Gbps)** cable | On-chip stereo depth over USB 3 to the Pi. The USB-3 cable (camera USB-C → Pi USB-A) is required for full frame-rate/resolution; a USB-2 cable would throttle it. |
-| **Flight battery** | **CNHL 1300 mAh 130C 6S** LiPo (2-pack, XT60) | Matches the airframe's recommended 1050–1300 mAh 6S pack. |
-| **Radio** | **RadioMaster Pocket (ELRS 2.4 GHz)** transmitter + **2× Samsung 30Q 18650** cells | Binds to the airframe's built-in GEPRC ELRS 2.4 GHz receiver. The 18650 cells power the radio (charges them internally via USB-C). Used for manual control, failsafe, and kill-switch. |
-| **Charging & storage** | **ISDT 608AC** balance charger (1–6S, XT60) + **Zeee** fireproof LiPo bag | Safe charge / discharge / storage of the 6S packs. |
-| **Build tools & wiring** | Soldering iron kit (w/ multimeter), Elegoo jumper-wire kit, MOGAOPI component kit (resistors/transistors), COMRUN M2.5 nylon standoff kit | For the FC swap, payload wiring, the buzzer transistor circuit, and mounting the Pi + OAK-D to the frame. |
+| **Airframe** | GEPRC CineLog35 V2 HD, 3.5″ ducted, 6S, BNF ELRS 2.4 GHz | 142 mm wheelbase; GEPRC ELRS receiver pre-installed; 2 spare prop pairs |
+| **Propulsion** (stock) | SPEEDX2 2105.5 motors, HQProp D-T90 props | ~150–200 g payload overhead |
+| **Flight controller** (replacement, Wk5) | MicoAir H743 V2 AIO — STM32H743 + integrated 4-in-1 45 A AM32 ESC | Replaces stock GEP F722-45A (Betaflight-only, not an ArduPilot target). Same 25.5×25.5 mm mount and 45 A rating — like-for-like swap; integrated ESC = no separate ESC |
+| **Companion computer** | Raspberry Pi 5 (4 GB) + Active Cooler + 64 GB microSD | ROS 2 + evasion node; depth arrives pre-computed |
+| **Bench power (Pi)** | Official 27 W USB-C PSU | Phases A–B desk power |
+| **Flight power (Pi)** | Pololu D24V50F5 5 V/5 A step-down | 6S → 5 V/5 A to Pi GPIO pins; see §4 |
+| **Depth sensor** | Luxonis OAK-D Lite + USB-C↔USB-A 3.1 Gen 2 cable | On-chip stereo depth over USB 3 (USB-2 cable would throttle it) |
+| **Flight battery** | CNHL 1300 mAh 130C 6S ×2 (XT60) | Matches recommended 1050–1300 mAh 6S |
+| **Radio** | RadioMaster Pocket (ELRS 2.4 GHz) + 2× Samsung 30Q 18650 | Manual control, failsafe, kill-switch |
+| **Charging** | ISDT 608AC + Zeee fireproof bag | |
+| **Tools/wiring** | Soldering kit (w/ multimeter), jumper wires, component kit, M2.5 nylon standoffs | FC swap, payload wiring, buzzer transistor circuit, Pi/OAK-D mounting |
 
-**Payload — Warning Systems**
+**Payload — warning systems**
 
-**Flashing lights**
-
-- Component: **BTF-Lighting WS2812B** addressable RGB LED strip (5 V, 144 LED/m).
-- Interface: Raspberry Pi 5 GPIO (5 V, GND, Data), driven from Python (`rpi_ws281x`) inside the ROS 2 pipeline for low-latency pulsing / strobe patterns.
-- **Wiring note:** the Pi's GPIO data line is 3.3 V but the WS2812B expects ~5 V logic, so a small **3.3 V → 5 V level shifter** (e.g. 74AHCT125) is recommended for reliable data. It can be built up from the component kit or added as a cheap board.
-
-**Siren / alarm**
-
-- Component: **Tokatuker 2–12 V piezo siren** (120 dB @ 12 V; still very loud at 5 V), 3.5 mm leads.
-- Interface: a Pi 5 digital GPIO pin through a **transistor circuit** (built from the MOGAOPI component kit) to limit current draw.
-- Software: toggled programmatically the moment an incoming threat vector is calculated.
+- **LEDs:** BTF-Lighting WS2812B strip (5 V, 144 LED/m), driven from Pi GPIO via
+  `rpi_ws281x`. Pi data line is 3.3 V vs the strip's ~5 V logic — add a 3.3→5 V level
+  shifter (e.g. 74AHCT125).
+- **Siren:** Tokatuker 2–12 V piezo (120 dB @ 12 V), on a Pi GPIO through a transistor
+  circuit; toggled the moment a threat vector is computed.
 
 ---
 
-## 3. Perception & Evasion Pipeline (ROS 2 + Stereo Depth)
+## 3. Perception & Evasion Pipeline
 
-The hardware is deliberately simplified — no event cameras, no multi-layer LiDAR, and no hand-built depth math. Depth maps are produced **inside the camera**: the OAK-D Lite's onboard Myriad X VPU computes stereoscopic depth on-chip and streams finished depth/point-cloud frames to the Pi over USB 3. The companion computer never touches raw sensor data — it receives finished depth, so no per-pixel depth reconstruction runs on the Pi at all.
-
-**Data flow**
+No event cameras, no LiDAR, no hand-built depth math: the OAK-D Lite's Myriad X VPU
+computes stereo depth **in-camera** and streams finished depth/point clouds to the Pi
+over USB 3 — the Pi never does per-pixel depth work.
 
 ```
-[ OAK-D Lite Camera ]
-        |  on-chip Myriad X VPU: stereo depth computed in-camera
-        |  USB 3 (USB-C → USB-A) → companion computer (finished depth + point cloud)
-        ▼
-[ Raspberry Pi 5 (4 GB) — Companion Computer ]
-    ├── depthai-ros Node   → republishes PointCloud2 / Depth Image (already computed)
-    └── Custom Evasion Node → subscribes to PointCloud2
-            ├── Spatial slice: filter noise, extract moving cluster
-            ├── Predictive Kalman filter: project intercept coordinate
-            └── GPIO trigger: fire buzzer + LED strobes simultaneously
-        |   pymavlink: inject SET_POSITION_TARGET_LOCAL_NED over USB/UART
-        ▼
-[ Flight Controller — MicoAir H743 AIO running ArduPilot ]
-    ├── Velocity-loop override: execute high-frequency dodge
-    └── Integrated 4-in-1 45 A ESC → SPEEDX2 motors
+[ OAK-D Lite ] —USB 3→ [ Raspberry Pi 5 ]
+    depthai-ros → PointCloud2/depth → evasion node:
+      spatial slice → moving-cluster extraction → predictive Kalman filter
+      → GPIO (buzzer + LED strobe) + pymavlink SET_POSITION_TARGET_LOCAL_NED
+→ [ MicoAir H743 AIO, ArduPilot ] velocity-loop dodge → 4-in-1 ESC → motors
 ```
 
-**Evasion software breakdown**
-
-1. **Object detection** — the ROS 2 node scans the incoming depth frames; an incoming projectile shows up as a sudden, drastic cluster of depth-value differentials.
-2. **Trajectory tracking** — the cluster's centroid (X, Y, Z) is piped continuously into a predictive Kalman filter to recover velocity.
-3. **Action trigger** — if the predicted intercept path crosses the drone's spatial boundary, the node toggles the alarm GPIO and a `pymavlink` script issues a high-rate `SET_POSITION_TARGET_LOCAL_NED` command for an immediate ~1.5 m/s velocity spike to clear the object.
+1. **Detection** — incoming projectile = sudden cluster of depth differentials.
+2. **Tracking** — cluster centroid piped into a predictive Kalman filter for velocity.
+3. **Trigger** — predicted intercept inside the drone's boundary → alarm GPIO + a
+   high-rate velocity-spike command (~1.5 m/s) to clear the object.
 
 ---
 
 ## 4. Critical Avionics, Power & Signal Notes
 
-- **Flight controller — MicoAir H743 V2 AIO:** the STM32**H743** is the required H7-class processor; it runs real-time ArduPilot control laws and services high-rate `pymavlink` velocity commands without stalling the loop. Its **integrated 4-in-1 45 A AM32 ESC** drives the stock SPEEDX2 motors, so no separate ESC is required. It replaces the stock GEP F722-45A AIO, which is a Betaflight-class F7 board and is not an ArduPilot target.
-- **The swap is a soldering job (Week 5):** the four motors (3 wires each), the battery leads, and the HD-VTX/camera + ELRS-receiver connections move from the stock AIO to the MicoAir. Same 25.5 × 25.5 mm mount means it drops into the existing frame standoffs. If fine-pitch soldering isn't comfortable, hand this one step to a local FPV/hobby shop.
-- **Control interface — pymavlink:** a native Python 3 `pymavlink` script connects directly to ArduPilot on the H743 and injects high-rate `SET_POSITION_TARGET_LOCAL_NED` velocity commands. No middleware agent sits between the evasion node and the flight controller.
-- **Isolated power — Pololu 5 V/5 A BEC:** the Pi 5 can spike to **5 V / 5 A** during peak inference and must **never** draw from the flight controller's rail. The Pololu **D24V50F5** takes the 6S battery (well within its ~38 V input ceiling) down to 5 V / 5 A, wired to the Pi's **5 V / GND GPIO pins**. Because that bypasses USB-C Power Delivery negotiation, set **`usb_max_current_enable=1`** in the Pi's `config.txt` so the Pi grants full current to its USB ports (otherwise it throttles them and starves the OAK-D).
-- **Manual video feed (optional):** the airframe's RunCam Wasp is part of the **DJI HD digital FPV** system. Manual FPV flying (Week 8) therefore needs **DJI FPV goggles**; if all manual checks are flown **line-of-sight**, goggles are not required.
-- **Depth quality — stereo vision:** stereoscopic depth uses no active IR emission, so there's no Multi-Path Interference to fight. Stereo carries its own failure modes (low-texture surfaces, depth dropouts at range, frame-rate dips), so that noise budget lives in the Kalman filter's tuning rather than in a separate denoising stage.
+- **H743 required:** real-time ArduPilot control laws + high-rate pymavlink velocity
+  commands need the H7 class; the stock F722 is Betaflight-only.
+- **FC swap = soldering job (Wk5):** 4 motors (3 wires each), battery leads, HD-VTX/camera
+  + ELRS receiver connections move to the MicoAir; same mount. Photograph stock wiring
+  first; outsource to an FPV shop if fine-pitch soldering isn't comfortable.
+- **Control interface:** native `pymavlink` over USB/UART, no middleware agent.
+- **Pi power isolation:** Pi 5 can spike to 5 V/5 A during inference and must never draw
+  from the FC rail. Pololu BEC feeds the Pi's 5 V/GND GPIO pins; because that bypasses
+  USB-C PD negotiation, set `usb_max_current_enable=1` in `config.txt` or the Pi
+  throttles its USB ports and starves the OAK-D.
+- **Manual FPV (optional):** the RunCam Wasp is DJI HD — manual video flying needs DJI
+  goggles; line-of-sight flying doesn't.
+- **Stereo noise budget:** no active IR (no MPI), but low-texture dropouts, range limits,
+  and frame-rate dips are handled in the Kalman filter tuning, not a denoise stage.
 
 ---
 
 ## 5. Roadmap (Simulation-First)
 
-**Roughly the first half is pure simulation.** Hardware bring-up runs in parallel on the bench (props off), and real flight is staged incrementally and late. Each week has an explicit *Definition of Done* (DoD) so you can't "feel finished" without hitting a checkpoint.
+Weeks 1–4 pure simulation; hardware bring-up parallel on the bench (props off); real
+flight staged late. Each week has a Definition of Done.
 
-### Week 0 — Procurement (complete)
+**Done:**
+- **Week 0 — Procurement ✔** Full BOM ordered (Appendix A); all Week-5 hardware in hand.
+- **Week 1 — Architecture, safety case, sim environment ✔** SITL + Gazebo + ROS 2 up;
+  scripted arm/takeoff/hold via pymavlink.
+- **Week 2 — ROS 2 ↔ pymavlink bridge + patrol ✔** Autonomous closed patrol loop in
+  Gazebo with logged telemetry (43 laps, mean 29.51 s — `docs/week2_patrol_evidence.md`).
+  Airframe fidelity tuning deferred to Weeks 7–8.
+- **Week 3 — Perception pipeline ✔** (closed 2026-07-15) Simulated OAK-D depth sensor,
+  synthetic projectile scenarios, detection node, labeled 17-bag library + regression
+  harness. Held-out test recall 100%, gate green. Open items in `docs/JOURNAL.md`.
 
-- Full bill of materials finalized, verified, and ordered (see **Appendix A**). All parts needed through Week 5 are accounted for.
-- Key procurement decision locked: the **MicoAir H743 AIO** flight controller is purchased to replace the stock board; the **Pololu 5 V/5 A BEC** powers the Pi in flight; the **RadioMaster Pocket (ELRS)** + 18650 cells drive manual control and bind to the airframe's built-in ELRS receiver.
-- *DoD:* every Week 5 hardware item in hand; no open ordering dependencies.
+**Remaining:**
+- **Week 4 — Evasion logic & Kalman filter in the loop.** Predictive KF tuned on the
+  scenario library; close detection → intercept → velocity-spike → alarm (mocked GPIO);
+  sweep dodge magnitude/threshold/latency. *DoD:* SITL drone dodges a defined battery of
+  projectiles above target success rate, end-to-end latency measured within budget.
+- **Week 5 — FC swap, avionics & power** (the one fabrication step). Swap F722 → H743,
+  flash ArduPilot, motor test (props off), bind radio + failsafes + kill-switch, wire
+  Pololu BEC, mount Pi + OAK-D. *DoD:* clean bench arm-up, failsafes verified, Pi powered
+  with no FC-rail draw.
+- **Week 6 — Payload wiring & real OAK-D bring-up.** WS2812B (level-shifted) + siren on
+  GPIO; depthai-ros streaming over verified USB-3; characterize real stereo noise into
+  the KF model; Remote ID / registration. *DoD:* live depth frames + payload triggers
+  within latency budget.
+- **Week 7 — HITL & tethered hover.** Real H743 + simulated world; tethered/netted hover.
+  *DoD:* stable tethered hover with full stack running and logging.
+- **Week 8 — Incremental real flight.** Manual hover → autonomous patrol → evasion, only
+  inside a netted enclosure with soft projectiles; re-tune KF against real stereo noise.
+  *DoD:* one clean autonomous patrol + successful evasion, fully logged.
+- **Week 9 — Validation, documentation & retro.** Validation matrix, as-built wiring doc,
+  final vlog, sim-vs-real post-mortem. *DoD:* reproducible build doc + validation report.
 
-### Phase A — Foundations & Simulation (Weeks 1–4)
-
-**Week 1 — Architecture, Safety Case & Sim Environment**
-
-- Lock requirements, message contracts (topics/types), and the node graph.
-- Write the safety case: failure modes, geofence/RTL behavior, kill-switch, test-enclosure rules.
-- Stand up the toolchain: ArduPilot **SITL** + **Gazebo** + ROS 2 in a **native, flat ROS 2 workspace** on your OS. (SITL is board-agnostic, so sim work is identical whether the target is the F722 or the H743 — no dependency on the FC swap.) Working natively sidesteps container pass-through for serial ports (the FC link) and the GPU (Gazebo rendering).
-- *DoD:* a simulated quad arms, takes off, and holds position in Gazebo, driven through `pymavlink`, on a teammate's fresh checkout.
-
-**Week 2 — Flight Dynamics & ROS 2 ↔ pymavlink Bridge in SITL**
-
-- Tune the simulated airframe (mass, inertia, motor model) to approximate the real 3.5" duct on 6S (SPEEDX2 2105.5 / D-T90).
-- Build and harden the ROS 2 → ArduPilot control path using a native `pymavlink` script; validate `SET_POSITION_TARGET_LOCAL_NED` round-trips and command rate.
-- Prototype the patrol path-follower as a ROS 2 node against the sim.
-- *DoD:* drone autonomously flies a closed patrol loop in Gazebo with logged telemetry.
-
-**Week 3 — Perception Pipeline on Synthetic & Recorded Depth**
-
-- Add a simulated **stereo depth** sensor in Gazebo (model it on OAK-D Lite resolution/FOV/frame-rate); generate synthetic "thrown object" scenarios (vary speed, angle, size, miss-distance).
-- Build the detection node: differential clustering and centroid extraction directly on the depth stream.
-- Start a labeled rosbag library of evasion scenarios for regression testing.
-- *DoD:* detection node flags ≥95% of simulated incoming clusters with a quantified false-positive rate.
-
-**Week 4 — Evasion Logic & Kalman Filter in the Loop**
-
-- Implement the predictive Kalman filter; tune process/measurement noise against the synthetic scenarios.
-- Close the loop: detection → intercept prediction → velocity-spike command → GPIO/alarm trigger (mocked in sim).
-- Sweep parameters (dodge magnitude, trigger threshold, latency budget) and chart hit-vs-miss outcomes.
-- *DoD:* in SITL, the drone dodges a defined battery of simulated projectiles above a target success rate, with end-to-end latency measured and within budget.
-
-### Phase B — Hardware Bring-Up (Weeks 5–6, parallel to sim refinement)
-
-**Week 5 — Flight-Controller Swap, Avionics & Power**
-
-This week is the one real fabrication step. The airframe arrives BNF, but its brain is replaced:
-
-- **Swap the flight controller:** remove the stock **GEP F722-45A AIO** and install the **MicoAir H743 V2 AIO** in the same 25.5 × 25.5 mm mount. Move over the 4 motors (3 wires each), battery leads, and the HD-VTX/camera + ELRS-receiver connections. *(Photograph the stock wiring first; if soldering isn't comfortable, outsource this one step.)*
-- **Flash & configure ArduPilot** on the H743: set frame to quad-X, run the **motor test** to confirm rotation direction/order, calibrate IMU/accelerometer, and configure the receiver protocol.
-- **Bind the radio:** pair the **RadioMaster Pocket (ELRS)** to the airframe's ELRS receiver; set up failsafes and the kill-switch.
-- **Power the Pi:** wire the **Pololu 5 V/5 A BEC** from the battery to the Pi's GPIO 5 V/GND and set `usb_max_current_enable=1`. (Bench dev still uses the 27 W USB-C PSU.)
-- **Mount** the Pi + OAK-D to the frame with the M2.5 standoffs.
-- Bench-test motors **props off**; verify IMU, calibration, RC link, failsafes, kill-switch.
-- *DoD:* clean ArduPilot bench arm-up (props off), all failsafes verified, RadioMaster ↔ drone bound, and the Pi powered from the BEC with **no FC-rail draw**.
-
-**Week 6 — Payload Wiring & Real OAK-D Lite Bring-Up**
-
-- Wire the **WS2812B** strip (via the 3.3→5 V level shifter) and the **piezo siren** (transistor circuit from the component kit) to Pi GPIO; validate timing/latency.
-- Bring up the real **OAK-D Lite** over the **USB-3** cable via `depthai-ros`; confirm on-chip depth streams to the Pi and that the CPU stays free of any depth reconstruction. (Confirm the link enumerates as USB-3, not USB-2.)
-- Characterize real-world stereo behavior (low-texture dropouts, range limits, frame-rate) and feed it into the Kalman noise model.
-- Implement Remote ID; confirm registration/regulatory items (see §6).
-- *DoD:* live depth frames published from the real sensor; payload triggers fire within the latency budget on real GPIO.
-
-### Phase C — Integration, Flight & Validation (Weeks 7–9)
-
-**Week 7 — Hardware-in-the-Loop & Tethered Hover**
-
-- Run HITL (real **MicoAir H743** FC, simulated world) to validate timing on real silicon before free flight.
-- Tethered / netted hover tests; sensor calibration in the real flight envelope.
-- *DoD:* stable tethered hover with the full software stack running and logging.
-
-**Week 8 — Incremental Real Flight**
-
-- Stage it: manual hover → autonomous patrol loop → evasion, **only inside a netted enclosure**, projectiles soft and controlled.
-- *Manual hover note:* flying by video needs **DJI FPV goggles** (the RunCam Wasp is DJI's HD system); if flying line-of-sight, goggles aren't required.
-- Compare real evasion outcomes against the sim regression suite; fix the sim-to-real gaps.
-- Use the Phase B schedule buffer to **re-tune the predictive Kalman filter** against real stereo edge noise and frame-rate drops, rather than rushing.
-- *DoD:* at least one clean autonomous patrol + successful evasion in the enclosure, fully logged.
-
-**Week 9 — Validation, Documentation & Retro**
-
-- Run the full validation matrix; write up results, the **as-built wiring/architecture** (including the FC swap), and tuning notes.
-- Produce the final vlog/build documentation and a post-mortem on sim-vs-real accuracy.
-- *DoD:* reproducible build doc + validation report a stranger could follow.
-
-> **Stretch / cut order if you fall behind:** keep Weeks 1–4 (sim) and 5 (FC swap + safe hardware checkout) sacred. The first things to trim are the *real* evasion flights in Week 8 — you can demo evasion convincingly in HITL/SITL and defer free-flight dodging rather than rush an unsafe test.
+> **Cut order if behind:** Weeks 1–5 are sacred. Trim real evasion flights first (Week
+> 8) — demo evasion in HITL/SITL rather than rush an unsafe test.
 
 ---
 
-## 6. Safety, Legal & Ethical Considerations
+## 6. Safety, Legal & Ethical
 
-These aren't optional paperwork — for this platform they shape the design.
-
-- **Flight rules (US/FAA):** register the aircraft, broadcast **Remote ID**, and respect the standard constraints — keep it within visual line of sight, don't fly autonomously over people or moving vehicles without the appropriate waiver, and stay clear of controlled airspace.
-- **LiPo safety:** charge the 6S packs on the **ISDT 608AC** in the **Zeee fireproof bag**, on a non-flammable surface, never unattended. Store at storage charge. The 18650 cells for the radio travel in a case, never loose.
-- **Test only in enclosures:** all projectile-evasion testing happens inside netting, with soft projectiles and a hardware kill-switch within reach. The ducts make blade contact safe; they do not make an uncommanded flyaway safe.
-- **People-tracking is sensitive:** "patrol," "target tracking," and "curfew enforcement" mean this thing can record and follow people. Decide up front what it records, where footage goes, how long it's kept, and don't point it at anyone who hasn't consented. Treat the warning payload as a *signal*, never as a way to harass or corner a person.
-- **Fail safe, not aggressive:** the default on any sensor dropout, link loss, or low battery should be a calm geofenced hover → RTL/land, never an evasive lunge.
+- **FAA:** register, broadcast Remote ID, visual line of sight, no autonomous flight over
+  people/vehicles without waiver, clear of controlled airspace.
+- **LiPo:** charge on the ISDT in the fireproof bag, never unattended; store at storage
+  charge; 18650s cased, never loose.
+- **Enclosures only:** all evasion testing inside netting, soft projectiles, hardware
+  kill-switch in reach. Ducts make blade contact safe, not a flyaway.
+- **People-tracking is sensitive:** decide up front what is recorded, where footage goes,
+  retention; never point at non-consenting people; the warning payload is a signal, never
+  harassment.
+- **Fail safe, not aggressive:** any dropout/link-loss/low-battery → calm geofenced hover
+  → RTL/land, never an evasive lunge.
 
 ---
 
@@ -232,8 +180,5 @@ These aren't optional paperwork — for this platform they shape the design.
 | 20 | Samsung 30Q 18650 cell | 2 | $13.98 | 18650 Battery Store |
 | | **Item subtotal (pre-tax/shipping)** | | **$1,149.21** | |
 
-*Prices captured June 2026; several were sale prices (notably the airframe, ~$200 off list). Excludes tax and per-vendor shipping; orders span five sellers. Possible small add-ons not yet purchased: a 3.3→5 V level shifter for the LED data line, and DJI FPV goggles if manual FPV flight is desired in Week 8.*
-
----
-
-*Project HuitzilinReflex — "Hummingbird Reflex." Loiter like a hover, dodge like a dart.*
+*Prices June 2026, several on sale. Not yet purchased: 3.3→5 V level shifter for the LED
+data line; DJI FPV goggles if manual FPV flight is desired in Week 8.*

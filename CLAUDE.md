@@ -1,13 +1,15 @@
 # CLAUDE.md
 
-Guidance for Claude working in this repo. Non-obvious facts only — derivable things (architecture,
-roadmap, BOM, topic tables) live in `docs/` and `HuitzilinReflex_v2.md`.
+Guidance for Claude working in this repo. Non-obvious facts only — derivable things
+(architecture, roadmap, BOM, topic tables) live in `docs/` and `HuitzilinReflex_v2.md`.
 
 ## What this is
 
 3.5″ ducted micro-quadrotor that patrols, signals, and reflexively dodges projectiles.
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink · Python 3.12 · Ubuntu 24.04.
-**Current phase: Week 3 (perception) — scaffolded, detection node not yet written.** Week 2 (autonomous patrol loop) is complete.
+**Current phase: Week 4 (Kalman filter + dodge trigger).** Weeks 1–3 complete: autonomous
+patrol loop (Wk2) and detection pipeline scored against a labeled bag library (Wk3,
+closed 2026-07-15 — see `docs/JOURNAL.md`).
 
 ## Build & run (inside WSL or native Ubuntu)
 
@@ -32,6 +34,7 @@ ros2 service call /huitzilin/takeoff std_srvs/srv/Trigger
 ros2 service call /huitzilin/start_patrol std_srvs/srv/SetBool '{data: true}'
 ```
 Preflight check: `./scripts/preflight_check.sh`
+Perception stack (depth world + detector, Dell box only): `docs/week3_capture_runbook.md`.
 
 ## Frame convention (critical)
 
@@ -50,22 +53,24 @@ Preflight check: `./scripts/preflight_check.sh`
 - **Don't blind force-arm** (`param2=21196`). Fix the root cause (frame/EKF) instead.
 - **Never `Ctrl-Z` a launch.** A suspended job holds the SITL TCP socket. Restart Gazebo+SITL together if the FDM link goes half-broken.
 - **Inline comments inside `.parm` files break MAVProxy.** Use comment-only lines.
-- **Judge all timing gates in sim time**, never wall-clock. Gazebo runs at ~24% real-time under WSL2 (no GPU passthrough); wall-clock numbers look ~4× off. Use `/clock` / message stamps. The Dell Inspiron (native Ubuntu) gets better real-time but still no discrete GPU — keep measuring in sim time there too.
-- **`mavlink_bridge` (Week 1 package) is superseded** by `huitzilin_sim`. Do not extend it.
+- **Judge all timing gates in sim time**, never wall-clock. Gazebo runs at ~24% real-time under WSL2 (no GPU passthrough); the Dell (native Ubuntu, no discrete GPU) drops to ~0.33 RTF under depth rendering. Use `/clock` / message stamps.
+- **`max_step_size` must stay `0.001`** (1000 Hz) — `0.004` causes a SITL "Main loop slow" PreArm failure.
+- **Depth rendering only works on the native-Ubuntu Dell box.** WSL2/Iris Xe cannot render Gazebo depth at rate; SITL/flight logic runs on either box.
+- **`iris_depth` must carry the flight plugins.** It merge-includes the *bare* `iris_with_standoffs` (no flight plugins). Symptom if missing: SITL spams `No JSON sensor message received`, `link 1 down`, nothing on `:9002`, no lift — while Gazebo steps fine and `/oak/points` streams. Fix (79c2e9b): `ArduPilotPlugin` (fdm 127.0.0.1:9002) + `LiftDrag`×8 + `ApplyJointForce`×4 + `JointStatePublisher` ported into `iris_depth/model.sdf` with the `iris_with_standoffs::` prefix **stripped** (merge flattens to top level).
+- **Depth camera runs at 15 Hz, not 30.** `ros_gz_bridge` PointCloudPacked→PointCloud2 can't sustain 30 Hz / 640×480 on the Dell. `iris_depth` `update_rate=15` (640×480 kept to match the real OAK-D Lite); 15 Hz is the standard for the bag library + tuning.
+- **Bags recorded before b0eedd5 lack attitude in `/huitzilin/odom`** — the detector falls back to camera-frame differencing on them. Never score against pre-b0eedd5 bags.
+- **`src/mavlink_bridge` (Week 1) is superseded** by `huitzilin_sim` and slated for deletion. Do not extend it.
 - **`ECC/` at repo root** is an unrelated plugin marketplace (untracked). Ignore it.
-- **The Week 3 perception world (`huitzilin_runway.sdf`) needs the flight plugins ported into `iris_depth`.** `iris_depth` merge-includes the *bare* `iris_with_standoffs`, which ships NO flight plugins — Week 2 flew only because its world used the plugin-equipped `iris_with_ardupilot`. Symptom if missing: SITL spams `No JSON sensor message received`, MAVProxy stays `link 1 down`, nothing listens on `:9002`, rotors make no lift — even though Gazebo steps fine (RTF ~1.0) and `/oak/points` streams. Fix (commit 79c2e9b): `iris_depth/model.sdf` carries `ArduPilotPlugin` (fdm 127.0.0.1:9002) + `LiftDrag`×8 + `ApplyJointForce`×4 + `JointStatePublisher`, ported from `iris_with_ardupilot` with the `iris_with_standoffs::` prefix **stripped** (merge flattens links/joints to top level; `base_link` stays top-level so odom/TF/patrol are unaffected).
-- **Depth camera runs at 15 Hz, not 30.** The `ros_gz_bridge` PointCloudPacked→PointCloud2 conversion can't sustain 30 Hz / 640×480 on the Dell (no GPU): `/oak/points` collapsed to ~8 Hz sim with ~0.9 s gaps. `iris_depth` sensor `update_rate=15` (resolution kept 640×480 to match the real OAK-D Lite). 15 Hz is the standard for the Week 3 bag library + detector tuning.
 
 ## Key docs
 
 | Doc | Contents |
 |---|---|
-| `HuitzilinReflex_v2.md` | Master doc: objectives, full BOM, perception design, 9-week roadmap |
-| `docs/architecture.md` | Node graph + full message/service contract table |
+| `HuitzilinReflex_v2.md` | Master doc: objectives, BOM, perception design, 9-week roadmap |
+| `docs/architecture.md` | Node graph + message/service contract table |
 | `docs/frames.md` | Coordinate frames + TF tree |
-| `docs/state_machine.md` | Full state/transition table |
+| `docs/state_machine.md` | State/transition table |
 | `docs/SAFETY_CASE.md` | FMEA, geofence/RTL, kill-switch |
-| `docs/SETUP.md` | Full install + run/acceptance |
-| `docs/JOURNAL.md` | Week-by-week log — best source for "why is it this way" |
-| `HuitzilinReflex_Week3_Playbook.docx` | Week 3 perception task cards (W3-01…W3-22) |
-| `docs/WEEK3_PLAN.md` | Week 3 reconciled plan — playbook vs. actual repo state |
+| `docs/SETUP.md` | Install + run/acceptance |
+| `docs/JOURNAL.md` | Compacted week log — results, open items, what Week 4 inherits |
+| `docs/week3_capture_runbook.md` | Bag re-capture + regression/tuning procedure (Dell) |
