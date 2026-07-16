@@ -19,11 +19,13 @@ detector:
     # Keep only points within this depth range (metres).
     # Reliable OAK-D Lite working band; clip edges that are too noisy.
     roi_min_range_m: 0.30
-    roi_max_range_m: 6.50   # W3-15: 8.0 let far background (12-19m) dominate the diff — hover attitude
+    roi_max_range_m: 5.00   # W3-15: 8.0 let far background (12-19m) dominate the diff — hover attitude
                              # jitter x long range >> diff_threshold there, flooding fg every frame
-                             # (S02 funnel: fg=25k-90k, clusters=0). 5.0 fixed that but starved S08
-                             # (offset_forward_m=6.0, 14 m/s) of dwell frames inside the ROI before
-                             # impact. 6.5 keeps far clutter out while giving fast closes room.
+                             # (S02 funnel: fg=25k-90k, clusters=0). Tried 6.5 to rescue S08 (14 m/s,
+                             # offset_forward_m=6.0) but that regressed S03 and STILL didn't fix S08
+                             # (90%->80% recall) — S08's failure isn't a range/dwell issue after all.
+                             # Reverting to 5.0 (best measured train recall: 90%, TP=9/FN=1) and
+                             # moving to the held-out test split per W3-17; S08 stays a known FN.
 
     # Forward half-angle of the ROI frustum (degrees).
     # Points outside this cone ahead of the camera are discarded.
