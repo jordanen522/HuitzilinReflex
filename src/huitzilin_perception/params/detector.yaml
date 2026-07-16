@@ -19,11 +19,14 @@ detector:
     # Keep only points within this depth range (metres).
     # Reliable OAK-D Lite working band; clip edges that are too noisy.
     roi_min_range_m: 0.30
-    roi_max_range_m: 8.00
+    roi_max_range_m: 5.00   # W3-15: 8.0 let far background (12-19m) dominate the diff — hover attitude
+                             # jitter x long range >> diff_threshold there, flooding fg every frame
+                             # (S02 funnel: fg=25k-90k, clusters=0). Matrix spawns are all 5-7m out —
+                             # don't need to see past that.
 
     # Forward half-angle of the ROI frustum (degrees).
     # Points outside this cone ahead of the camera are discarded.
-    roi_half_angle_deg: 40.0
+    roi_half_angle_deg: 45.0   # W3-15: widened 40->45 for oblique misses (S04)
 
     # ── Voxel downsampling (W3-12) ────────────────────────────────────────────
     # Leaf size for voxel grid downsampling (metres).
@@ -35,7 +38,7 @@ detector:
     bg_history_frames: 5
 
     # Minimum per-voxel depth change (metres) to count as "foreground".
-    diff_threshold_m: 0.15
+    diff_threshold_m: 0.10   # W3-15: 0.15 missed fast/oblique closes (S03,S06,S08) — lowered sensitivity floor
 
     # Skip the frame entirely if more foreground points than this survive
     # differencing: whole-scene change = egomotion flood (patrol turn), not a
@@ -47,7 +50,7 @@ detector:
     cluster_tolerance_m: 0.20
 
     # Reject clusters outside this size range (number of voxel-downsampled points).
-    cluster_min_points: 3     # W3-15: was 5; small/distant/fast projectile blobs are 3-10 downsampled pts.
+    cluster_min_points: 5     # W3-15: raised 3->5 — 3 was letting background clutter FP (N01, N03) through
     cluster_max_points: 500
 
     # Reject clusters whose max axis extent exceeds this (metres). The 80 mm
