@@ -33,9 +33,9 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 
 1. **Inherited State & Setup** — `[x]` W3-01 (regression gate, Dell — clean lap confirmed 2026-06-30) → `[x]` W3-02 (close Wk2 carry-overs) → `[x]` W3-03 (scaffold `huitzilin_perception`)
 2. **Simulated Depth Sensor (Gazebo)** — `[x]` W3-04 (add sensor to SDF + world) → `[x]` W3-05 (bridge to ROS 2) → `[x]` W3-06 (camera TF) → `[x]` W3-07 (depth stream verified 2026-07-06, Dell — 15 Hz sim, metronome-stable at rest + in flight)
-3. **Synthetic Threat Scenarios** — `[x]` W3-08 (projectile spawner) → `[x]` W3-09 (scenario matrix + labels) → `[ ]` W3-10 (record labeled rosbag library, Dell)
-4. **Detection Node** — `[x]` W3-11 (skeleton) → `[x]` W3-12 (ROI/filter) → `[x]` W3-13 (differential clustering) → `[x]` W3-14 (centroid + publish) → `[~]` W3-15 (tune thresholds — params exposed, operating point pending sweep)
-5. **Rosbag Library & Regression** — `[x]` W3-16 (offline harness) → `[ ]` W3-17 (quantify TP/FP on held-out set, Dell) → `[~]` W3-18 (regression-proof — harness committed, library wiring pending bags)
+3. **Synthetic Threat Scenarios** — `[x]` W3-08 (projectile spawner) → `[x]` W3-09 (scenario matrix + labels) → `[x]` W3-10 (record labeled rosbag library, Dell — all 17 bags captured)
+4. **Detection Node** — `[x]` W3-11 (skeleton) → `[x]` W3-12 (ROI/filter) → `[x]` W3-13 (differential clustering) → `[x]` W3-14 (centroid + publish) → `[x]` W3-15 (tune thresholds — operating point chosen; train recall 90%, known FN on S08)
+5. **Rosbag Library & Regression** — `[x]` W3-16 (offline harness) → `[x]` W3-17 (quantify TP/FP on held-out set, Dell — test recall 100%, PASS) → `[x]` W3-18 (regression-proof — harness wired to the recorded library, gate exits 0 on test)
 6. **Integration, Reproducibility & DoD** — `[ ]` W3-19 (update contracts) → `[x]` W3-20 (reproducible launch) → `[ ]` W3-21 (recorded acceptance run, Dell) → `[ ]` W3-22 (retro + Wk4 handoff)
 
 ## 4. Status snapshot (2026-06-21)
@@ -77,13 +77,15 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 
 | Task | What |
 |------|------|
-| **W3-10** | Record labeled bags per scenario: `./scripts/capture_scenario.sh <ID>` for S01–S12, N01, N02, N03, N05 (Ctrl-C ~8–10 s after each spawn). N04 needs `takeoff_alt_m: 12.0` first. |
-| **W3-15 (tune)** | Sweep `detector.yaml` thresholds against train-set bags; commit the chosen operating point. |
-| **W3-17** | Run `./scripts/run_regression.sh /data/huitzilin_bags test` on held-out scenarios. |
-| **W3-18 (wire)** | Point the harness at the recorded bag library so a detection-hurting change fails CI automatically. |
 | **W3-19** | Promote `/oak/*` + `/threat/centroid` from provisional → active in `docs/architecture.md`. |
 | **W3-21** | Clean-shell end-to-end acceptance run; record RViz + bag as evidence. |
 | **W3-22** | Retro + journal update. |
+
+### Tuning result (2026-07-15, Dell) — W3-15/17/18 closed
+
+- **Train split** (14 bags): recall 90% (TP=9, FN=1 — S08, a 14 m/s / offset_forward_m=6.0 close, never publishes within its 4.0s window). Precision 81.8%, FP on N02/N03 (fp_count=1–2 each, patrol-turn/background clutter — doesn't fail the gate, not yet root-caused).
+- **Test split** (S11, S12, N05 — held out, never used for tuning): recall 100% (TP=2, FN=0), FP on N05 (fp_count=2). `run_regression.sh /data/huitzilin_bags test` exits 0 — **gate PASS**.
+- **Decision:** stopped tuning here rather than continuing to chase the recall floor on individual train scenarios — two further threshold changes aimed at S08 regressed other scenarios without fixing it (see `detector.yaml` history, commits `40d79f2`..`454e312`). Current `detector.yaml` is the best-measured operating point, not a perfect one. S08's train-set FN and the N02/N03/N05 FPs are known, open limitations carried into Week 4 rather than blockers.
 
 ## 5. What stays out of scope this week
 
