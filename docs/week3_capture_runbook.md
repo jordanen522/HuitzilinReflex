@@ -13,7 +13,9 @@ timing in **sim time** (`/clock`, message stamps), never wall-clock.
 # once per checkout:
 cd ~/huitzilin_ws && colcon build --symlink-install
 
-# T1 — perception world (exports GZ_SIM_RESOURCE_PATH itself)
+# T1 — perception world (exports GZ_SIM_RESOURCE_PATH itself); manual equivalent:
+#   export GZ_SIM_RESOURCE_PATH="$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/models:$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/worlds:$GZ_SIM_RESOURCE_PATH"
+#   gz sim -s -r "$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/worlds/huitzilin_runway.sdf"
 ./scripts/week3_world.sh
 # T2 — SITL
 sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON \
