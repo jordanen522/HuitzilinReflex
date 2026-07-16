@@ -244,3 +244,66 @@ Then the capture loop, one command per scenario (Ctrl-C ~8–10 s after each spa
 After capture: **W3-15** tune `detector.yaml` on train → **W3-17**
 `./scripts/run_regression.sh /data/huitzilin_bags test` → evidence doc →
 **W3-19** contracts → **W3-21** acceptance → **W3-22** retro.
+
+---
+
+## Week 3 — 2026-07-15: tuning closed, acceptance run PASSED, Week 3 done (W3-15/17/18/21/22)
+
+All 17 scenario bags (S01–S12, N01–N05) captured in the prior session. This session
+tuned `detector.yaml` against the train split, ran the held-out test split, and did the
+live acceptance run on the Dell.
+
+### Tuning result (W3-15)
+
+Five threshold changes against the train split, landed across commits `40d79f2` →
+`454e312`: `diff_threshold_m` 0.15→0.10, `roi_half_angle_deg` 40→45,
+`cluster_min_points` 3→5, and `roi_max_range_m` 8.0→5.0 (to kill far-background
+attitude-jitter flood — see 07-06 entry above). A follow-up attempt to raise
+`roi_max_range_m` to 6.5 to rescue S08 (14 m/s, `offset_forward_m=6.0`) instead
+regressed train recall 90%→80% (newly broke S03, still didn't fix S08) — reverted.
+**Final train result: recall 90% (TP=9, FN=1 — S08), precision 81.8%, FP on N02/N03
+(fp_count 1–2 each).**
+
+**S08 stays a known, unfixed false negative.** Two threshold-based attempts (range
+cut, range restore) failed to fix it without breaking something else — the failure
+mode was never root-caused past "fails within its 4.0s window," because we stopped
+guessing at thresholds rather than chase it further. Whoever revisits detector tuning
+should start with a single-bag `debug_funnel:=true` trace on S08 specifically (not
+attempted this session) before touching any threshold.
+
+### Test split (W3-17/W3-18)
+
+`./scripts/run_regression.sh /data/huitzilin_bags test` on S11/S12/N05 (held out,
+never used for tuning): **recall 100% (TP=2, FN=0), FP on N05 (fp_count=2), gate
+exits 0 — PASS.** This is the number that matters for the Week 3 DoD; the harness is
+wired to the real captured library, not synthetic/placeholder bags.
+
+### Acceptance run (W3-21)
+
+Fresh-shell bring-up on the Dell (world → SITL → `week3_perception.launch.py
+with_patrol:=true` → arm/takeoff/start_patrol → live `spawn_projectile` for S02),
+recorded via `ros2 bag record` to `/data/huitzilin_bags/week3_acceptance`. Centroid
+marker confirmed firing live in RViz on `/threat/marker`. Confirmed by teammate,
+2026-07-15.
+
+### Known open items carried into Week 4
+
+- **S08 false negative** (train split) — not root-caused, see above.
+- **N02/N03/N05 false positives** — patrol-turn (N02) and background-clutter (N03,
+  N05) triggers. Don't fail the recall-floor gate but hurt precision/FP-rate; not
+  investigated this session.
+- **`/huitzilin/cmd_vel` velocity commands producing no observable motion** during
+  an earlier N04 manual-altitude workaround — flagged in an earlier session,
+  never revisited. Worth checking before Week 4 evasion commands depend on it.
+
+### What Week 4 inherits
+
+- `/threat/centroid` (`geometry_msgs/PointStamped`, reliable, `base_link` frame) —
+  the only contract the Kalman filter / dodge-trigger node needs to consume.
+  Promoted provisional→active in `docs/architecture.md` (W3-19).
+- `detector.yaml` at commit `454e312` as the tuned operating point — imperfect
+  (see S08/N02/N03/N05 above) but the best measured on the current bag library.
+- Bag library at `/data/huitzilin_bags` (17 scenario bags + the W3-21 acceptance
+  bag) for any future regression or re-tuning work.
+
+**Week 3 is done.** All of W3-01 through W3-22 are closed per `docs/WEEK3_PLAN.md`.

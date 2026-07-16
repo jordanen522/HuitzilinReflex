@@ -36,7 +36,7 @@ Work top to bottom — later tasks assume earlier ones are done. Six work areas.
 3. **Synthetic Threat Scenarios** — `[x]` W3-08 (projectile spawner) → `[x]` W3-09 (scenario matrix + labels) → `[x]` W3-10 (record labeled rosbag library, Dell — all 17 bags captured)
 4. **Detection Node** — `[x]` W3-11 (skeleton) → `[x]` W3-12 (ROI/filter) → `[x]` W3-13 (differential clustering) → `[x]` W3-14 (centroid + publish) → `[x]` W3-15 (tune thresholds — operating point chosen; train recall 90%, known FN on S08)
 5. **Rosbag Library & Regression** — `[x]` W3-16 (offline harness) → `[x]` W3-17 (quantify TP/FP on held-out set, Dell — test recall 100%, PASS) → `[x]` W3-18 (regression-proof — harness wired to the recorded library, gate exits 0 on test)
-6. **Integration, Reproducibility & DoD** — `[ ]` W3-19 (update contracts) → `[x]` W3-20 (reproducible launch) → `[ ]` W3-21 (recorded acceptance run, Dell) → `[ ]` W3-22 (retro + Wk4 handoff)
+6. **Integration, Reproducibility & DoD** — `[x]` W3-19 (contracts promoted, see `docs/architecture.md`) → `[x]` W3-20 (reproducible launch) → `[x]` W3-21 (recorded acceptance run, Dell — 2026-07-15, confirmed) → `[x]` W3-22 (retro + Wk4 handoff, `docs/JOURNAL.md`)
 
 ## 4. Status snapshot (2026-06-21)
 
