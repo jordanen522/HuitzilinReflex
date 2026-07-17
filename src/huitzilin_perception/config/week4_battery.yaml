@@ -1,0 +1,66 @@
+# week4_battery.yaml — Week 4 dodge battery (see docs/WEEK4_PLAN.md).
+#
+# Every run spawns one projectile at the patrolling drone and scores the
+# outcome against Gazebo ground truth. compensate_gravity: true makes
+# "direct hit" runs genuinely intercept the drone (flat Week 3 throws pass
+# 0.7-2.8 m below it). expect_dodge: false rows are the false-dodge check.
+#
+# No hard success-rate gate (2026-07-16 decision): the battery reports
+# measured rates; only harness errors fail the run.
+
+defaults:
+  offset_forward_m: 6.0
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  repeats: 3
+
+runs:
+  - id: B01
+    description: "Head-on slow (4 m/s), true hit"
+    speed_mps: 4.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+
+  - id: B02
+    description: "Head-on medium (8 m/s), true hit — design point"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+
+  - id: B03
+    description: "Head-on fast (14 m/s), true hit — hardest window"
+    speed_mps: 14.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+
+  - id: B04
+    description: "Oblique +30deg medium, true hit"
+    speed_mps: 8.0
+    approach_angle_deg: 30.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+
+  - id: B05
+    description: "Oblique -30deg medium, true hit"
+    speed_mps: 8.0
+    approach_angle_deg: -30.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+
+  - id: B06
+    description: "Near miss 0.5 m medium — inside threat radius, must dodge"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.5
+    expect_dodge: true
+
+  - id: B07
+    description: "Wide miss 1.5 m medium — outside threat radius, must NOT dodge"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 1.5
+    expect_dodge: false
+    repeats: 2

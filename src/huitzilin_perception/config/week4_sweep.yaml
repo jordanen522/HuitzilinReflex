@@ -1,0 +1,11 @@
+# week4_sweep.yaml — parameter sweep over the dodge trigger/maneuver.
+#
+# Grid kept deliberately small: the Dell renders depth at ~0.33 RTF, so each
+# battery pass costs ~3x its sim duration in wall time.
+
+parameters:
+  dodge_speed_mps: [1.0, 1.5, 2.5]
+  trigger_horizon_s: [1.0, 1.5]
+
+runs: [B02, B03, B06]   # subset of week4_battery.yaml ids
+repeats: 1
