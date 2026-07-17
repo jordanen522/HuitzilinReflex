@@ -78,6 +78,8 @@ def _pose_bridge(context):
     if context.launch_configurations.get("gz_pose_bridge", "true").lower() != "true":
         return []
     world = context.launch_configurations["world_name"]
+    use_sim_time = (context.launch_configurations.get("use_sim_time", "true")
+                    .lower() == "true")
     gz_topic = f"/world/{world}/dynamic_pose/info"
     return [Node(
         package="ros_gz_bridge",
@@ -86,5 +88,5 @@ def _pose_bridge(context):
         output="screen",
         arguments=[f"{gz_topic}@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V"],
         remappings=[(gz_topic, "/gz/dynamic_poses")],
-        parameters=[{"use_sim_time": True}],
+        parameters=[{"use_sim_time": use_sim_time}],
     )]
