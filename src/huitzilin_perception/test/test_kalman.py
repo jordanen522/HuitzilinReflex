@@ -94,3 +94,79 @@ def test_out_of_order_stamp_rejected():
     tr.process(1.0, [6.0, 0.0, 2.0])
     assert not tr.process(0.9, [5.9, 0.0, 2.0])
     assert tr.n_updates == 1
+
+
+# ── Task 3: dodge planning ────────────────────────────────────────────────
+
+from huitzilin_perception.kalman import (  # noqa: E402
+    dodge_direction,
+    plan_dodge,
+    predict_closest_approach,
+    should_dodge,
+)
+
+
+def test_tca_and_miss_without_gravity():
+    tca, miss, miss_vec = predict_closest_approach(
+        [6.0, 0.5, 0.0], [-8.0, 0.0, 0.0], gravity=np.zeros(3))
+    assert tca == pytest.approx(0.75, abs=0.02)
+    assert miss == pytest.approx(0.5, abs=0.02)
+    assert miss_vec[1] == pytest.approx(0.5, abs=0.02)
+
+
+def test_tca_gravity_compensated_throw_is_a_hit():
+    # Lofted throw: vz0 = 0.5*g*t_flight returns to aim altitude at t=0.75 s.
+    v_rel = np.array([-8.0, 0.0, 0.5 * G_MPS2 * 0.75])
+    tca, miss, _ = predict_closest_approach([6.0, 0.0, 0.0], v_rel)
+    assert tca == pytest.approx(0.75, abs=0.02)
+    assert miss < 0.06  # bounded by the 10 ms sampling step
+
+
+def test_miss_beyond_horizon_reports_horizon_edge():
+    # Ball flying AWAY: closest approach is now (t=0).
+    tca, miss, _ = predict_closest_approach([6.0, 0.0, 0.0], [8.0, 0.0, 0.0],
+                                            gravity=np.zeros(3))
+    assert tca == pytest.approx(0.0)
+    assert miss == pytest.approx(6.0)
+
+
+def test_dodge_direction_moves_away_from_pass_side():
+    # Ball passes 0.4 m to the drone's +y: dodge must be -y.
+    d = dodge_direction([0.0, 0.4, 0.0], [-8.0, 0.0, 0.0])
+    np.testing.assert_allclose(d, [0.0, -1.0, 0.0], atol=1e-9)
+    assert np.linalg.norm(d) == pytest.approx(1.0)
+
+
+def test_dodge_direction_dead_centre_falls_back_to_lateral():
+    d = dodge_direction([0.01, 0.0, 0.0], [-8.0, 0.0, 0.0])
+    assert np.linalg.norm(d) == pytest.approx(1.0)
+    assert abs(d @ np.array([-1.0, 0.0, 0.0])) < 1e-9   # perpendicular to approach
+    assert d[2] == pytest.approx(0.0)                    # horizontal fallback
+
+
+def test_dodge_direction_vertical_approach_still_defined():
+    d = dodge_direction([0.0, 0.0, 0.01], [0.0, 0.0, -10.0])
+    assert np.linalg.norm(d) == pytest.approx(1.0)
+    assert abs(d[2]) < 1e-9
+
+
+@pytest.mark.parametrize("n,miss,tca,expected", [
+    (3, 0.5, 1.0, True),
+    (2, 0.5, 1.0, False),   # not enough confirmations
+    (3, 0.9, 1.0, False),   # passes outside threat radius
+    (3, 0.5, 2.0, False),   # too far in the future
+    (3, 0.5, -0.1, False),  # already passed
+])
+def test_should_dodge_thresholds(n, miss, tca, expected):
+    assert should_dodge(
+        n, miss, tca,
+        min_updates=3, threat_radius_m=0.75, trigger_horizon_s=1.5,
+    ) is expected
+
+
+def test_plan_dodge_end_to_end_hit_geometry():
+    v0 = np.array([-8.0, 0.0, 0.5 * G_MPS2 * 0.75])
+    plan = plan_dodge([6.0, 0.0, 2.0], v0, [0.0, 0.0, 2.0], [0.0, 0.0, 0.0])
+    assert plan.tca_s == pytest.approx(0.75, abs=0.02)
+    assert plan.miss_m < 0.06
+    assert np.linalg.norm(plan.direction) == pytest.approx(1.0)

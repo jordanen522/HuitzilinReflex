@@ -148,3 +148,84 @@ class ProjectileTracker:
             [np.eye(3) * (dt ** 3 / 2.0 * q2), np.eye(3) * (dt * dt * q2)],
         ])
         return F @ self._x + u, F @ self._P @ F.T + Q
+
+
+# ── Dodge planning ────────────────────────────────────────────────────────
+
+
+def predict_closest_approach(
+    p_rel,
+    v_rel,
+    *,
+    horizon_s: float = 3.0,
+    step_s: float = 0.01,
+    gravity=GRAVITY_ENU,
+) -> tuple[float, float, np.ndarray]:
+    """
+    Closest approach of a ballistic projectile RELATIVE to the drone.
+    p_rel / v_rel: projectile state minus drone state (ENU). The drone is
+    assumed constant-velocity over the horizon, so the relative acceleration
+    is exactly gravity. Sampled numerically (vectorised): gravity makes the
+    closed form a quartic, and 300 samples cost microseconds.
+    Returns (tca_s, miss_m, miss_vec) with miss_vec = drone->projectile at
+    closest approach.
+    """
+    ts = np.arange(0.0, horizon_s + step_s, step_s)
+    rel = (np.asarray(p_rel, dtype=np.float64)
+           + ts[:, None] * np.asarray(v_rel, dtype=np.float64)
+           + 0.5 * ts[:, None] ** 2 * np.asarray(gravity, dtype=np.float64))
+    d = np.linalg.norm(rel, axis=1)
+    i = int(np.argmin(d))
+    return float(ts[i]), float(d[i]), rel[i]
+
+
+def dodge_direction(miss_vec, approach_vel, *, min_offset_m: float = 0.05) -> np.ndarray:
+    """
+    Unit ENU dodge direction: perpendicular to the approach axis, pointing
+    AWAY from where the projectile will pass (miss_vec is drone->projectile
+    at closest approach, so -miss_vec_perp opens the gap fastest).
+    Dead-centre hits have no defined "away" side — fall back to a horizontal
+    perpendicular (deterministic, so battery runs are repeatable).
+    """
+    a = np.asarray(approach_vel, dtype=np.float64)
+    a_norm = np.linalg.norm(a)
+    a_hat = a / a_norm if a_norm > 1e-9 else np.array([1.0, 0.0, 0.0])
+
+    m = np.asarray(miss_vec, dtype=np.float64)
+    m_perp = m - (m @ a_hat) * a_hat
+    m_perp_norm = np.linalg.norm(m_perp)
+    if m_perp_norm >= min_offset_m:
+        return -m_perp / m_perp_norm
+
+    lateral = np.cross(a_hat, np.array([0.0, 0.0, 1.0]))
+    lat_norm = np.linalg.norm(lateral)
+    if lat_norm < 1e-6:  # vertical approach
+        return np.array([1.0, 0.0, 0.0])
+    return lateral / lat_norm
+
+
+def should_dodge(
+    n_updates: int,
+    miss_m: float,
+    tca_s: float,
+    *,
+    min_updates: int,
+    threat_radius_m: float,
+    trigger_horizon_s: float,
+) -> bool:
+    """Trigger policy: confirmed track + predicted pass inside the threat
+    radius + impact soon enough that dodging now is the right call."""
+    return (
+        n_updates >= min_updates
+        and miss_m < threat_radius_m
+        and 0.0 <= tca_s <= trigger_horizon_s
+    )
+
+
+def plan_dodge(p_proj, v_proj, p_drone, v_drone, *, horizon_s: float = 3.0) -> DodgePlan:
+    """Convenience wrapper: absolute states in odom ENU -> full dodge plan."""
+    p_rel = np.asarray(p_proj, dtype=np.float64) - np.asarray(p_drone, dtype=np.float64)
+    v_rel = np.asarray(v_proj, dtype=np.float64) - np.asarray(v_drone, dtype=np.float64)
+    tca, miss, miss_vec = predict_closest_approach(p_rel, v_rel, horizon_s=horizon_s)
+    approach_vel = v_rel + tca * GRAVITY_ENU
+    return DodgePlan(tca, miss, miss_vec, dodge_direction(miss_vec, approach_vel))
