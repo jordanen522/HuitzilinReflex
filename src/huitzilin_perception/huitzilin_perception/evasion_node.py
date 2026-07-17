@@ -67,6 +67,16 @@ SWEEPABLE = {
     "dodge_duration_s", "min_track_updates",
 }
 
+# Declared params that are consumed exactly once at node start (tracker
+# construction, topic wiring, timer creation). Rejecting writes keeps the
+# ROS parameter surface honest: what `ros2 param get` shows is what runs.
+FIXED_AT_START = {
+    "centroid_topic", "odom_topic", "evade_topic", "alarm_topic",
+    "intercept_topic", "event_topic", "marker_topic", "patrol_service",
+    "process_accel_std", "meas_std_m", "init_vel_std", "track_timeout_s",
+    "evade_cmd_rate_hz",
+}
+
 
 class EvadeState(Enum):
     TRACKING = "TRACKING"
@@ -164,7 +174,12 @@ class EvasionNode(Node):
 
     def _on_param_set(self, params) -> SetParametersResult:
         for prm in params:
-            if prm.name in SWEEPABLE:
+            if prm.name in FIXED_AT_START:
+                return SetParametersResult(
+                    successful=False,
+                    reason=f"{prm.name} is fixed at node start — "
+                           "edit params/evasion.yaml and restart")
+            if prm.name in self._p:  # SWEEPABLE + live-read tunables
                 self._p[prm.name] = prm.value
                 self.get_logger().info(f"param {prm.name} -> {prm.value}")
         return SetParametersResult(successful=True)
