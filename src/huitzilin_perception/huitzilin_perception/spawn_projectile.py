@@ -33,6 +33,13 @@ DESIGN NOTES
   This is cleaner than a post-spawn force impulse in Harmonic.
 - All gz service calls are made via subprocess (gz CLI) — the Python
   gz bindings are not stable across Harmonic patch versions.
+- Spawn geometry (position + velocity) is computed by
+  `ballistics.compute_spawn`, shared with the Week 4 dodge battery so both
+  use the exact same math. `compensate_gravity:=true` lofts the throw so
+  the parabola arrives at true drone altitude (a real hit trajectory)
+  instead of the Week 3 flat throw, which passes below the target.
+- `gz_spawn`/`gz_remove`/`_run_gz` are module-level (not node methods) so
+  dodge_battery.py can reuse them without needing a live rclpy node.
 """
 
 from __future__ import annotations
@@ -48,6 +55,8 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 
+from huitzilin_perception.ballistics import compute_spawn
+
 RELIABLE_QOS = QoSProfile(
     reliability=QoSReliabilityPolicy.RELIABLE,
     history=QoSHistoryPolicy.KEEP_LAST,
@@ -58,6 +67,57 @@ RELIABLE_QOS = QoSProfile(
 # Vertical-offset scenarios (N04) therefore require the drone to fly high
 # enough that drone_z + offset_vertical_m >= MIN_SPAWN_Z.
 MIN_SPAWN_Z = 0.3
+
+
+def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
+             timeout_s: float = 5.0) -> tuple[bool, str]:
+    """Spawn `model_uri` as `name` at ENU `position` with initial `velocity`
+    via the Gazebo Harmonic EntityFactory service. Returns (ok, message).
+    Module-level so dodge_battery.py can reuse it without a node."""
+    factory_json = json.dumps({
+        "sdf_filename": model_uri.replace("model://", ""),
+        "name": name,
+        "pose": {
+            "position": {"x": float(position[0]), "y": float(position[1]),
+                         "z": float(position[2])},
+            "orientation": {"x": 0, "y": 0, "z": 0, "w": 1},
+        },
+        "initial_linear_velocity": {"x": float(velocity[0]),
+                                    "y": float(velocity[1]),
+                                    "z": float(velocity[2])},
+    })
+    cmd = [
+        "gz", "service", "-s", f"/world/{world}/create",
+        "--reqtype", "gz.msgs.EntityFactory", "--reptype", "gz.msgs.Boolean",
+        "--timeout", "2000", "--req", factory_json,
+    ]
+    return _run_gz(cmd, timeout_s)
+
+
+def gz_remove(world: str, name: str, timeout_s: float = 5.0) -> tuple[bool, str]:
+    """Remove model `name` from the world (gz.msgs.Entity type 2 = MODEL).
+    The dodge battery calls this between runs so spent balls don't litter
+    the ground plane and confuse the depth background model."""
+    req = json.dumps({"name": name, "type": 2})
+    cmd = [
+        "gz", "service", "-s", f"/world/{world}/remove",
+        "--reqtype", "gz.msgs.Entity", "--reptype", "gz.msgs.Boolean",
+        "--timeout", "2000", "--req", req,
+    ]
+    return _run_gz(cmd, timeout_s)
+
+
+def _run_gz(cmd: list[str], timeout_s: float) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return False, "gz service timed out"
+    except FileNotFoundError:
+        return False, "'gz' command not found — is Gazebo Harmonic installed?"
+    if result.returncode != 0:
+        return False, f"gz service failed: {result.stderr.strip()}"
+    return True, result.stdout.strip()
 
 
 class SpawnProjectileNode(Node):
@@ -78,6 +138,7 @@ class SpawnProjectileNode(Node):
         self.declare_parameter("offset_vertical_m", 0.0)    # relative to drone; negative = below (N04)
         self.declare_parameter("world_name", "huitzilin_runway")
         self.declare_parameter("model_uri", "model://projectile")
+        self.declare_parameter("compensate_gravity", False)  # loft to arrive at drone altitude (Week 4 battery)
 
         self._scenario_id  = self.get_parameter("scenario_id").value
         self._speed        = self.get_parameter("speed_mps").value
@@ -87,6 +148,7 @@ class SpawnProjectileNode(Node):
         self._offset_vert  = self.get_parameter("offset_vertical_m").value
         self._world        = self.get_parameter("world_name").value
         self._model_uri    = self.get_parameter("model_uri").value
+        self._comp_gravity  = self.get_parameter("compensate_gravity").value
 
         self._latest_odom: Optional[Odometry] = None
         self._spawned = False
@@ -126,11 +188,16 @@ class SpawnProjectileNode(Node):
             1.0 - 2.0 * (q.y * q.y + q.z * q.z),
         )
 
-        # Spawn point: forward of drone by offset_forward_m, laterally by miss_distance
-        angle_rad = math.radians(self._angle_deg)
-        spawn_x = dx + self._offset_fwd * math.cos(yaw) + self._miss_dist * math.sin(yaw)
-        spawn_y = dy + self._offset_fwd * math.sin(yaw) - self._miss_dist * math.cos(yaw)
-        spawn_z = dz + self._offset_vert  # 0 = drone altitude; negative = below (N04)
+        plan = compute_spawn(
+            (dx, dy, dz), yaw,
+            speed_mps=self._speed,
+            approach_angle_deg=self._angle_deg,
+            miss_distance_m=self._miss_dist,
+            offset_forward_m=self._offset_fwd,
+            offset_vertical_m=self._offset_vert,
+            compensate_gravity=self._comp_gravity,
+        )
+        spawn_x, spawn_y, spawn_z = plan.position
 
         if spawn_z < MIN_SPAWN_Z:
             self.get_logger().error(
@@ -142,51 +209,19 @@ class SpawnProjectileNode(Node):
             )
             return
 
-        # Velocity: toward the drone (opposite of spawn direction)
-        # approach_angle tilts the trajectory off head-on
-        vel_dir_x = -math.cos(yaw + angle_rad)
-        vel_dir_y = -math.sin(yaw + angle_rad)
-        vel_dir_z = 0.0  # horizontal throw; adjust for arc if needed
-        vx = self._speed * vel_dir_x
-        vy = self._speed * vel_dir_y
-        vz = self._speed * vel_dir_z
-
         model_name = f"projectile_{self._scenario_id}_{int(time.time())}"
-
-        # Build the gz EntityFactory proto as JSON string
-        factory_json = json.dumps({
-            "sdf_filename": self._model_uri.replace("model://", ""),
-            "name": model_name,
-            "pose": {
-                "position": {"x": spawn_x, "y": spawn_y, "z": spawn_z},
-                "orientation": {"x": 0, "y": 0, "z": 0, "w": 1},
-            },
-            "initial_linear_velocity": {"x": vx, "y": vy, "z": vz},
-        })
-
-        cmd = [
-            "gz", "service",
-            "-s", f"/world/{self._world}/create",
-            "--reqtype", "gz.msgs.EntityFactory",
-            "--reptype", "gz.msgs.Boolean",
-            "--timeout", "2000",
-            "--req", factory_json,
-        ]
-
+        vx, vy, vz = plan.velocity
         self.get_logger().info(
             f"Spawning '{model_name}' at ({spawn_x:.2f}, {spawn_y:.2f}, {spawn_z:.2f}) "
-            f"vel=({vx:.2f}, {vy:.2f}, {vz:.2f}) m/s"
+            f"vel=({vx:.2f}, {vy:.2f}, {vz:.2f}) m/s "
+            f"(gravity compensation {'ON' if self._comp_gravity else 'off'})"
         )
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5.0)
-            if result.returncode != 0:
-                self.get_logger().error(f"gz service failed: {result.stderr}")
-            else:
-                self.get_logger().info(f"Spawn OK: {result.stdout.strip()}")
-        except subprocess.TimeoutExpired:
-            self.get_logger().error("gz service timed out")
-        except FileNotFoundError:
-            self.get_logger().error("'gz' command not found — is Gazebo Harmonic installed?")
+        ok, msg = gz_spawn(self._world, self._model_uri, model_name,
+                           plan.position, plan.velocity)
+        if ok:
+            self.get_logger().info(f"Spawn OK: {msg}")
+        else:
+            self.get_logger().error(msg)
 
 
 def main(args=None) -> None:
