@@ -58,6 +58,15 @@ RELIABLE_QOS = QoSProfile(
     depth=10,
 )
 
+# Best-effort matches a publisher of EITHER reliability; a RELIABLE
+# subscriber would silently never match a best-effort bridge publisher
+# and every run would die on the pose-stream pre-flight timeout.
+SENSOR_QOS = QoSProfile(
+    reliability=QoSReliabilityPolicy.BEST_EFFORT,
+    history=QoSHistoryPolicy.KEEP_LAST,
+    depth=5,
+)
+
 ODOM_WAIT_TIMEOUT_WALL_S = 60.0   # bring-up bound (wall clock; generous, exits early)
 POSE_STREAM_TIMEOUT_WALL_S = 30.0
 
@@ -108,7 +117,7 @@ class DodgeBatteryNode(Node):
         self.create_subscription(Odometry, "/huitzilin/odom",
                                  self._odom_cb, RELIABLE_QOS)
         self.create_subscription(TFMessage, "/gz/dynamic_poses",
-                                 self._pose_cb, RELIABLE_QOS)
+                                 self._pose_cb, SENSOR_QOS)
         self.create_subscription(String, "/threat/evade_event",
                                  self._event_cb, RELIABLE_QOS)
 
@@ -221,9 +230,22 @@ class DodgeBatteryNode(Node):
                     self.get_logger().warn(f"unknown run id {rid}; skipping")
                     continue
                 scen = runs[rid]
-                n_rep = int(repeats_override or scen.get("repeats", 1))
+                n_rep = int(repeats_override if repeats_override is not None
+                            else scen.get("repeats", 1))
                 for rep in range(n_rep):
-                    row = self._one_run(scen, rep, combo)
+                    try:
+                        row = self._one_run(scen, rep, combo)
+                    except Exception as e:  # noqa: BLE001 — a crashed run must
+                        # still produce a scored report, not kill the battery
+                        with self._lock:
+                            self._listening = False
+                            self._active_ball = None
+                        self.get_logger().error(f"run {rid} r{rep} crashed: {e}")
+                        row = {"combo": self._combo_str(combo), "id": rid,
+                               "rep": rep,
+                               "expect_dodge": bool(scen.get("expect_dodge", False)),
+                               "error": True, "success": False,
+                               "note": f"harness exception: {e}"}
                     rows.append(row)
                     mark = "✓" if row.get("success") else "✗"
                     self.get_logger().info(
