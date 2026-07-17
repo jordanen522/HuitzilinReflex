@@ -12,6 +12,9 @@ defaults:
   offset_forward_m: 6.0
   offset_vertical_m: 0.0
   compensate_gravity: true
+  # oblique runs aim the spawn ray at the drone — without this a 30° "hit"
+  # passes ~3 m wide
+  aim_at_drone: true
   repeats: 3
 
 runs:

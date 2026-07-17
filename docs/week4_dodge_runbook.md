@@ -69,6 +69,8 @@ Grids `dodge_speed_mps × trigger_horizon_s` (3×2) over B02/B03/B06 via
 `ros2 param set` on the live evasion node — no restarts. Results →
 `/tmp/week4_sweep.{txt,csv}`. Pick the winning combo, write it into
 `params/evasion.yaml`, and re-run the full battery once to confirm.
+The battery restores the baseline evasion params after the sweep; if a
+sweep aborts partway, restart T3 before running the confirmation battery.
 
 ## 5. What "done" looks like (Week 4 DoD)
 

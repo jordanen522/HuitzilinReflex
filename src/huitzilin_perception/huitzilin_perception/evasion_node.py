@@ -61,7 +61,10 @@ RELIABLE_QOS = QoSProfile(
     depth=10,
 )
 
-# Params the dodge battery sweeps at runtime (ros2 param set /evasion ...).
+# Documented sweep surface used by the dodge battery's sweep config (ros2
+# param set /evasion ...). Any live-read key in self._p outside
+# FIXED_AT_START also accepts writes -- this set is the subset the battery
+# actually grids, not an exhaustive allow-list.
 SWEEPABLE = {
     "dodge_speed_mps", "threat_radius_m", "trigger_horizon_s",
     "dodge_duration_s", "min_track_updates",
@@ -82,6 +85,7 @@ class EvadeState(Enum):
     TRACKING = "TRACKING"
     EVADING = "EVADING"
     RECOVERING = "RECOVERING"
+    HANDOFF = "HANDOFF"
 
 
 class EvasionNode(Node):
@@ -111,6 +115,7 @@ class EvasionNode(Node):
         self.declare_parameter("dodge_speed_mps", 1.5)
         self.declare_parameter("dodge_duration_s", 1.0)
         self.declare_parameter("recover_hold_s", 0.5)
+        self.declare_parameter("patrol_handoff_s", 0.8)
         self.declare_parameter("evade_cmd_rate_hz", 20.0)
         self.declare_parameter("auto_resume_patrol", True)
 
@@ -123,7 +128,8 @@ class EvasionNode(Node):
                 "init_vel_std", "track_timeout_s", "min_track_updates",
                 "threat_radius_m", "trigger_horizon_s", "prediction_horizon_s",
                 "latency_budget_s", "dodge_speed_mps", "dodge_duration_s",
-                "recover_hold_s", "evade_cmd_rate_hz", "auto_resume_patrol",
+                "recover_hold_s", "patrol_handoff_s", "evade_cmd_rate_hz",
+                "auto_resume_patrol",
             )
         }
         self.add_on_set_parameters_callback(self._on_param_set)
@@ -274,6 +280,14 @@ class EvasionNode(Node):
         self._phase_end = now + Duration(
             seconds=float(self._p["dodge_duration_s"]))
 
+        # Publish the first evade command immediately so the command path
+        # doesn't wait up to one 20 Hz tick for _evade_tick to fire it.
+        cmd = Twist()
+        cmd.linear.x = float(self._dodge_cmd_body[0])
+        cmd.linear.y = float(self._dodge_cmd_body[1])
+        cmd.linear.z = float(self._dodge_cmd_body[2])
+        self._evade_pub.publish(cmd)
+
     def _evade_tick(self) -> None:
         if self._state is EvadeState.TRACKING:
             return
@@ -294,6 +308,18 @@ class EvasionNode(Node):
                     seconds=float(self._p["recover_hold_s"]))
         elif self._state is EvadeState.RECOVERING:
             self._evade_pub.publish(Twist())      # hold zero while settling
+            if now >= self._phase_end:
+                # Don't resume patrol yet: the bridge treats /cmd/evade as
+                # fresh for cmd_timeout_s after our last zero publish and
+                # would keep streaming zero-velocity setpoints that fight
+                # patrol's position setpoints. Go silent on /cmd/evade for
+                # patrol_handoff_s and let the bridge's own stale-evade
+                # handback (a single zero) cover the gap instead.
+                self._state = EvadeState.HANDOFF
+                self._phase_end = now + Duration(
+                    seconds=float(self._p["patrol_handoff_s"]))
+        elif self._state is EvadeState.HANDOFF:
+            # Publish nothing here: this is the silent gap.
             if now >= self._phase_end:
                 if bool(self._p["auto_resume_patrol"]):
                     self._set_patrol(True)

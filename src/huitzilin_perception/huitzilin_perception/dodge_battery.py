@@ -43,7 +43,7 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
-from rcl_interfaces.srv import SetParameters
+from rcl_interfaces.srv import GetParameters, SetParameters
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import String
@@ -121,6 +121,13 @@ class DodgeBatteryNode(Node):
         self.create_subscription(String, "/threat/evade_event",
                                  self._event_cb, RELIABLE_QOS)
 
+        # Created once and reused for every sweep combo + the baseline
+        # snapshot/restore — avoids leaking a service client per combo.
+        self._set_params_cli = self.create_client(
+            SetParameters, f"{self._evasion_name}/set_parameters")
+        self._get_params_cli = self.create_client(
+            GetParameters, f"{self._evasion_name}/get_parameters")
+
         self.get_logger().info(
             f"dodge_battery ready | config={self._battery_f} "
             f"sweep={self._sweep_f or '-'} "
@@ -165,10 +172,20 @@ class DodgeBatteryNode(Node):
     def _sim_now(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9
 
-    def _wait_sim(self, duration_s: float) -> None:
+    def _wait_sim(self, duration_s: float) -> bool:
+        """Wait for duration_s of SIM time. Returns True if it completed
+        normally, False if the wall-clock bail-out fired (stalled /clock)."""
+        max_wall_s = duration_s * 10.0 + 30.0
         t0 = self._sim_now()
+        t0_wall = time.monotonic()
         while rclpy.ok() and self._sim_now() - t0 < duration_s:
+            if time.monotonic() - t0_wall > max_wall_s:
+                self.get_logger().warn(
+                    f"_wait_sim bailed after {max_wall_s:.0f} s wall time "
+                    f"waiting for {duration_s} s sim time — /clock stalled?")
+                return False
             time.sleep(0.02)  # wall-sleep; the WINDOW is judged in sim time
+        return True
 
     def _wait_wall_for(self, predicate, timeout_s: float) -> bool:
         t0 = time.monotonic()
@@ -192,6 +209,7 @@ class DodgeBatteryNode(Node):
         combos = [{}]
         selected = list(runs)
         repeats_override = None
+        sweep_keys = None
         if self._sweep_f:
             sweep_path = Path(self._sweep_f)
             if not sweep_path.exists():
@@ -199,9 +217,9 @@ class DodgeBatteryNode(Node):
                 return 1
             with open(sweep_path) as f:
                 sweep = yaml.safe_load(f)
-            keys = sorted(sweep["parameters"])
-            combos = [dict(zip(keys, vals)) for vals in
-                      itertools.product(*(sweep["parameters"][k] for k in keys))]
+            sweep_keys = sorted(sweep["parameters"])
+            combos = [dict(zip(sweep_keys, vals)) for vals in
+                      itertools.product(*(sweep["parameters"][k] for k in sweep_keys))]
             selected = sweep.get("runs", selected)
             repeats_override = sweep.get("repeats")
 
@@ -218,41 +236,61 @@ class DodgeBatteryNode(Node):
             return 1
 
         rows = []
-        for combo in combos:
-            if combo and not self._apply_params(combo):
-                rows.append({"combo": self._combo_str(combo), "id": "-",
-                             "rep": 0, "error": True, "success": False,
+        baseline_snapshot = None
+        if sweep_keys is not None:
+            baseline_snapshot = self._snapshot_params(sweep_keys)
+            if baseline_snapshot is None:
+                self.get_logger().error(
+                    "could not snapshot baseline params — sweep aborted")
+                rows.append({"combo": "baseline", "id": "-", "rep": 0,
+                             "error": True, "success": False,
                              "expect_dodge": False,
-                             "note": "set_parameters failed"})
-                continue
-            for rid in selected:
-                if rid not in runs:
-                    self.get_logger().warn(f"unknown run id {rid}; skipping")
+                             "note": "could not snapshot baseline params — "
+                                     "sweep aborted"})
+                return self._report(rows)
+
+        try:
+            for combo in combos:
+                if combo and not self._apply_params(combo):
+                    rows.append({"combo": self._combo_str(combo), "id": "-",
+                                 "rep": 0, "error": True, "success": False,
+                                 "expect_dodge": False,
+                                 "note": "set_parameters failed"})
                     continue
-                scen = runs[rid]
-                n_rep = int(repeats_override if repeats_override is not None
-                            else scen.get("repeats", 1))
-                for rep in range(n_rep):
-                    try:
-                        row = self._one_run(scen, rep, combo)
-                    except Exception as e:  # noqa: BLE001 — a crashed run must
-                        # still produce a scored report, not kill the battery
-                        with self._lock:
-                            self._listening = False
-                            self._active_ball = None
-                        self.get_logger().error(f"run {rid} r{rep} crashed: {e}")
-                        row = {"combo": self._combo_str(combo), "id": rid,
-                               "rep": rep,
-                               "expect_dodge": bool(scen.get("expect_dodge", False)),
-                               "error": True, "success": False,
-                               "note": f"harness exception: {e}"}
-                    rows.append(row)
-                    mark = "✓" if row.get("success") else "✗"
-                    self.get_logger().info(
-                        f"  [{mark}] {row['combo']:<24} {row['id']:>4} r{rep} "
-                        f"dodged={row.get('dodged')} "
-                        f"min={row.get('min_dist_m', float('nan'))} m "
-                        f"lat={row.get('latency_ms', '-')} ms | {row['note']}")
+                for rid in selected:
+                    if rid not in runs:
+                        self.get_logger().warn(f"unknown run id {rid}; skipping")
+                        continue
+                    scen = runs[rid]
+                    n_rep = int(repeats_override if repeats_override is not None
+                                else scen.get("repeats", 1))
+                    for rep in range(n_rep):
+                        try:
+                            row = self._one_run(scen, rep, combo)
+                        except Exception as e:  # noqa: BLE001 — a crashed run must
+                            # still produce a scored report, not kill the battery
+                            with self._lock:
+                                self._listening = False
+                                self._active_ball = None
+                            self.get_logger().error(f"run {rid} r{rep} crashed: {e}")
+                            row = {"combo": self._combo_str(combo), "id": rid,
+                                   "rep": rep,
+                                   "expect_dodge": bool(scen.get("expect_dodge", False)),
+                                   "error": True, "success": False,
+                                   "note": f"harness exception: {e}"}
+                        rows.append(row)
+                        mark = "✓" if row.get("success") else "✗"
+                        self.get_logger().info(
+                            f"  [{mark}] {row['combo']:<24} {row['id']:>4} r{rep} "
+                            f"dodged={row.get('dodged')} "
+                            f"min={row.get('min_dist_m', float('nan'))} m "
+                            f"lat={row.get('latency_ms', '-')} ms | {row['note']}")
+        finally:
+            if baseline_snapshot is not None:
+                if not self._apply_params(baseline_snapshot):
+                    self.get_logger().error(
+                        "could not restore baseline evasion params after sweep "
+                        f"— manually restore: {baseline_snapshot}")
 
         return self._report(rows)
 
@@ -278,6 +316,7 @@ class DodgeBatteryNode(Node):
             offset_forward_m=float(scen.get("offset_forward_m", 6.0)),
             offset_vertical_m=float(scen.get("offset_vertical_m", 0.0)),
             compensate_gravity=bool(scen.get("compensate_gravity", True)),
+            aim_at_drone=bool(scen.get("aim_at_drone", False)),
         )
         if plan.position[2] < MIN_SPAWN_Z:
             return {**base, "error": True, "success": False,
@@ -298,7 +337,14 @@ class DodgeBatteryNode(Node):
                 self._active_ball = None
             return {**base, "error": True, "success": False, "note": msg}
 
-        self._wait_sim(self._window_s)
+        window_ok = self._wait_sim(self._window_s)
+        if not window_ok:
+            with self._lock:
+                self._listening = False
+                self._active_ball = None
+            gz_remove(self._world, name)
+            return {**base, "error": True, "success": False,
+                    "note": "sim clock stalled mid-window"}
 
         with self._lock:
             self._listening = False
@@ -308,6 +354,8 @@ class DodgeBatteryNode(Node):
 
         gz_remove(self._world, name)
         self._wait_sim(self._settle_s)   # let patrol resume + bg model settle
+        # (settle-wait result ignored — a stall here doesn't invalidate the
+        # run that already completed above)
 
         dodged = len(events) > 0
         latency_ms = round(events[0]["latency_s"] * 1000.0, 1) if dodged else None
@@ -329,9 +377,39 @@ class DodgeBatteryNode(Node):
                 "latency_ms": latency_ms, "min_dist_m": round(min_dist, 3),
                 "success": success, "note": note}
 
+    def _snapshot_params(self, names: list) -> dict | None:
+        """Read current values of `names` from /evasion via get_parameters,
+        for restoring the node's baseline config after a sweep."""
+        if not self._get_params_cli.wait_for_service(timeout_sec=10.0):
+            self.get_logger().error(
+                f"{self._evasion_name}/get_parameters unavailable")
+            return None
+        req = GetParameters.Request()
+        req.names = list(names)
+        fut = self._get_params_cli.call_async(req)
+        if not self._wait_wall_for(fut.done, 10.0):
+            self.get_logger().error("get_parameters call timed out")
+            return None
+        result = fut.result()
+        if result is None:
+            self.get_logger().error("get_parameters returned no result")
+            return None
+        snapshot = {}
+        for name, pv in zip(names, result.values):
+            if pv.type == ParameterType.PARAMETER_DOUBLE:
+                snapshot[name] = pv.double_value
+            elif pv.type == ParameterType.PARAMETER_INTEGER:
+                snapshot[name] = pv.integer_value
+            elif pv.type == ParameterType.PARAMETER_BOOL:
+                snapshot[name] = pv.bool_value
+            else:
+                self.get_logger().error(
+                    f"unexpected parameter type for {name}: {pv.type}")
+                return None
+        return snapshot
+
     def _apply_params(self, combo: dict) -> bool:
-        cli = self.create_client(
-            SetParameters, f"{self._evasion_name}/set_parameters")
+        cli = self._set_params_cli
         if not cli.wait_for_service(timeout_sec=10.0):
             self.get_logger().error(
                 f"{self._evasion_name}/set_parameters unavailable")

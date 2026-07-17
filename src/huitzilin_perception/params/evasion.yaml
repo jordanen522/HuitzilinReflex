@@ -22,5 +22,8 @@ evasion:
     dodge_speed_mps: 1.5       # master doc: ~1.5 m/s velocity spike
     dodge_duration_s: 1.0      # how long the spike streams
     recover_hold_s: 0.5        # zero-velocity settle before patrol resumes
+    patrol_handoff_s: 0.8      # silent gap before patrol resumes; MUST exceed
+                               # the bridge cmd_timeout_s (0.7) or zero-velocity
+                               # handback fights patrol position setpoints
     evade_cmd_rate_hz: 20.0    # /cmd/evade stream rate while evading
     auto_resume_patrol: true   # call /huitzilin/start_patrol true after recovery

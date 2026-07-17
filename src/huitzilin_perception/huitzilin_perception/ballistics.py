@@ -17,7 +17,9 @@ from typing import NamedTuple
 
 import numpy as np
 
-G_MPS2 = 9.80665  # Gazebo Harmonic default world gravity
+G_MPS2 = 9.80665  # standard gravity; Gazebo's default world gravity is 9.8 — the
+                  # 0.07% delta is ~2 mm over a battery throw, absorbed by the KF
+                  # process noise
 
 
 class SpawnPlan(NamedTuple):
@@ -49,6 +51,7 @@ def compute_spawn(
     offset_forward_m: float = 6.0,
     offset_vertical_m: float = 0.0,
     compensate_gravity: bool = False,
+    aim_at_drone: bool = False,
     g: float = G_MPS2,
 ) -> SpawnPlan:
     """
@@ -66,14 +69,29 @@ def compute_spawn(
           vz0 = 0.5*g*t - offset_vertical_m/t
       With offset_vertical_m=0 the ball arrives AT drone altitude — a true
       hit trajectory for the Week 4 dodge battery.
+
+    aim_at_drone=False (default) -> Week 3-compatible, BYTE-IDENTICAL geometry:
+      the spawn ray (and its lateral-miss perpendicular) uses drone_yaw, while
+      the velocity is independently tilted by approach_angle_deg. This means
+      approach_angle_deg tilts the velocity but does NOT aim the throw at the
+      drone — a nominal 30 deg "hit" scenario actually passes
+      ~offset_forward_m * sin(angle_rad) away from the drone (the Week 3
+      crossing-trajectory semantic; this bit us once and is why Week 4 needs
+      aim_at_drone=True for oblique scenarios).
+    aim_at_drone=True  -> the spawn ray AND the lateral-miss perpendicular use
+      (yaw + angle_rad) instead of yaw, so the ball's straight-line path
+      genuinely closes on the drone with closest approach == miss_distance_m,
+      regardless of approach_angle_deg. Velocity direction is unchanged
+      (still -speed * unit(yaw + angle_rad)).
     """
     dx, dy, dz = (float(v) for v in drone_enu)
     yaw = float(drone_yaw)
     angle_rad = math.radians(approach_angle_deg)
+    ray = yaw + (angle_rad if aim_at_drone else 0.0)
 
     spawn = np.array([
-        dx + offset_forward_m * math.cos(yaw) + miss_distance_m * math.sin(yaw),
-        dy + offset_forward_m * math.sin(yaw) - miss_distance_m * math.cos(yaw),
+        dx + offset_forward_m * math.cos(ray) + miss_distance_m * math.sin(ray),
+        dy + offset_forward_m * math.sin(ray) - miss_distance_m * math.cos(ray),
         dz + offset_vertical_m,
     ])
 

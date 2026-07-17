@@ -58,3 +58,29 @@ def test_gravity_compensation_nulls_vertical_offset():
 def test_gravity_comp_requires_positive_speed():
     with pytest.raises(ValueError):
         compute_spawn((0.0, 0.0, 2.0), 0.0, speed_mps=0.0, compensate_gravity=True)
+
+
+def test_aim_at_drone_oblique_throw_actually_hits():
+    plan = compute_spawn((0.0, 0.0, 2.0), 0.0, speed_mps=8.0,
+                         approach_angle_deg=30.0, compensate_gravity=True,
+                         aim_at_drone=True)
+    t_flight = 6.0 / 8.0
+    p = ballistic_positions(plan.position, plan.velocity, t_flight)[0]
+    np.testing.assert_allclose(p, [0.0, 0.0, 2.0], atol=1e-9)
+
+
+def test_aim_at_drone_preserves_miss_distance():
+    plan = compute_spawn((0.0, 0.0, 2.0), 0.0, speed_mps=8.0,
+                         approach_angle_deg=30.0, miss_distance_m=0.5,
+                         aim_at_drone=True)
+    t_flight = 6.0 / 8.0
+    p = ballistic_positions(plan.position, plan.velocity, t_flight)[0]
+    assert np.linalg.norm(p[:2]) == pytest.approx(0.5, abs=1e-9)
+
+
+def test_aim_at_drone_false_is_week3_identical():
+    a = compute_spawn((0.0, 0.0, 2.0), 0.3, speed_mps=8.0, approach_angle_deg=30.0)
+    b = compute_spawn((0.0, 0.0, 2.0), 0.3, speed_mps=8.0, approach_angle_deg=30.0,
+                      aim_at_drone=False)
+    np.testing.assert_allclose(a.position, b.position)
+    np.testing.assert_allclose(a.velocity, b.velocity)
