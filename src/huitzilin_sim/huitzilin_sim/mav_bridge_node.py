@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ROS 2 Jazzy wrapper around MavBridge: cmd_vel in, odom/state out, services."""
+"""ROS 2 Jazzy wrapper around MavBridge: cmd_vel/evade in, odom/state out, services."""
 import json
 import math
 import threading
@@ -41,8 +41,18 @@ class MavBridgeNode(Node):
         self._lock = threading.Lock()
         self._cmd_ever_received = False   # don't send setpoints until patrol starts
 
+        # evade override state: /cmd/evade preempts /huitzilin/cmd_vel while
+        # fresh (Week 4). Separate from cmd_vel so a finished dodge hands
+        # control back cleanly instead of leaving a zero-velocity stream
+        # fighting patrol's position setpoints.
+        self._last_evade = (0.0, 0.0, 0.0, 0.0)
+        self._last_evade_t = self.get_clock().now()
+        self._evade_ever_received = False
+        self._evade_active = False
+
         # --- ROS interfaces (contracts: see playbook §3) ---
         self.create_subscription(Twist, "/huitzilin/cmd_vel", self._on_cmd_vel, 10)
+        self.create_subscription(Twist, "/cmd/evade", self._on_evade, 10)
         self.odom_pub = self.create_publisher(Odometry, "/huitzilin/odom", 10)
         self.state_pub = self.create_publisher(String, "/huitzilin/state", 10)
 
@@ -71,16 +81,47 @@ class MavBridgeNode(Node):
             self._last_cmd_t = self.get_clock().now()
             self._cmd_ever_received = True
 
+    # -- /cmd/evade: same FLU->NED mapping as cmd_vel, but takes priority
+    def _on_evade(self, msg: Twist):
+        vx = msg.linear.x
+        vy = -msg.linear.y                 # FLU y(left) -> NED y(right)
+        vz = -msg.linear.z                 # up -> down
+        yaw_rate = -msg.angular.z          # ENU yaw(ccw+) -> NED yaw(cw+)
+        with self._lock:
+            self._last_evade = (vx, vy, vz, yaw_rate)
+            self._last_evade_t = self.get_clock().now()
+            self._evade_ever_received = True
+
     def _tick_setpoint(self):
-        """Stream the last command at a fixed rate; zero-hold if stale (fail-safe).
-        Does nothing until the first cmd_vel arrives so takeoff/hover aren't disrupted."""
-        if not self._cmd_ever_received:
-            return
+        """Stream the freshest command at a fixed rate.
+
+        Priority: fresh /cmd/evade > /huitzilin/cmd_vel. When an evade goes
+        stale, send ONE zero setpoint (so ArduPilot doesn't coast on the last
+        dodge velocity), then fall back — to cmd_vel zero-hold if patrol ever
+        commanded velocity, or to full silence (patrol position mode owns the
+        vehicle again)."""
         now = self.get_clock().now()
         with self._lock:
-            age = (now - self._last_cmd_t).nanoseconds * 1e-9
+            evade_fresh = False
+            if self._evade_ever_received:
+                e_age = (now - self._last_evade_t).nanoseconds * 1e-9
+                evade_fresh = e_age <= self.cmd_timeout
+            evx, evy, evz, eyr = self._last_evade
+            cmd_age = (now - self._last_cmd_t).nanoseconds * 1e-9
             vx, vy, vz, yr = self._last_cmd
-        if age > self.cmd_timeout:
+
+        if evade_fresh:
+            self._evade_active = True
+            self.bridge.send_velocity_body(evx, evy, evz, eyr)
+            return
+        if self._evade_active:
+            self._evade_active = False
+            self.bridge.send_velocity_body(0.0, 0.0, 0.0, 0.0)  # handback
+            return
+
+        if not self._cmd_ever_received:
+            return
+        if cmd_age > self.cmd_timeout:
             vx = vy = vz = yr = 0.0        # dropout -> calm hold, never a coast/lunge
         self.bridge.send_velocity_body(vx, vy, vz, yr)
 
