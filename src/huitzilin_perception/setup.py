@@ -6,7 +6,7 @@ package_name = "huitzilin_perception"
 
 setup(
     name=package_name,
-    version="0.3.0",
+    version="0.4.0",
     packages=find_packages(exclude=["test"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/huitzilin_perception"]),
@@ -24,7 +24,7 @@ setup(
     zip_safe=True,
     maintainer="Jordan",
     maintainer_email="j602eng1z@gmail.com",
-    description="HuitzilinReflex Week 3: perception pipeline (depth, TF, detection, scenarios).",
+    description="HuitzilinReflex Weeks 3-4: perception pipeline + Kalman evasion.",
     license="MIT",
     tests_require=["pytest"],
     entry_points={
@@ -32,6 +32,7 @@ setup(
             "detector = huitzilin_perception.detector_node:main",
             "spawn_projectile = huitzilin_perception.spawn_projectile:main",
             "score_bags = huitzilin_perception.score_bags:main",
+            "evasion = huitzilin_perception.evasion_node:main",
         ],
     },
 )

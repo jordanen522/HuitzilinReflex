@@ -1,0 +1,26 @@
+# evasion.yaml — Week 4 evasion-node tuning (see docs/WEEK4_PLAN.md).
+#
+# Sweepable at runtime via `ros2 param set /evasion <key> <val>` (the dodge
+# battery's sweep mode uses this): dodge_speed_mps, threat_radius_m,
+# trigger_horizon_s, dodge_duration_s, min_track_updates.
+# Kalman keys are fixed at node start (tracker is constructed once).
+
+evasion:
+  ros__parameters:
+    # ── Kalman filter (fixed at node start) ──────────────────────────────
+    process_accel_std: 3.0     # m/s^2 accel noise; absorbs drag/stereo mismatch
+    meas_std_m: 0.15           # centroid measurement noise (stereo + clustering)
+    init_vel_std: 15.0         # m/s prior; covers throws up to 14 m/s
+    track_timeout_s: 0.5       # sim s of silence before a track is dropped
+    # ── Trigger policy ───────────────────────────────────────────────────
+    min_track_updates: 3       # confirmations before a dodge may fire
+    threat_radius_m: 0.75      # predicted pass inside this radius -> dodge
+    trigger_horizon_s: 1.5     # only dodge if TCA is sooner than this
+    prediction_horizon_s: 3.0  # numeric closest-approach search window
+    latency_budget_s: 0.15     # centroid stamp -> dodge command, sim s
+    # ── Dodge maneuver ───────────────────────────────────────────────────
+    dodge_speed_mps: 1.5       # master doc: ~1.5 m/s velocity spike
+    dodge_duration_s: 1.0      # how long the spike streams
+    recover_hold_s: 0.5        # zero-velocity settle before patrol resumes
+    evade_cmd_rate_hz: 20.0    # /cmd/evade stream rate while evading
+    auto_resume_patrol: true   # call /huitzilin/start_patrol true after recovery
