@@ -1,18 +1,19 @@
 # Node Graph — Project HuitzilinReflex
 
-Active namespace is `/huitzilin/*`. Weeks 1–3 contracts are **active**; Week 4–6
-contracts are provisional until their nodes land. In Week 4 the evasion path
-(`/cmd/evade`) commands through the same `mav_bridge` velocity path.
+Active namespace is `/huitzilin/*`. Weeks 1–4 contracts are **active**; Week 5–6
+contracts are provisional until their nodes land. The evasion path
+(`/cmd/evade`) commands through the same `mav_bridge` velocity path and preempts
+`/huitzilin/cmd_vel` while fresh.
 
 ## Nodes
 
 | Node | Responsibility | Inputs | Outputs | Rate | Phase | Runs on |
 |---|---|---|---|---|---|---|
-| mav_bridge | ROS 2 ↔ ArduPilot bridge (pymavlink); single NED↔ENU conversion point | `/huitzilin/cmd_vel`; services `/huitzilin/arm`, `/huitzilin/takeoff`, `/huitzilin/set_mode` | `/huitzilin/odom`, `/huitzilin/state`; ArduPilot FC | 30 Hz odom | **active (Wk2)** | Pi / dev PC |
+| mav_bridge | ROS 2 ↔ ArduPilot bridge (pymavlink); single NED↔ENU conversion point | `/huitzilin/cmd_vel`; `/cmd/evade` (priority); services `/huitzilin/arm`, `/huitzilin/takeoff`, `/huitzilin/set_mode` | `/huitzilin/odom`, `/huitzilin/state`; ArduPilot FC | 30 Hz odom | **active (Wk2)** | Pi / dev PC |
 | patrol_node | Autonomous patrol path-following | `/huitzilin/odom`; service `/huitzilin/start_patrol` | position targets to FC; `/huitzilin/mission_marker` | 10 Hz | **active (Wk2)** | Pi / dev PC |
 | camera_driver | Depth + point cloud (sim: Gazebo bridge; real: OAK-D Lite) | sensor | `/oak/points`, `/oak/depth` | 15 Hz sim (30 Hz real target) | **active, sim (Wk3)** | Pi (real, Wk6) / Dell (sim) |
 | detector_node | ROI gate, egomotion-compensated differencing, clustering, centroid | `/oak/points`, `/huitzilin/odom` (TF) | `/threat/centroid` + RViz marker | per cloud | **active, sim (Wk3)** | Pi / dev PC |
-| evasion_node | Kalman filter + dodge trigger | `/threat/centroid` | `/threat/intercept`, `/cmd/evade` | 30 Hz | Wk4 | Pi / dev PC |
+| evasion_node | Kalman filter + dodge trigger + patrol pause/resume | `/threat/centroid`, `/huitzilin/odom` | `/threat/intercept`, `/cmd/evade`, `/payload/alarm` (mock), `/threat/evade_event` | per centroid; 20 Hz while evading | **active, sim (Wk4)** | Pi / dev PC |
 | payload_node | LED strip + buzzer via GPIO | `/payload/alarm` | GPIO | on-event | Wk6 | Pi only |
 | supervisor_node | State machine, fault monitoring | node statuses | `/huitzilin/set_mode`, `/huitzilin/start_patrol` | 1 Hz | Wk2+ | Pi / dev PC |
 
@@ -23,10 +24,11 @@ contracts are provisional until their nodes land. In Week 4 the evasion path
 supervisor_node → mode/start → patrol_node → position targets → mav_bridge → ArduPilot (pymavlink)
                                mav_bridge → /huitzilin/odom, /huitzilin/state → all
 camera_driver → /oak/points, /oak/depth → detector_node → /threat/centroid → RViz marker
-
-[ Wk4–6 future ]
 detector_node → /threat/centroid → evasion_node → /threat/intercept, /cmd/evade → mav_bridge
-                                   evasion_node → /payload/alarm → payload_node
+                                   evasion_node → /payload/alarm (mock until Wk6); /huitzilin/start_patrol (pause/resume)
+
+[ Wk5–6 future ]
+evasion_node → /payload/alarm → payload_node
 ```
 
 ## Message & Service Contracts
@@ -56,10 +58,17 @@ conversion lives in `mav_bridge` (see `docs/frames.md`). Velocity setpoints use
 | `/oak/depth` | `sensor_msgs/Image` | Best-effort, keep-last 1 | `camera_optical_frame` |
 | `/threat/centroid` | `geometry_msgs/PointStamped` | Reliable | `base_link` |
 
-### Provisional (Wk4–6)
+### Active — evasion (sim, promoted W4)
+
+| Interface | Type | QoS | Frame |
+|---|---|---|---|
+| `/threat/intercept` | `geometry_msgs/PointStamped` | Reliable | `base_link` |
+| `/cmd/evade` | `geometry_msgs/Twist` | Reliable | body **FLU** (bridge priority over `/huitzilin/cmd_vel`) |
+| `/threat/evade_event` | `std_msgs/String` (JSON) | Reliable | N/A |
+| `/payload/alarm` | `std_msgs/Bool` | Reliable | N/A (consumer arrives Wk6) |
+
+### Provisional (Wk5–6)
 
 | Topic | Type | QoS | Frame | Phase |
 |---|---|---|---|---|
-| `/threat/intercept` | `geometry_msgs/PointStamped` | Reliable | `base_link` | Wk4 |
-| `/cmd/evade` | `geometry_msgs/Twist` | Reliable | `base_link` (FLU) | Wk4 (folds into the bridge cmd path) |
 | `/payload/alarm` | `std_msgs/Bool` | Reliable | N/A | Wk6 |
