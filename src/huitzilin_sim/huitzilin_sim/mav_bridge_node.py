@@ -109,14 +109,14 @@ class MavBridgeNode(Node):
             evx, evy, evz, eyr = self._last_evade
             cmd_age = (now - self._last_cmd_t).nanoseconds * 1e-9
             vx, vy, vz, yr = self._last_cmd
+            handback = (not evade_fresh) and self._evade_active
+            self._evade_active = evade_fresh
 
         if evade_fresh:
-            self._evade_active = True
             self.bridge.send_velocity_body(evx, evy, evz, eyr)
             return
-        if self._evade_active:
-            self._evade_active = False
-            self.bridge.send_velocity_body(0.0, 0.0, 0.0, 0.0)  # handback
+        if handback:
+            self.bridge.send_velocity_body(0.0, 0.0, 0.0, 0.0)  # handback zero
             return
 
         if not self._cmd_ever_received:
