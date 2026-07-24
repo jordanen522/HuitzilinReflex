@@ -74,19 +74,22 @@ def generate_launch_description() -> LaunchDescription:
 
 def _pose_bridge(context):
     """Ground-truth pose bridge; the world name must be resolved to build
-    the gz topic string, hence OpaqueFunction instead of a plain Node."""
+    the gz topic string, hence OpaqueFunction instead of a plain Node.
+
+    Uses huitzilin_perception's own gz_pose_bridge node (shells out to the
+    `gz` CLI, same pattern as spawn_projectile.py) rather than
+    ros_gz_bridge's parameter_bridge — the Pose_V -> TFMessage factory isn't
+    registered in this Harmonic/ros_gz_bridge build, so parameter_bridge
+    starts but /gz/dynamic_poses never produces output."""
     if context.launch_configurations.get("gz_pose_bridge", "true").lower() != "true":
         return []
     world = context.launch_configurations["world_name"]
     use_sim_time = (context.launch_configurations.get("use_sim_time", "true")
                     .lower() == "true")
-    gz_topic = f"/world/{world}/dynamic_pose/info"
     return [Node(
-        package="ros_gz_bridge",
-        executable="parameter_bridge",
+        package="huitzilin_perception",
+        executable="gz_pose_bridge",
         name="gz_pose_bridge",
         output="screen",
-        arguments=[f"{gz_topic}@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V"],
-        remappings=[(gz_topic, "/gz/dynamic_poses")],
-        parameters=[{"use_sim_time": use_sim_time}],
+        parameters=[{"world_name": world, "use_sim_time": use_sim_time}],
     )]

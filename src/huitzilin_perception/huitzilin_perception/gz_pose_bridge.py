@@ -1,0 +1,233 @@
+"""
+gz_pose_bridge.py — HuitzilinReflex Week 4.
+
+Replaces the `ros_gz_bridge parameter_bridge` conversion for
+`/world/<world>/dynamic_pose/info` (gz.msgs.Pose_V -> tf2_msgs/TFMessage),
+which is not registered in this Harmonic/ros_gz_bridge build (bridge starts
+but never produces a factory match, so /gz/dynamic_poses stays silent).
+
+Same workaround as spawn_projectile.py: shell out to the `gz` CLI instead of
+depending on Python gz bindings or the ros_gz_bridge factory table. Here we
+stream `gz topic -e -t <topic>`, which prints each message as protobuf text
+format, and hand-parse it into TFMessage — matching the exact shape
+dodge_battery.py already expects on /gz/dynamic_poses (TransformStamped per
+pose, child_frame_id = model name).
+
+Message format (captured 2026-07-23 via `gz topic -e -t .../dynamic_pose/info`):
+  header {
+    stamp { sec: <int> nsec: <int> }
+  }
+  pose {
+    name: "<model>"
+    id: <int>
+    position { x: <f> y: <f> z: <f> }
+    orientation { x: <f> y: <f> z: <f> w: <f> }
+  }
+  pose { ... }
+  <blank line>
+  pose { ... }        # header omitted on messages where it didn't change
+  <blank line>
+  ...
+Consecutive messages are separated by a blank line; `header` is optional on
+any given message, so the last-seen stamp is reused when it's missing.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import threading
+from typing import Optional
+
+import rclpy
+from builtin_interfaces.msg import Time
+from geometry_msgs.msg import TransformStamped
+from rclpy.node import Node
+from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from tf2_msgs.msg import TFMessage
+
+SENSOR_QOS = QoSProfile(
+    reliability=QoSReliabilityPolicy.BEST_EFFORT,
+    durability=QoSDurabilityPolicy.VOLATILE,
+    history=QoSHistoryPolicy.KEEP_LAST,
+    depth=10,
+)
+
+_BLOCK_OPEN_RE = re.compile(r"^(\w+)\s*\{$")
+_SCALAR_RE = re.compile(r"^\s*(\w+)\s*:\s*(-?[0-9.eE+-]+)")
+_NAME_RE = re.compile(r'^\s*name\s*:\s*"(.*)"')
+
+
+def split_top_level_blocks(lines: list[str]) -> list[tuple[str, list[str]]]:
+    """Split protobuf-text lines into (key, inner_lines) for each top-level
+    `key { ... }` block, tracking brace depth so nested blocks (position,
+    orientation, stamp) stay intact inside their parent's inner_lines."""
+    blocks: list[tuple[str, list[str]]] = []
+    i, n = 0, len(lines)
+    while i < n:
+        m = _BLOCK_OPEN_RE.match(lines[i].strip())
+        if not m:
+            i += 1
+            continue
+        key = m.group(1)
+        depth = 1
+        inner: list[str] = []
+        j = i + 1
+        while j < n and depth > 0:
+            depth += lines[j].count("{") - lines[j].count("}")
+            if depth > 0:
+                inner.append(lines[j])
+            j += 1
+        blocks.append((key, inner))
+        i = j
+    return blocks
+
+
+def parse_scalar_block(lines: list[str]) -> dict[str, float]:
+    """Parse flat `field: <number>` lines (position/orientation/stamp)."""
+    out: dict[str, float] = {}
+    for line in lines:
+        m = _SCALAR_RE.match(line)
+        if m:
+            out[m.group(1)] = float(m.group(2))
+    return out
+
+
+def parse_pose_block(lines: list[str]) -> Optional[tuple[str, dict, dict]]:
+    """Parse one `pose { ... }` block into (name, position, orientation)."""
+    name = None
+    for line in lines:
+        m = _NAME_RE.match(line)
+        if m:
+            name = m.group(1)
+            break
+    if name is None:
+        return None
+    position, orientation = {}, {}
+    for key, inner in split_top_level_blocks(lines):
+        if key == "position":
+            position = parse_scalar_block(inner)
+        elif key == "orientation":
+            orientation = parse_scalar_block(inner)
+    return name, position, orientation
+
+
+def parse_message(lines: list[str]) -> tuple[Optional[Time], list[tuple[str, dict, dict]]]:
+    """Parse one blank-line-delimited Pose_V message into (stamp, poses).
+    stamp is None when this message carried no `header` block."""
+    stamp = None
+    poses: list[tuple[str, dict, dict]] = []
+    for key, inner in split_top_level_blocks(lines):
+        if key == "header":
+            for hkey, hinner in split_top_level_blocks(inner):
+                if hkey == "stamp":
+                    s = parse_scalar_block(hinner)
+                    if "sec" in s:
+                        stamp = Time(sec=int(s["sec"]), nanosec=int(s.get("nsec", 0)))
+        elif key == "pose":
+            parsed = parse_pose_block(inner)
+            if parsed is not None:
+                poses.append(parsed)
+    return stamp, poses
+
+
+class GzPoseBridgeNode(Node):
+    """Streams `gz topic -e -t /world/<world>/dynamic_pose/info` and
+    republishes it as tf2_msgs/TFMessage on `/gz/dynamic_poses`, matching
+    what dodge_battery.py expects (child_frame_id = model name)."""
+
+    def __init__(self) -> None:
+        super().__init__("gz_pose_bridge")
+
+        self.declare_parameter("world_name", "huitzilin_runway")
+        self.declare_parameter("output_topic", "/gz/dynamic_poses")
+        self.declare_parameter("frame_id", "world")
+
+        world = self.get_parameter("world_name").value
+        self._output_topic = self.get_parameter("output_topic").value
+        self._frame_id = self.get_parameter("frame_id").value
+        self._gz_topic = f"/world/{world}/dynamic_pose/info"
+        self._last_stamp: Optional[Time] = None
+
+        self._pub = self.create_publisher(TFMessage, self._output_topic, SENSOR_QOS)
+
+        self._proc = subprocess.Popen(
+            ["gz", "topic", "-e", "-t", self._gz_topic],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._thread.start()
+
+        self.get_logger().info(
+            f"gz_pose_bridge streaming '{self._gz_topic}' -> '{self._output_topic}'"
+        )
+
+    def _read_loop(self) -> None:
+        buffer: list[str] = []
+        assert self._proc.stdout is not None
+        for line in self._proc.stdout:
+            if self._stop.is_set():
+                return
+            if line.strip() == "":
+                if buffer:
+                    self._publish_message(buffer)
+                    buffer = []
+                continue
+            buffer.append(line)
+        if buffer:
+            self._publish_message(buffer)
+        if not self._stop.is_set():
+            stderr = self._proc.stderr.read() if self._proc.stderr else ""
+            self.get_logger().error(
+                f"gz topic stream on '{self._gz_topic}' ended unexpectedly: {stderr.strip()}"
+            )
+
+    def _publish_message(self, lines: list[str]) -> None:
+        stamp, poses = parse_message(lines)
+        if stamp is not None:
+            self._last_stamp = stamp
+        if not poses:
+            return
+        tf_msg = TFMessage()
+        for name, position, orientation in poses:
+            t = TransformStamped()
+            t.header.stamp = self._last_stamp if self._last_stamp is not None \
+                else self.get_clock().now().to_msg()
+            t.header.frame_id = self._frame_id
+            t.child_frame_id = name
+            t.transform.translation.x = position.get("x", 0.0)
+            t.transform.translation.y = position.get("y", 0.0)
+            t.transform.translation.z = position.get("z", 0.0)
+            t.transform.rotation.x = orientation.get("x", 0.0)
+            t.transform.rotation.y = orientation.get("y", 0.0)
+            t.transform.rotation.z = orientation.get("z", 0.0)
+            t.transform.rotation.w = orientation.get("w", 1.0)
+            tf_msg.transforms.append(t)
+        self._pub.publish(tf_msg)
+
+    def destroy_node(self) -> bool:
+        self._stop.set()
+        if self._proc.poll() is None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        return super().destroy_node()
+
+
+def main(args=None) -> None:
+    rclpy.init(args=args)
+    node = GzPoseBridgeNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

@@ -34,6 +34,7 @@ setup(
             "score_bags = huitzilin_perception.score_bags:main",
             "evasion = huitzilin_perception.evasion_node:main",
             "dodge_battery = huitzilin_perception.dodge_battery:main",
+            "gz_pose_bridge = huitzilin_perception.gz_pose_bridge:main",
         ],
     },
 )
