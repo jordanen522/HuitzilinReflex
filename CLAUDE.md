@@ -74,3 +74,4 @@ Perception stack (depth world + detector, Dell box only): `docs/week3_capture_ru
 | `docs/SETUP.md` | Install + run/acceptance |
 | `docs/JOURNAL.md` | Compacted week log — results, open items, what Week 4 inherits |
 | `docs/week3_capture_runbook.md` | Bag re-capture + regression/tuning procedure (Dell) |
+| `docs/hardware_bringup.md` | Weeks 5–6 physical assembly checklist: FC swap, ArduPilot config, radio bind, Pi power, payload wiring |
