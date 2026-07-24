@@ -35,7 +35,9 @@ any given message, so the last-seen stamp is reused when it's missing.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
+import tempfile
 import threading
 from typing import Optional
 
@@ -151,9 +153,27 @@ class GzPoseBridgeNode(Node):
 
         self._pub = self.create_publisher(TFMessage, self._output_topic, SENSOR_QOS)
 
+        # `gz topic -e` writes to std::cout, which is BLOCK-buffered (~4 KB)
+        # when stdout is a pipe rather than a TTY. Without line buffering the
+        # poses arrive in bursts — or appear to never arrive at all at low pose
+        # rates — which looks exactly like a dead bridge. `stdbuf -oL` forces
+        # line buffering. (spawn_projectile.py never needed this: its gz calls
+        # are one-shot and flush at process exit.)
+        cmd = ["gz", "topic", "-e", "-t", self._gz_topic]
+        if shutil.which("stdbuf"):
+            cmd = ["stdbuf", "-oL"] + cmd
+        else:
+            self.get_logger().warn(
+                "stdbuf not found — gz stdout stays block-buffered, so poses "
+                "may arrive in bursts"
+            )
+
+        # stderr must NOT be an undrained PIPE: gz can be chatty, and a full
+        # ~64 KB pipe buffer blocks the child on write, stalling stdout with no
+        # diagnostic. Route it to a temp file we can read on exit instead.
+        self._stderr_file = tempfile.TemporaryFile(mode="w+")
         self._proc = subprocess.Popen(
-            ["gz", "topic", "-e", "-t", self._gz_topic],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            cmd, stdout=subprocess.PIPE, stderr=self._stderr_file, text=True,
         )
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
@@ -171,17 +191,38 @@ class GzPoseBridgeNode(Node):
                 return
             if line.strip() == "":
                 if buffer:
-                    self._publish_message(buffer)
+                    self._publish_or_warn(buffer)
                     buffer = []
                 continue
             buffer.append(line)
         if buffer:
-            self._publish_message(buffer)
+            self._publish_or_warn(buffer)
         if not self._stop.is_set():
-            stderr = self._proc.stderr.read() if self._proc.stderr else ""
             self.get_logger().error(
-                f"gz topic stream on '{self._gz_topic}' ended unexpectedly: {stderr.strip()}"
+                f"gz topic stream on '{self._gz_topic}' ended unexpectedly: "
+                f"{self._read_stderr()}"
             )
+
+    def _publish_or_warn(self, lines: list[str]) -> None:
+        """Never let one malformed message kill the reader thread: a stray
+        `nan`/`inf` or a line torn at a buffer boundary would raise inside
+        float(), and this thread is the only thing feeding the topic — it
+        would go permanently silent with nothing logged."""
+        try:
+            self._publish_message(lines)
+        except Exception as exc:  # noqa: BLE001 — must keep streaming
+            self.get_logger().warn(
+                f"skipped unparseable pose message ({exc.__class__.__name__}: {exc})",
+                throttle_duration_sec=5.0,
+            )
+
+    def _read_stderr(self) -> str:
+        """Drain the child's stderr temp file (see __init__ for why it isn't a pipe)."""
+        try:
+            self._stderr_file.seek(0)
+            return self._stderr_file.read().strip()
+        except Exception:  # noqa: BLE001 — diagnostics must not raise
+            return "<stderr unavailable>"
 
     def _publish_message(self, lines: list[str]) -> None:
         stamp, poses = parse_message(lines)
@@ -214,6 +255,10 @@ class GzPoseBridgeNode(Node):
                 self._proc.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+        try:
+            self._stderr_file.close()
+        except Exception:  # noqa: BLE001 — shutdown must not raise
+            pass
         return super().destroy_node()
 
 

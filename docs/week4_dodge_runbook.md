@@ -39,12 +39,22 @@ ros2 run huitzilin_perception spawn_projectile --ros-args \
   -p scenario_id:=SMOKE -p speed_mps:=8.0 -p compensate_gravity:=true
 ```
 
-Expected within ~1 s (sim): evasion logs `DODGE: miss=... tca=... latency=...`,
-the drone visibly jinks sideways in Gazebo, patrol pauses and resumes
-~1.5 s later, and `/payload/alarm` pulses true→false. If the drone does not
-move, check `ros2 topic echo /cmd/evade` first — if commands stream but
-nothing moves, the bridge priority path is at fault; if no commands, the
-trigger never fired (check `/threat/evade_event`).
+Expected within ~1 s (sim): evasion logs `DODGE: miss=... tca=... latency=...`
+and the drone visibly jinks sideways in Gazebo. The full cycle is **~2.3 s of
+sim time**, three sequential phases (defaults from `params/evasion.yaml`):
+
+| Phase | Param | Default | What you see |
+|---|---|---|---|
+| EVADING | `dodge_duration_s` | 1.0 s | velocity spike streams on `/cmd/evade`; `/payload/alarm` true |
+| RECOVERING | `recover_hold_s` | 0.5 s | zero-velocity settle; alarm drops to false as this phase starts |
+| HANDOFF | `patrol_handoff_s` | 0.8 s | `/cmd/evade` silent, then `dodge complete -> TRACKING (patrol resumed)` |
+
+So `/payload/alarm` pulses true→false at ~1.0 s, but patrol only resumes at
+~2.3 s. Judge both in **sim time** — at RTF ~0.33 that is ~7 s of wall clock.
+
+If the drone does not move, check `ros2 topic echo /cmd/evade` first — if
+commands stream but nothing moves, the bridge priority path is at fault; if no
+commands, the trigger never fired (check `/threat/evade_event`).
 
 ## 3. Full battery
 
