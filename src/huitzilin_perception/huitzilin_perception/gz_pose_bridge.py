@@ -24,12 +24,22 @@ Message format (captured 2026-07-23 via `gz topic -e -t .../dynamic_pose/info`):
     orientation { x: <f> y: <f> z: <f> w: <f> }
   }
   pose { ... }
-  <blank line>
-  pose { ... }        # header omitted on messages where it didn't change
-  <blank line>
+  header { ... }      # next message begins — no separator line between them
+  pose { ... }
   ...
-Consecutive messages are separated by a blank line; `header` is optional on
-any given message, so the last-seen stamp is reused when it's missing.
+
+Message framing (corrected 2026-07-24 on the Dell): this build emits **no
+blank-line separators** — top-level blocks stream back to back. An earlier
+version split messages on blank lines, so the buffer never flushed and
+/gz/dynamic_poses stayed silent while the source streamed fine. Boundaries are
+therefore inferred: a new top-level `header {`, or a `pose` whose model name
+already appeared in the message being built (covers messages that omit an
+unchanged `header`). `header` is optional, so the last-seen stamp is reused
+when it's missing.
+
+Grouping matters: dodge_battery.py measures drone-vs-ball distance only when
+both appear in the SAME TFMessage, so each published message must be a whole
+Pose_V snapshot — never one pose per message.
 """
 
 from __future__ import annotations
@@ -184,24 +194,60 @@ class GzPoseBridgeNode(Node):
         )
 
     def _read_loop(self) -> None:
-        buffer: list[str] = []
+        """Accumulate whole top-level blocks by brace depth and flush one
+        Pose_V snapshot per inferred message boundary (see module docstring —
+        this stream has no blank-line separators to split on)."""
         assert self._proc.stdout is not None
+        depth = 0
+        block: list[str] = []      # lines of the top-level block being read
+        message: list[str] = []    # blocks accumulated for the current message
+        seen_names: set[str] = set()
+
         for line in self._proc.stdout:
             if self._stop.is_set():
                 return
-            if line.strip() == "":
-                if buffer:
-                    self._publish_or_warn(buffer)
-                    buffer = []
+            stripped = line.strip()
+            if not stripped:
                 continue
-            buffer.append(line)
-        if buffer:
-            self._publish_or_warn(buffer)
+            if depth == 0 and not _BLOCK_OPEN_RE.match(stripped):
+                continue  # stray line between blocks (banner, warning)
+
+            block.append(line)
+            depth += line.count("{") - line.count("}")
+            if depth > 0:
+                continue
+            depth = 0  # clamp: a stray '}' must not desync the reader
+
+            key = _BLOCK_OPEN_RE.match(block[0].strip()).group(1)
+            name = self._block_model_name(block) if key == "pose" else None
+
+            # A message ends when the next one starts: either a fresh header,
+            # or a model we've already recorded in this snapshot.
+            if message and (key == "header" or (name is not None and name in seen_names)):
+                self._publish_or_warn(message)
+                message, seen_names = [], set()
+
+            message.extend(block)
+            if name is not None:
+                seen_names.add(name)
+            block = []
+
+        if message:
+            self._publish_or_warn(message)
         if not self._stop.is_set():
             self.get_logger().error(
                 f"gz topic stream on '{self._gz_topic}' ended unexpectedly: "
                 f"{self._read_stderr()}"
             )
+
+    @staticmethod
+    def _block_model_name(block: list[str]) -> Optional[str]:
+        """Model name from a `pose { ... }` block, used for boundary detection."""
+        for line in block:
+            m = _NAME_RE.match(line)
+            if m:
+                return m.group(1)
+        return None
 
     def _publish_or_warn(self, lines: list[str]) -> None:
         """Never let one malformed message kill the reader thread: a stray
