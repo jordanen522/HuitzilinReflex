@@ -8,6 +8,16 @@ detector:
   ros__parameters:
     use_sim_time: true
 
+    # W4 live bring-up diagnostic (2026-07-24): live runs produce zero
+    # /threat/centroid while /oak/points streams fine — Week 3 was only ever
+    # scored against bags, never live. This logs per-stage survivor counts
+    # (raw -> range -> angle -> voxel -> fg -> clusters -> ball_sized -> score).
+    # Note: detector_node caches params at construction and has no set-param
+    # callback, so this cannot be flipped with `ros2 param set` — it must be
+    # set here and the node restarted. Revert to false once live detection
+    # is confirmed; it is chatty (throttled to ~1 Hz per stage).
+    debug_funnel: true
+
     # ── Input cloud axis convention (W3-15) ───────────────────────────────────
     # gz-sim PointCloudPacked stays in the gz sensor body frame (X fwd, Y left,
     # Z up); <optical_frame_id> renames the header only. "gz_flu" remaps points
