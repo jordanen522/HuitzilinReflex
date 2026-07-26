@@ -21,6 +21,13 @@ evasion:
     # ── Dodge maneuver ───────────────────────────────────────────────────
     dodge_speed_mps: 1.5       # master doc: ~1.5 m/s velocity spike
     dodge_duration_s: 1.0      # how long the spike streams
+    dodge_floor_m: 1.0         # SAFETY: no dodge may descend below this AGL.
+                               # Descending throws make the geometric escape
+                               # point DOWN (measured dir_body z = -0.83); at
+                               # 2 m the drone flew into the runway and
+                               # disarmed. The clamp caps the downward part to
+                               # the headroom above this floor and re-spends
+                               # the rest horizontally. Raise for real flight.
     recover_hold_s: 0.5        # zero-velocity settle before patrol resumes
     patrol_handoff_s: 0.8      # silent gap before patrol resumes; MUST exceed
                                # the bridge cmd_timeout_s (0.7) or zero-velocity

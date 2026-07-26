@@ -170,3 +170,61 @@ def test_plan_dodge_end_to_end_hit_geometry():
     assert plan.tca_s == pytest.approx(0.75, abs=0.02)
     assert plan.miss_m < 0.06
     assert np.linalg.norm(plan.direction) == pytest.approx(1.0)
+
+
+# ── Ground clearance (W4 live bring-up, 2026-07-26) ───────────────────────
+# The drone dodged itself into the runway from 2 m: a gravity-compensated
+# throw arrives descending, so the perpendicular escape points DOWN.
+
+from huitzilin_perception.kalman import clamp_dodge_to_clearance  # noqa: E402
+
+
+def test_clearance_leaves_upward_dodge_untouched():
+    d = clamp_dodge_to_clearance([0.0, 0.6, 0.8], altitude_m=0.2,
+                                 floor_m=1.0, descent_len_m=1.5)
+    np.testing.assert_allclose(d, [0.0, 0.6, 0.8], atol=1e-9)
+
+
+def test_clearance_leaves_affordable_descent_untouched():
+    # 2 m up, 1 m floor -> 1 m of headroom; a 1.5 m dodge descending at 0.5
+    # of full speed travels 0.75 m. Affordable, so pass it through.
+    d = clamp_dodge_to_clearance([0.0, 0.866, -0.5], altitude_m=2.0,
+                                 floor_m=1.0, descent_len_m=1.5)
+    np.testing.assert_allclose(d, [0.0, 0.866, -0.5], atol=1e-9)
+
+
+def test_clearance_reaims_steep_dodge_horizontally_keeping_unit_speed():
+    # The measured crash case: dir_body z = -0.83 at 2 m altitude.
+    d = clamp_dodge_to_clearance([0.03, 0.56, -0.83], altitude_m=2.0,
+                                 floor_m=1.0, descent_len_m=1.5)
+    assert np.linalg.norm(d) == pytest.approx(1.0)
+    assert d[2] == pytest.approx(-1.0 / 1.5)      # exactly the headroom
+    assert d[1] > 0.0                              # same escape side
+    assert d[0] / d[1] == pytest.approx(0.03 / 0.56)
+
+
+def test_clearance_at_the_floor_forbids_descent_entirely():
+    d = clamp_dodge_to_clearance([0.0, 0.56, -0.83], altitude_m=0.8,
+                                 floor_m=1.0, descent_len_m=1.5)
+    assert d[2] == pytest.approx(0.0)
+    np.testing.assert_allclose(d, [0.0, 1.0, 0.0], atol=1e-9)
+
+
+def test_clearance_straight_down_escape_becomes_horizontal():
+    d = clamp_dodge_to_clearance([0.0, 0.0, -1.0], altitude_m=0.5,
+                                 floor_m=1.0, descent_len_m=1.5)
+    assert np.linalg.norm(d) == pytest.approx(1.0)
+    assert d[2] == pytest.approx(0.0)
+
+
+def test_plan_dodge_applies_clearance_when_altitude_given():
+    # Descending throw from ahead-and-above: unclamped escape points down.
+    v0 = np.array([-8.0, 0.0, -2.0])
+    kw = dict(altitude_m=1.2, floor_m=1.0, descent_len_m=1.5)
+    free = plan_dodge([6.0, 0.0, 1.6], v0, [0.0, 0.0, 1.2], [0.0, 0.0, 0.0])
+    clamped = plan_dodge([6.0, 0.0, 1.6], v0, [0.0, 0.0, 1.2],
+                         [0.0, 0.0, 0.0], **kw)
+    assert free.direction[2] < -0.3                     # would fly downward
+    assert clamped.direction[2] >= -0.2 / 1.5 - 1e-9    # 0.2 m of headroom
+    assert np.linalg.norm(clamped.direction) == pytest.approx(1.0)
+    assert clamped.tca_s == pytest.approx(free.tca_s)   # geometry unchanged

@@ -114,6 +114,7 @@ class EvasionNode(Node):
         self.declare_parameter("latency_budget_s", 0.15)
         self.declare_parameter("dodge_speed_mps", 1.5)
         self.declare_parameter("dodge_duration_s", 1.0)
+        self.declare_parameter("dodge_floor_m", 1.0)
         self.declare_parameter("recover_hold_s", 0.5)
         self.declare_parameter("patrol_handoff_s", 0.8)
         self.declare_parameter("evade_cmd_rate_hz", 20.0)
@@ -128,6 +129,7 @@ class EvasionNode(Node):
                 "init_vel_std", "track_timeout_s", "min_track_updates",
                 "threat_radius_m", "trigger_horizon_s", "prediction_horizon_s",
                 "latency_budget_s", "dodge_speed_mps", "dodge_duration_s",
+                "dodge_floor_m",
                 "recover_hold_s", "patrol_handoff_s", "evade_cmd_rate_hz",
                 "auto_resume_patrol",
             )
@@ -234,8 +236,18 @@ class EvasionNode(Node):
         tw = odom.twist.twist.linear
         v_drone = np.array([tw.x, tw.y, tw.z])  # world ENU (bridge converts NED)
 
-        plan = plan_dodge(pos_proj, vel_proj, p_drone, v_drone,
-                          horizon_s=float(self._p["prediction_horizon_s"]))
+        # p.z is height above the odom origin, which the bridge places at the
+        # EKF origin = the takeoff point on the ground, so it IS altitude AGL
+        # on flat ground. On sloped terrain this over-reads and the clamp gets
+        # optimistic; that is a Week 6 field-test item, not a sim one.
+        plan = plan_dodge(
+            pos_proj, vel_proj, p_drone, v_drone,
+            horizon_s=float(self._p["prediction_horizon_s"]),
+            altitude_m=float(p.z),
+            floor_m=float(self._p["dodge_floor_m"]),
+            descent_len_m=(float(self._p["dodge_speed_mps"])
+                           * float(self._p["dodge_duration_s"])),
+        )
         self._publish_intercept(plan, pos_proj, vel_proj, T_odom_bl,
                                 msg.header.stamp)
 

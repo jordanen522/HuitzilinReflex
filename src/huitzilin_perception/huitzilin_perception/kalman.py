@@ -18,6 +18,7 @@ jitter) and becomes the Week 8 re-tuning knob.
 
 from __future__ import annotations
 
+import math
 from typing import NamedTuple, Optional
 
 import numpy as np
@@ -204,6 +205,66 @@ def dodge_direction(miss_vec, approach_vel, *, min_offset_m: float = 0.05) -> np
     return lateral / lat_norm
 
 
+def clamp_dodge_to_clearance(
+    direction,
+    altitude_m: float,
+    *,
+    floor_m: float,
+    descent_len_m: float,
+) -> np.ndarray:
+    """
+    Re-aim a dodge that would fly the drone into the ground. Returns a unit
+    ENU vector.
+
+    dodge_direction() only sees the approach geometry, and it is *usually*
+    right to escape downward: a gravity-compensated throw arrives descending,
+    so the fastest-opening perpendicular points down. That is also how the
+    drone kills itself. Measured live 2026-07-26 hovering at 2 m:
+
+        dir_body=(+0.01,+0.68,-0.74)
+        dir_body=(+0.03,+0.56,-0.83)
+
+    (body FLU, so z is up). At dodge_speed_mps x dodge_duration_s = 1.5 m
+    that is >1.2 m of descent from 2 m — MAVProxy logged Crash then Disarm,
+    and the rest of the battery aborted on the MIN_SPAWN_Z guard because the
+    vehicle was lying on the runway.
+
+    descent_len_m is how far the maneuver travels if the whole command is
+    spent going down (dodge_speed_mps * dodge_duration_s). The downward
+    component is capped at whatever fraction of that fits in the headroom
+    above floor_m, and the freed budget is re-spent along the *same*
+    horizontal escape bearing, so escape speed is preserved and the drone
+    still leaves the projectile's pass side.
+
+    Escape is never flipped upward. The ball is descending through that
+    space; climbing into it trades a ground strike for a hit.
+    """
+    d = np.asarray(direction, dtype=np.float64)
+    n = np.linalg.norm(d)
+    if n < 1e-9:
+        return np.array([1.0, 0.0, 0.0])
+    d = d / n
+    if d[2] >= 0.0:
+        return d
+
+    headroom_m = max(float(altitude_m) - float(floor_m), 0.0)
+    max_down = (min(1.0, headroom_m / descent_len_m)
+                if descent_len_m > 1e-9 else 0.0)
+    if -d[2] <= max_down:
+        return d
+
+    horiz = np.array([d[0], d[1], 0.0])
+    h_norm = np.linalg.norm(horiz)
+    if h_norm < 1e-6:
+        # Straight down with no headroom: any horizontal beats descending.
+        # Deterministic pick so battery runs stay repeatable.
+        return np.array([1.0, 0.0, 0.0])
+    h_keep = math.sqrt(max(1.0 - max_down ** 2, 0.0))
+    return np.array([horiz[0] / h_norm * h_keep,
+                     horiz[1] / h_norm * h_keep,
+                     -max_down])
+
+
 def should_dodge(
     n_updates: int,
     miss_m: float,
@@ -222,10 +283,30 @@ def should_dodge(
     )
 
 
-def plan_dodge(p_proj, v_proj, p_drone, v_drone, *, horizon_s: float = 3.0) -> DodgePlan:
-    """Convenience wrapper: absolute states in odom ENU -> full dodge plan."""
+def plan_dodge(
+    p_proj,
+    v_proj,
+    p_drone,
+    v_drone,
+    *,
+    horizon_s: float = 3.0,
+    altitude_m: Optional[float] = None,
+    floor_m: float = 1.0,
+    descent_len_m: float = 0.0,
+) -> DodgePlan:
+    """Convenience wrapper: absolute states in odom ENU -> full dodge plan.
+
+    Pass altitude_m (metres above the ground, not above the odom origin) to
+    apply the ground-clearance clamp — see clamp_dodge_to_clearance. Flight
+    callers must pass it; omitting it returns the raw geometric escape, which
+    can point at the ground.
+    """
     p_rel = np.asarray(p_proj, dtype=np.float64) - np.asarray(p_drone, dtype=np.float64)
     v_rel = np.asarray(v_proj, dtype=np.float64) - np.asarray(v_drone, dtype=np.float64)
     tca, miss, miss_vec = predict_closest_approach(p_rel, v_rel, horizon_s=horizon_s)
     approach_vel = v_rel + tca * GRAVITY_ENU
-    return DodgePlan(tca, miss, miss_vec, dodge_direction(miss_vec, approach_vel))
+    direction = dodge_direction(miss_vec, approach_vel)
+    if altitude_m is not None:
+        direction = clamp_dodge_to_clearance(
+            direction, altitude_m, floor_m=floor_m, descent_len_m=descent_len_m)
+    return DodgePlan(tca, miss, miss_vec, direction)
