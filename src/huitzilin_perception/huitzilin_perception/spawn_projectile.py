@@ -93,14 +93,37 @@ def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
         "--reqtype", "gz.msgs.EntityFactory", "--reptype", "gz.msgs.Boolean",
         "--timeout", "2000", "--req", req,
     ]
-    ok, msg = _run_gz(cmd, timeout_s)
-    if not ok:
-        return False, msg
-    if "data: true" not in msg:
-        return False, (f"create service did not confirm the spawn "
-                       f"(reply {msg!r}) — is model {model_uri} on the "
-                       f"server's GZ_SIM_RESOURCE_PATH?")
-    return gz_impulse(world, name, velocity, timeout_s=timeout_s)
+    # Pause across create+impulse. Each gz CLI call costs ~0.2 s of wall
+    # clock, so on a running world the ball free-falls ~0.4 s before its
+    # wrench lands — measured 2026-07-26: it reached the ground first and
+    # ground contact ate over half the kick (3.8 m/s delivered of 8.0).
+    # Paused, both messages apply on the same resume step: an 8 m/s vertical
+    # test throw from z=5.0 apexed at 8.261 m vs 8.26 predicted.
+    paused, _ = gz_world_control(world, "pause: true", timeout_s)
+    try:
+        ok, msg = _run_gz(cmd, timeout_s)
+        if not ok:
+            return False, msg
+        if "data: true" not in msg:
+            return False, (f"create service did not confirm the spawn "
+                           f"(reply {msg!r}) — is model {model_uri} on the "
+                           f"server's GZ_SIM_RESOURCE_PATH?")
+        ok, msg = gz_impulse(world, name, velocity, timeout_s=timeout_s)
+    finally:
+        if paused:
+            gz_world_control(world, "pause: false", timeout_s)
+    return ok, msg
+
+
+def gz_world_control(world: str, body: str,
+                     timeout_s: float = 5.0) -> tuple[bool, str]:
+    """gz.msgs.WorldControl request, e.g. body='pause: true'."""
+    ok, msg = _run_gz([
+        "gz", "service", "-s", f"/world/{world}/control",
+        "--reqtype", "gz.msgs.WorldControl", "--reptype", "gz.msgs.Boolean",
+        "--timeout", "2000", "--req", body,
+    ], timeout_s)
+    return (ok and "data: true" in msg), msg
 
 
 def gz_impulse(world: str, model_name: str, velocity, link_name: str = "link",
