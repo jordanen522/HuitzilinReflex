@@ -44,6 +44,12 @@
             name="gz::sim::systems::Magnetometer"/>
     <plugin filename="gz-sim-forcetorque-system"
             name="gz::sim::systems::ForceTorque"/>
+    <!-- Throws the projectile: spawn_projectile.gz_impulse publishes an
+         EntityWrench on /world/huitzilin_runway/wrench, which this system
+         applies for one physics step. gz.msgs.EntityFactory has no velocity
+         field, so without this the ball spawns at rest and just drops. -->
+    <plugin filename="gz-sim-apply-link-wrench-system"
+            name="gz::sim::systems::ApplyLinkWrench"/>
 
     <!-- ── Sun ── -->
     <light type="directional" name="sun">

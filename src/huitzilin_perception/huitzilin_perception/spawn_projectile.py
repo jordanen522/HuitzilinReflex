@@ -27,10 +27,13 @@ A fixed random seed per scenario_id ensures identical replays.
 DESIGN NOTES
 ------------
 - Uses gz service /world/<world>/create (Gazebo Harmonic API) to spawn
-  the projectile model, then gz topic to apply a velocity.
-- The Gazebo "apply_link_wrench" or initial velocity set is done by spawning
-  the model with a non-zero linear_velocity field in the EntityFactory proto.
-  This is cleaner than a post-spawn force impulse in Harmonic.
+  the projectile model, then a /world/<world>/wrench impulse to throw it.
+  EntityFactory has NO velocity field in Harmonic, so the throw cannot be
+  part of the spawn — see gz_impulse. The world must load
+  gz-sim-apply-link-wrench-system or the ball spawns and simply drops.
+- gz requests are protobuf TEXT format, not JSON. `gz service --req` parses
+  text format only; a JSON body is rejected with an empty reply and exit
+  code 0, which reads as success unless the reply is checked (_run_gz).
 - All gz service calls are made via subprocess (gz CLI) — the Python
   gz bindings are not stable across Harmonic patch versions.
 - Spawn geometry (position + velocity) is computed by
@@ -44,7 +47,6 @@ DESIGN NOTES
 
 from __future__ import annotations
 
-import json
 import math
 import subprocess
 import time
@@ -68,37 +70,80 @@ RELIABLE_QOS = QoSProfile(
 # enough that drone_z + offset_vertical_m >= MIN_SPAWN_Z.
 MIN_SPAWN_Z = 0.3
 
+# Must match models/projectile/model.sdf <mass> and the world's
+# <max_step_size>; gz_impulse converts a target velocity into a one-step
+# force with them, so a change on either side rescales every throw.
+PROJECTILE_MASS_KG = 0.150
+WORLD_STEP_S = 0.001
+
 
 def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
              timeout_s: float = 5.0) -> tuple[bool, str]:
-    """Spawn `model_uri` as `name` at ENU `position` with initial `velocity`
-    via the Gazebo Harmonic EntityFactory service. Returns (ok, message).
+    """Spawn `model_uri` as `name` at ENU `position`, then kick it to
+    `velocity` with a one-step impulse. Returns (ok, message).
     Module-level so dodge_battery.py can reuse it without a node."""
-    factory_json = json.dumps({
-        "sdf_filename": model_uri.replace("model://", ""),
-        "name": name,
-        "pose": {
-            "position": {"x": float(position[0]), "y": float(position[1]),
-                         "z": float(position[2])},
-            "orientation": {"x": 0, "y": 0, "z": 0, "w": 1},
-        },
-        "initial_linear_velocity": {"x": float(velocity[0]),
-                                    "y": float(velocity[1]),
-                                    "z": float(velocity[2])},
-    })
+    req = (
+        f'sdf_filename: "{model_uri.replace("model://", "")}", '
+        f'name: "{name}", '
+        f'pose: {{position: {_tf_vec3(position)}, '
+        f'orientation: {{x: 0, y: 0, z: 0, w: 1}}}}'
+    )
     cmd = [
         "gz", "service", "-s", f"/world/{world}/create",
         "--reqtype", "gz.msgs.EntityFactory", "--reptype", "gz.msgs.Boolean",
-        "--timeout", "2000", "--req", factory_json,
+        "--timeout", "2000", "--req", req,
     ]
-    return _run_gz(cmd, timeout_s)
+    ok, msg = _run_gz(cmd, timeout_s)
+    if not ok:
+        return False, msg
+    if "data: true" not in msg:
+        return False, (f"create service did not confirm the spawn "
+                       f"(reply {msg!r}) — is model {model_uri} on the "
+                       f"server's GZ_SIM_RESOURCE_PATH?")
+    return gz_impulse(world, name, velocity, timeout_s=timeout_s)
+
+
+def gz_impulse(world: str, model_name: str, velocity, link_name: str = "link",
+               mass_kg: float = PROJECTILE_MASS_KG,
+               step_s: float = WORLD_STEP_S,
+               timeout_s: float = 5.0) -> tuple[bool, str]:
+    """Accelerate a just-spawned model from rest to `velocity` (world ENU).
+
+    EntityFactory carries no velocity field — verified against
+    `gz msg --info gz.msgs.EntityFactory` on this Harmonic build, whose
+    oneof is sdf/sdf_filename/model/light/clone_name only — so the throw has
+    to be a force applied after creation. A message on /world/<world>/wrench
+    is applied by the ApplyLinkWrench system for exactly one physics
+    iteration, so the delivered impulse is F*step_s and the resulting speed
+    is F*step_s/mass — hence F = mass*v/step_s. The ball then flies a true
+    drag-free parabola under gravity, which is what ballistics.py and the
+    Week 4 Kalman filter both assume.
+
+    Coupling to watch: `mass_kg` must match models/projectile/model.sdf and
+    `step_s` must match the world's <max_step_size> (0.001 — see CLAUDE.md);
+    changing either silently rescales every throw.
+    """
+    force = [mass_kg * float(v) / step_s for v in velocity]
+    msg = (f'entity: {{name: "{model_name}::{link_name}", type: LINK}}, '
+           f'wrench: {{force: {_tf_vec3(force)}, '
+           f'torque: {{x: 0, y: 0, z: 0}}}}')
+    cmd = [
+        "gz", "topic", "-t", f"/world/{world}/wrench",
+        "-m", "gz.msgs.EntityWrench", "-p", msg,
+    ]
+    ok, out = _run_gz(cmd, timeout_s)
+    if not ok:
+        return False, f"spawned but impulse failed: {out}"
+    return True, (f"spawned + impulse "
+                  f"({force[0]:.0f}, {force[1]:.0f}, {force[2]:.0f}) N "
+                  f"for one {step_s * 1e3:.0f} ms step")
 
 
 def gz_remove(world: str, name: str, timeout_s: float = 5.0) -> tuple[bool, str]:
-    """Remove model `name` from the world (gz.msgs.Entity type 2 = MODEL).
+    """Remove model `name` from the world (gz.msgs.Entity.Type MODEL).
     The dodge battery calls this between runs so spent balls don't litter
     the ground plane and confuse the depth background model."""
-    req = json.dumps({"name": name, "type": 2})
+    req = f'name: "{name}", type: MODEL'
     cmd = [
         "gz", "service", "-s", f"/world/{world}/remove",
         "--reqtype", "gz.msgs.Entity", "--reptype", "gz.msgs.Boolean",
@@ -107,16 +152,32 @@ def gz_remove(world: str, name: str, timeout_s: float = 5.0) -> tuple[bool, str]
     return _run_gz(cmd, timeout_s)
 
 
+def _tf_vec3(v) -> str:
+    """gz.msgs.Vector3d in protobuf text format."""
+    return f"{{x: {float(v[0]):.6f}, y: {float(v[1]):.6f}, z: {float(v[2]):.6f}}}"
+
+
 def _run_gz(cmd: list[str], timeout_s: float) -> tuple[bool, str]:
+    """Run a `gz` CLI call. (ok, stdout) on success, (False, reason) otherwise.
+
+    Exit code 0 is NOT proof of success: a request the server rejects still
+    exits 0 with empty stdout, and a request `gz` itself cannot parse writes
+    a protobuf error to stderr and also exits 0. Both are caught here so no
+    caller can read silence as success — that hid every failed spawn of the
+    2026-07-26 bring-up session.
+    """
     try:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=timeout_s)
     except subprocess.TimeoutExpired:
-        return False, "gz service timed out"
+        return False, "gz call timed out"
     except FileNotFoundError:
         return False, "'gz' command not found — is Gazebo Harmonic installed?"
     if result.returncode != 0:
-        return False, f"gz service failed: {result.stderr.strip()}"
+        return False, f"gz call failed: {result.stderr.strip()}"
+    stderr = result.stderr.strip()
+    if "Error parsing" in stderr or "Unable to create request" in stderr:
+        return False, f"gz rejected the request: {stderr}"
     return True, result.stdout.strip()
 
 
