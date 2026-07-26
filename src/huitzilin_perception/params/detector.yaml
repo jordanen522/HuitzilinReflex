@@ -22,6 +22,15 @@ detector:
     # installed copy and would otherwise be unreadable.
     debug_funnel_throttle_s: 0.0
 
+    # ── Cloud transport (W4 live bring-up, 2026-07-26) ────────────────────────
+    # /oak/points is a 7.37 MB sample; BEST_EFFORT lost ~75% of it to UDP
+    # fragmentation (measured: best_effort 3.99 Hz vs reliable 14.43 Hz on the
+    # same topic; the detector itself was down to 1.25 Hz). At that rate a ball
+    # is seen once per throw and no dodge can ever trigger. Set cloud_reliable
+    # false on real hardware, where DepthAI publishes best-effort.
+    cloud_reliable: true
+    cloud_queue_depth: 5
+
     # ── Input cloud axis convention (W3-15) ───────────────────────────────────
     # gz-sim PointCloudPacked stays in the gz sensor body frame (X fwd, Y left,
     # Z up); <optical_frame_id> renames the header only. "gz_flu" remaps points

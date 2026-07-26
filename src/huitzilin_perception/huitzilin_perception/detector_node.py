@@ -112,6 +112,22 @@ class DetectorNode(Node):
         self.declare_parameter("fg_max_points", 5000)  # skip frame if foreground explodes (egomotion flood)
         self.declare_parameter("cluster_max_extent_m", 0.35)  # reject clusters physically larger than the projectile
         self.declare_parameter("fixed_frame", "odom")  # frame for egomotion-compensated differencing
+        # Cloud subscription reliability. TRUE is not the usual sensor-data
+        # choice, and it is deliberate: /oak/points is a 7.37 MB sample
+        # (640x480 x 24 B) fragmented across thousands of UDP datagrams against
+        # a 208 KB net.core.rmem_max, so under BEST_EFFORT a single lost
+        # fragment discards the entire sample with no retransmit. Measured live
+        # 2026-07-26 on this topic with one variable changed:
+        #     best_effort depth=1   ->  3.99 Hz
+        #     reliable    depth=10  -> 14.43 Hz  (the camera's full 15 Hz)
+        # The detector itself was getting only 1.25 Hz. A ball crosses the
+        # frustum in ~0.75 s of sim time, so at that rate it is seen once or
+        # twice, the Kalman track never reaches min_track_updates, and no dodge
+        # can fire -- that was the Week 4 "no DODGE" root cause, not the
+        # detection thresholds. Set false for a real OAK-D, where DepthAI
+        # publishes best-effort and dropping a frame beats queueing it.
+        self.declare_parameter("cloud_reliable", True)
+        self.declare_parameter("cloud_queue_depth", 5)
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
@@ -136,11 +152,19 @@ class DetectorNode(Node):
         self._warned_no_attitude = False
 
         # ── Subscribers ──────────────────────────────────────────────────────
+        # See the cloud_reliable comment above for why this is not BEST_EFFORT.
+        cloud_qos = QoSProfile(
+            reliability=(QoSReliabilityPolicy.RELIABLE
+                         if self.get_parameter("cloud_reliable").value
+                         else QoSReliabilityPolicy.BEST_EFFORT),
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=int(self.get_parameter("cloud_queue_depth").value),
+        )
         self._cloud_sub = self.create_subscription(
             PointCloud2,
             "/oak/points",
             self._cloud_cb,
-            SENSOR_QOS,
+            cloud_qos,
         )
         if self._p["compensate_egomotion"]:
             self._odom_sub = self.create_subscription(
@@ -164,7 +188,8 @@ class DetectorNode(Node):
 
         self.get_logger().info(
             "detector_node ready — subscribing /oak/points "
-            f"(ROI {self._p['roi_min_range_m']}–{self._p['roi_max_range_m']} m, "
+            f"({cloud_qos.reliability.name} depth={cloud_qos.depth}, "
+            f"ROI {self._p['roi_min_range_m']}–{self._p['roi_max_range_m']} m, "
             f"voxel {self._p['voxel_leaf_m']} m, "
             f"diff_thresh {self._p['diff_threshold_m']} m)"
         )
