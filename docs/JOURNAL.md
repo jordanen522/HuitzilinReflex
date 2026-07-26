@@ -190,3 +190,50 @@ in `docs/SAFETY_CASE.md` too.
 Battery results so far: patrol 0/18 (pre-yaw-fix) → 2/18 → v4 aborted at 10 runs by
 the crash, but with dodges firing at 64 ms. CSVs on the Dell:
 `/tmp/week4_battery{,_patrol,_hover,_fgmax,_v4}.csv`.
+
+### Ground-clearance clamp, non-colliding ball, and the first complete battery
+
+**Finding 2 fixed** (`adfe69f`). `kalman.clamp_dodge_to_clearance` caps the dodge's
+downward component at the headroom above a new `dodge_floor_m` (1.0 m AGL) and
+re-spends the freed budget along the same horizontal escape bearing, so escape speed
+and pass side are preserved. Escape is never flipped *upward* — the projectile is
+descending through that space. Measured effect: `dir_body` z went from −0.74/−0.83 to
+**+0.12 and +0.24**. No ground strike since.
+
+**Finding 3 — one marginal dodge used to destroy the whole battery.** With the
+clearance fix in, the next battery still stopped at B03: `dodged=True min=0.267 m`
+(a genuine miss-distance failure), then the ball *contacted* the airframe, ArduPilot
+crash-checked at `AngErr=170>30` and disarmed, and all ~50 remaining runs aborted on
+`MIN_SPAWN_Z` against the wreck. A flipped vehicle cannot be recovered in-harness:
+ArduPilot refuses to arm inverted, so this always costs a full stack restart.
+Fixed by giving the projectile `<collide_bitmask>0x00</collide_bitmask>` — it now
+flies its parabola through the airframe and the runway alike. This is a measurement
+decision, not a fidelity shortcut: `min_dist_m` is computed geometrically from
+`/gz/dynamic_poses` against `hit_radius`, so the verdict is unchanged and better
+resolved than "did the physics engine flip it". Restore contact only for a
+deliberate impact-damage study.
+
+**First complete battery (v6, 20/20 runs, no crash):** 3/18 dodges (17%),
+**0/2 false dodges**, latency mean 201 ms / max 364 ms against the 150 ms budget.
+
+**Finding 4 — the battery is currently measuring the throw harness, not the dodge.**
+B01–B05 all specify `miss_distance_m: 0.0` (direct hit), yet runs where no dodge
+fired measured min_dist of **2.6, 2.35, 2.0, 1.36, 2.75, 1.07, 1.22, 1.14 m**. Those
+throws were never on target, so the trigger *correctly* ignored them (miss >
+`threat_radius` 0.75) — they are scored ✗ only because `expect_dodge: true`. So most
+of the 15 "failures" are aiming error, not trigger error. Aim is computed from the
+latest odom in `_one_run`, but the ball needs ~0.75 s of flight plus the gz spawn
+call, and `auto_resume_patrol` puts the drone back in motion between runs; that
+accounts for a few tenths of a metre, not 2.7 m. Also seen: `B01 r0` reported
+**latency −51 ms**, i.e. a centroid stamped in the future relative to the trigger,
+which points at the same odom/centroid stamping question as the flood rate
+dependence. **Fix aiming before reading anything into the sweep** — with 15 of 18
+scenarios not actually threatening, a sweep would grid noise.
+
+Latency is the other real gap: mean 201 ms is over the 150 ms budget, and the spread
+(61 → 364 ms) is wide enough that it is a scheduling/stamping problem rather than
+compute cost.
+
+Dell helper: `/tmp/hz_restart.sh` does the full teardown+restart (world → SITL →
+MAVProxy → ROS stack) that any crash requires. CSVs: `/tmp/week4_battery*.csv`,
+logs `/tmp/battery_v{5,6}.log`.
