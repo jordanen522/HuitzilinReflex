@@ -78,10 +78,15 @@ WORLD_STEP_S = 0.001
 
 
 def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
-             timeout_s: float = 5.0) -> tuple[bool, str]:
+             timeout_s: float = 5.0, *,
+             pause_world: bool = False) -> tuple[bool, str]:
     """Spawn `model_uri` as `name` at ENU `position`, then kick it to
     `velocity` with a one-step impulse. Returns (ok, message).
-    Module-level so dodge_battery.py can reuse it without a node."""
+    Module-level so dodge_battery.py can reuse it without a node.
+
+    pause_world=False (default) is REQUIRED whenever ArduPilot SITL is flying.
+    See gz_world_control for why pausing breaks a live run.
+    """
     req = (
         f'sdf_filename: "{model_uri.replace("model://", "")}", '
         f'name: "{name}", '
@@ -93,13 +98,9 @@ def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
         "--reqtype", "gz.msgs.EntityFactory", "--reptype", "gz.msgs.Boolean",
         "--timeout", "2000", "--req", req,
     ]
-    # Pause across create+impulse. Each gz CLI call costs ~0.2 s of wall
-    # clock, so on a running world the ball free-falls ~0.4 s before its
-    # wrench lands — measured 2026-07-26: it reached the ground first and
-    # ground contact ate over half the kick (3.8 m/s delivered of 8.0).
-    # Paused, both messages apply on the same resume step: an 8 m/s vertical
-    # test throw from z=5.0 apexed at 8.261 m vs 8.26 predicted.
-    paused, _ = gz_world_control(world, "pause: true", timeout_s)
+    paused = False
+    if pause_world:
+        paused, _ = gz_world_control(world, "pause: true", timeout_s)
     try:
         ok, msg = _run_gz(cmd, timeout_s)
         if not ok:
@@ -117,7 +118,20 @@ def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
 
 def gz_world_control(world: str, body: str,
                      timeout_s: float = 5.0) -> tuple[bool, str]:
-    """gz.msgs.WorldControl request, e.g. body='pause: true'."""
+    """gz.msgs.WorldControl request, e.g. body='pause: true'.
+
+    DO NOT pause a world that a flying SITL is attached to. ArduPilot keeps
+    running on wall clock while Gazebo is frozen, so it winds up its
+    controllers against stale state and the drone lurches hard on resume.
+    Measured 2026-07-26 with a ~2 s pause across create+impulse: the very
+    first frame after resume floods the detector's egomotion diff
+    (fg=34881 > fg_max_points), the next has raw 115k->153k and the range
+    gate 17k->58k as the tilted frustum fills with ground, and the whole
+    0.75 s ball flight is consumed by that recovery — no cluster, no dodge.
+    Pausing is only safe for standalone geometry checks with SITL down; that
+    is what validated the impulse math (8 m/s vertical from z=5.0 apexed at
+    8.261 m vs 8.26 predicted).
+    """
     ok, msg = _run_gz([
         "gz", "service", "-s", f"/world/{world}/control",
         "--reqtype", "gz.msgs.WorldControl", "--reptype", "gz.msgs.Boolean",
@@ -223,6 +237,7 @@ class SpawnProjectileNode(Node):
         self.declare_parameter("world_name", "huitzilin_runway")
         self.declare_parameter("model_uri", "model://projectile")
         self.declare_parameter("compensate_gravity", False)  # loft to arrive at drone altitude (Week 4 battery)
+        self.declare_parameter("pause_world", False)         # only with SITL down — see gz_world_control
 
         self._scenario_id  = self.get_parameter("scenario_id").value
         self._speed        = self.get_parameter("speed_mps").value
@@ -233,6 +248,7 @@ class SpawnProjectileNode(Node):
         self._world        = self.get_parameter("world_name").value
         self._model_uri    = self.get_parameter("model_uri").value
         self._comp_gravity  = self.get_parameter("compensate_gravity").value
+        self._pause_world   = self.get_parameter("pause_world").value
 
         self._latest_odom: Optional[Odometry] = None
         self._spawned = False
@@ -301,7 +317,8 @@ class SpawnProjectileNode(Node):
             f"(gravity compensation {'ON' if self._comp_gravity else 'off'})"
         )
         ok, msg = gz_spawn(self._world, self._model_uri, model_name,
-                           plan.position, plan.velocity)
+                           plan.position, plan.velocity,
+                           pause_world=self._pause_world)
         if ok:
             self.get_logger().info(f"Spawn OK: {msg}")
         else:

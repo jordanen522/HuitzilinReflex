@@ -745,6 +745,16 @@ git commit -m "W4-03: dodge planning — numeric closest-approach, away-side dod
 
 In `spawn_projectile.py`, add after the `MIN_SPAWN_Z` constant (keep all existing imports; none new are needed):
 
+> **SUPERSEDED (2026-07-26) — do not copy this snippet.** The JSON bodies below do
+> not work: `gz service --req` parses protobuf **text** format only, and rejects JSON
+> with empty stdout and exit code 0 (silent failure). `gz.msgs.EntityFactory` also has
+> no `initial_linear_velocity` field in Harmonic — the throw is a separate one-physics-step
+> `gz.msgs.EntityWrench` on `/world/<world>/wrench` (needs `gz-sim-apply-link-wrench-system`),
+> and the world must be paused across create+impulse or the ball free-falls and ground
+> contact eats the kick. See the shipped `gz_spawn` / `gz_world_control` / `gz_impulse` /
+> `gz_remove` / `_run_gz` in `src/huitzilin_perception/huitzilin_perception/spawn_projectile.py`
+> for the authoritative form.
+
 ```python
 def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
              timeout_s: float = 5.0) -> tuple[bool, str]:
@@ -2246,7 +2256,7 @@ Grids `dodge_speed_mps × trigger_horizon_s` (3×2) over B02/B03/B06 via
 | Dodge fires, drone doesn't move | patrol still fighting the spike → check evasion log called `/huitzilin/start_patrol false`; verify bridge evade priority |
 | No dodge on obvious hits | `/threat/centroid` silent (detector issue — Week 3 runbook) or `min_track_updates` unreached for fast balls at 15 Hz → try `trigger_horizon_s` 2.0 |
 | `ball ... never seen on /gz/dynamic_poses` | wrong `world_name`/`drone_model` param, or pose bridge disabled (`gz_pose_bridge:=false`) |
-| Balls pile up on the runway | `gz_remove` failing — check T3 log; remove manually: `gz service -s /world/huitzilin_runway/remove --reqtype gz.msgs.Entity --reptype gz.msgs.Boolean --timeout 2000 --req '{"name": "<ball>", "type": 2}'` |
+| Balls pile up on the runway | `gz_remove` failing — check T3 log; remove manually: `gz service -s /world/huitzilin_runway/remove --reqtype gz.msgs.Entity --reptype gz.msgs.Boolean --timeout 2000 --req 'name: "<ball>", type: MODEL'` |
 | Everything slow / timing weird | judging by wall clock — all windows are sim-time; RTF ~0.33 is expected |
 ````
 
