@@ -360,6 +360,19 @@ class SpawnProjectileNode(Node):
         self.declare_parameter("model_uri", "model://projectile")
         self.declare_parameter("compensate_gravity", False)  # loft to arrive at drone altitude (Week 4 battery)
         self.declare_parameter("pause_world", False)         # only with SITL down — see gz_world_control
+        # Wall seconds to leave the ball in the world before removing it; 0 disables.
+        # NOT optional hygiene: a ball left behind has link gravity off and no
+        # rolling resistance, so it rolls until its AABB no longer fits ODE's
+        # hash-space int quantization and the physics engine aborts the entire
+        # world ("ODE INTERNAL ERROR 1: assertion aabbBound >= dMinIntExact &&
+        # aabbBound < dMaxIntExact failed in collide()"). That killed the
+        # 2026-07-26 bring-up world after ~9 idle hours, with leftover balls
+        # measured at x=-42 m and x=-207 m. dodge_battery calls gz_remove
+        # itself, so this only covers the standalone/probe path. 20 s wall is
+        # ~6 s of sim time at the Dell's ~0.33 RTF — well past a 0.75 s transit,
+        # and capture_scenario.sh runs the spawn disowned in the background so
+        # the later exit never delays a bag.
+        self.declare_parameter("lifetime_s", 20.0)
 
         self._scenario_id  = self.get_parameter("scenario_id").value
         self._speed        = self.get_parameter("speed_mps").value
@@ -371,6 +384,7 @@ class SpawnProjectileNode(Node):
         self._model_uri    = self.get_parameter("model_uri").value
         self._comp_gravity  = self.get_parameter("compensate_gravity").value
         self._pause_world   = self.get_parameter("pause_world").value
+        self._lifetime_s    = float(self.get_parameter("lifetime_s").value)
 
         self._latest_odom: Optional[Odometry] = None
         self._spawned = False
@@ -456,6 +470,20 @@ class SpawnProjectileNode(Node):
             self.get_logger().info(f"Spawn OK: {msg}")
         else:
             self.get_logger().error(msg)
+            return
+
+        # Blocking is safe here: _do_spawn runs inside the odom callback, so
+        # main()'s spin loop cannot exit until this returns.
+        if self._lifetime_s > 0.0:
+            time.sleep(self._lifetime_s)
+            gone, why = gz_remove(self._world, model_name)
+            if gone:
+                self.get_logger().info(f"Removed '{model_name}'.")
+            else:
+                self.get_logger().error(
+                    f"Could NOT remove '{model_name}' ({why}). Remove it by hand "
+                    f"before leaving the world idle — a stray ball rolls until "
+                    f"ODE aborts the world. See the lifetime_s comment.")
 
 
 def main(args=None) -> None:
