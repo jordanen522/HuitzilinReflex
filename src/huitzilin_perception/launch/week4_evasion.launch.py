@@ -69,7 +69,30 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     return LaunchDescription(args + [week3, evasion,
-                                     OpaqueFunction(function=_pose_bridge)])
+                                     OpaqueFunction(function=_pose_bridge),
+                                     OpaqueFunction(function=_wrench_bridge)])
+
+
+def _wrench_bridge(context):
+    """ROS->gz bridge for the two ApplyLinkWrench topics.
+
+    spawn_projectile throws the ball by publishing a one-step impulse and a
+    persistent -mass*g wrench (the model spawns with gravity off). Both have
+    to land on the same physics step, which the `gz` CLI cannot do — each call
+    costs ~0.5 s of sim time. Without this bridge the throw silently degrades
+    to the slower CLI path and the trajectory flattens.
+    """
+    world = context.launch_configurations["world_name"]
+    return [Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="wrench_bridge",
+        output="screen",
+        arguments=[
+            f"/world/{world}/wrench@ros_gz_interfaces/msg/EntityWrench]gz.msgs.EntityWrench",
+            f"/world/{world}/wrench/persistent@ros_gz_interfaces/msg/EntityWrench]gz.msgs.EntityWrench",
+        ],
+    )]
 
 
 def _pose_bridge(context):

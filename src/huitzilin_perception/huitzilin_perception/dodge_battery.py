@@ -50,7 +50,12 @@ from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 
 from huitzilin_perception.ballistics import compute_spawn
-from huitzilin_perception.spawn_projectile import MIN_SPAWN_Z, gz_remove, gz_spawn
+from huitzilin_perception.spawn_projectile import (
+    MIN_SPAWN_Z,
+    WrenchThrower,
+    gz_remove,
+    gz_spawn,
+)
 
 RELIABLE_QOS = QoSProfile(
     reliability=QoSReliabilityPolicy.RELIABLE,
@@ -105,6 +110,11 @@ class DodgeBatteryNode(Node):
         self._settle_s = float(self.get_parameter("settle_s").value)
         self._budget_s = float(self.get_parameter("latency_budget_s").value)
         self._evasion_name = self.get_parameter("evasion_node_name").value
+
+        # Warm wrench publishers, built once: every throw needs its impulse and
+        # its gravity restore on the same physics step, which the gz CLI cannot
+        # do. run() blocks on wait_for_bridge before the first scenario.
+        self._thrower = WrenchThrower(self, self._world)
 
         self._lock = threading.Lock()
         self._latest_odom = None
@@ -198,6 +208,12 @@ class DodgeBatteryNode(Node):
     # ── Main flow ────────────────────────────────────────────────────────
 
     def run(self) -> int:
+        if not self._thrower.wait_for_bridge():
+            self.get_logger().error(
+                "wrench bridge never connected — every throw would leave the "
+                "ball hanging motionless. Start the stack with "
+                "week4_evasion.launch.py (it launches wrench_bridge).")
+            return 1
         if not self._battery_f.exists():
             self.get_logger().error(f"battery config not found: {self._battery_f}")
             return 1
@@ -330,7 +346,8 @@ class DodgeBatteryNode(Node):
             self._listening = True
 
         ok, msg = gz_spawn(self._world, self._model_uri, name,
-                           plan.position, plan.velocity)
+                           plan.position, plan.velocity,
+                           thrower=self._thrower)
         if not ok:
             with self._lock:
                 self._listening = False

@@ -57,7 +57,7 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 
-from huitzilin_perception.ballistics import compute_spawn
+from huitzilin_perception.ballistics import G_MPS2, compute_spawn
 
 RELIABLE_QOS = QoSProfile(
     reliability=QoSReliabilityPolicy.RELIABLE,
@@ -79,13 +79,18 @@ WORLD_STEP_S = 0.001
 
 def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
              timeout_s: float = 5.0, *,
-             pause_world: bool = False) -> tuple[bool, str]:
+             pause_world: bool = False,
+             thrower: "WrenchThrower | None" = None) -> tuple[bool, str]:
     """Spawn `model_uri` as `name` at ENU `position`, then kick it to
     `velocity` with a one-step impulse. Returns (ok, message).
     Module-level so dodge_battery.py can reuse it without a node.
 
     pause_world=False (default) is REQUIRED whenever ArduPilot SITL is flying.
     See gz_world_control for why pausing breaks a live run.
+
+    Pass `thrower` (a WrenchThrower) so the launch impulse and the gravity
+    restore land on the same physics step. Without it the CLI fallback is
+    used, which is ~0.25 s of sim time slower and flattens the trajectory.
     """
     req = (
         f'sdf_filename: "{model_uri.replace("model://", "")}", '
@@ -109,7 +114,17 @@ def gz_spawn(world: str, model_uri: str, name: str, position, velocity,
             return False, (f"create service did not confirm the spawn "
                            f"(reply {msg!r}) — is model {model_uri} on the "
                            f"server's GZ_SIM_RESOURCE_PATH?")
-        ok, msg = gz_impulse(world, name, velocity, timeout_s=timeout_s)
+        if thrower is not None:
+            ok, msg = thrower.throw(name, velocity)
+        else:
+            ok, msg = gz_impulse(world, name, velocity, timeout_s=timeout_s)
+            if ok:
+                g_ok, g_msg = gz_restore_gravity(world, name,
+                                                 timeout_s=timeout_s)
+                if not g_ok:
+                    return False, (f"impulse sent but gravity restore failed "
+                                   f"({g_msg}) — the ball will fly straight")
+                msg += " + gravity restored (CLI, one call late)"
     finally:
         if paused:
             gz_world_control(world, "pause: false", timeout_s)
@@ -174,6 +189,109 @@ def gz_impulse(world: str, model_name: str, velocity, link_name: str = "link",
     return True, (f"spawned + impulse "
                   f"({force[0]:.0f}, {force[1]:.0f}, {force[2]:.0f}) N "
                   f"for one {step_s * 1e3:.0f} ms step")
+
+
+def gz_restore_gravity(world: str, model_name: str, link_name: str = "link",
+                       mass_kg: float = PROJECTILE_MASS_KG,
+                       g: float = G_MPS2,
+                       timeout_s: float = 5.0) -> tuple[bool, str]:
+    """Re-enable gravity on a spawned ball as a persistent -mass*g wrench.
+
+    models/projectile/model.sdf ships with link gravity OFF so the ball cannot
+    fall during the ~0.5 s of sim time a `gz` CLI call costs. A constant force
+    of -mass*g gives exactly a = -g, so the parabola ballistics.py and
+    kalman.py assume is preserved.
+
+    CLI fallback only: it lands ~0.25 s of sim time after the impulse, so the
+    ball flies briefly straight and drops that much less than planned. Pass a
+    WrenchThrower to gz_spawn to get both messages on the same step.
+    """
+    msg = (f'entity: {{name: "{model_name}::{link_name}", type: LINK}}, '
+           f'wrench: {{force: {_tf_vec3((0.0, 0.0, -mass_kg * g))}, '
+           f'torque: {{x: 0, y: 0, z: 0}}}}')
+    return _run_gz([
+        "gz", "topic", "-t", f"/world/{world}/wrench/persistent",
+        "-m", "gz.msgs.EntityWrench", "-p", msg,
+    ], timeout_s)
+
+
+class WrenchThrower:
+    """Warm ROS publishers for the two ApplyLinkWrench topics.
+
+    Throwing needs two messages to land on the SAME physics step: the one-step
+    launch impulse (/world/<world>/wrench) and the persistent -mass*g wrench
+    that restores gravity (/world/<world>/wrench/persistent). The `gz` CLI
+    cannot do that — each call costs ~0.5 s of sim time — so both are
+    published from ROS publishers that are already matched to
+    ros_gz_bridge's ROS->gz bridge (launched by week4_evasion.launch.py).
+
+    Verified 2026-07-26: ball held dead still at z=3.000 across five polls
+    after create, then a 8 m/s vertical throw apexed at 6.08+ m against 6.26
+    predicted (0.2 s polling straddles the true apex).
+
+    Usage:
+        thrower = WrenchThrower(node, world)
+        thrower.wait_for_bridge()          # once, before the first throw
+        gz_spawn(..., thrower=thrower)
+    """
+
+    def __init__(self, node, world: str,
+                 mass_kg: float = PROJECTILE_MASS_KG,
+                 step_s: float = WORLD_STEP_S,
+                 g: float = G_MPS2) -> None:
+        from ros_gz_interfaces.msg import EntityWrench  # noqa: PLC0415
+
+        self._node = node
+        self._mass = mass_kg
+        self._step = step_s
+        self._g = g
+        self._impulse_pub = node.create_publisher(
+            EntityWrench, f"/world/{world}/wrench", 10)
+        self._gravity_pub = node.create_publisher(
+            EntityWrench, f"/world/{world}/wrench/persistent", 10)
+
+    def wait_for_bridge(self, timeout_s: float = 15.0) -> bool:
+        """Block until parameter_bridge has subscribed to BOTH topics.
+
+        Without this the first throw is silently dropped: a ROS publisher with
+        no matched subscriber discards the message, and the ball just hangs
+        motionless where it spawned.
+        """
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            if (self._impulse_pub.get_subscription_count() > 0
+                    and self._gravity_pub.get_subscription_count() > 0):
+                return True
+            rclpy.spin_once(self._node, timeout_sec=0.05)
+        return False
+
+    def throw(self, model_name: str, velocity,
+              link_name: str = "link") -> tuple[bool, str]:
+        """Launch `model_name` at `velocity` (world ENU) and restore gravity."""
+        if (self._impulse_pub.get_subscription_count() == 0
+                or self._gravity_pub.get_subscription_count() == 0):
+            return False, ("wrench bridge not connected — is parameter_bridge "
+                           "running for /world/<world>/wrench{,/persistent}? "
+                           "(week4_evasion.launch.py starts it)")
+        force = [self._mass * float(v) / self._step for v in velocity]
+        self._impulse_pub.publish(self._msg(model_name, link_name, force))
+        self._gravity_pub.publish(self._msg(
+            model_name, link_name, (0.0, 0.0, -self._mass * self._g)))
+        rclpy.spin_once(self._node, timeout_sec=0.05)   # flush both
+        return True, (f"thrown via warm bridge: impulse "
+                      f"({force[0]:.0f}, {force[1]:.0f}, {force[2]:.0f}) N "
+                      f"for one {self._step * 1e3:.0f} ms step + gravity restored")
+
+    def _msg(self, model_name: str, link_name: str, force):
+        from ros_gz_interfaces.msg import Entity, EntityWrench  # noqa: PLC0415
+
+        msg = EntityWrench()
+        msg.entity.name = f"{model_name}::{link_name}"
+        msg.entity.type = Entity.LINK
+        msg.wrench.force.x = float(force[0])
+        msg.wrench.force.y = float(force[1])
+        msg.wrench.force.z = float(force[2])
+        return msg
 
 
 def gz_remove(world: str, name: str, timeout_s: float = 5.0) -> tuple[bool, str]:
@@ -253,6 +371,10 @@ class SpawnProjectileNode(Node):
         self._latest_odom: Optional[Odometry] = None
         self._spawned = False
 
+        # Built here (not at throw time) so the bridge has the whole odom wait
+        # to match the publishers — an unmatched publisher drops the throw.
+        self._thrower = WrenchThrower(self, self._world)
+
         self._odom_sub = self.create_subscription(
             Odometry,
             "/huitzilin/odom",
@@ -316,9 +438,16 @@ class SpawnProjectileNode(Node):
             f"vel=({vx:.2f}, {vy:.2f}, {vz:.2f}) m/s "
             f"(gravity compensation {'ON' if self._comp_gravity else 'off'})"
         )
+        if not self._thrower.wait_for_bridge():
+            self.get_logger().warning(
+                "wrench bridge never connected — falling back to the CLI "
+                "throw, which restores gravity ~0.25 s of sim time late")
+            thrower = None
+        else:
+            thrower = self._thrower
         ok, msg = gz_spawn(self._world, self._model_uri, model_name,
                            plan.position, plan.velocity,
-                           pause_world=self._pause_world)
+                           pause_world=self._pause_world, thrower=thrower)
         if ok:
             self.get_logger().info(f"Spawn OK: {msg}")
         else:

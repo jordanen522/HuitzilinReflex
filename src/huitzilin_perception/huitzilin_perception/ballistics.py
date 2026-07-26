@@ -5,9 +5,15 @@ Shared by spawn_projectile.py (spawn planning), dodge_battery.py (analytic
 cross-checks), and the unit tests. No ROS imports — unit-testable on any
 machine (mirrors the cloud_geometry.py pattern).
 
-The Gazebo projectile model (models/projectile/model.sdf) has gravity ON and
-no aero-drag plugin, so a spawned ball flies an exact parabola: these
-closed-form trajectories match the simulator, not approximate it.
+The Gazebo projectile model (models/projectile/model.sdf) has no aero-drag
+plugin, so a thrown ball flies an exact parabola: these closed-form
+trajectories match the simulator, not approximate it.
+
+The model ships with link gravity OFF so the ball cannot fall during the
+~0.5 s of sim time a `gz` CLI call costs; spawn_projectile restores it at
+throw time as a persistent -mass*g wrench, which gives exactly a = -g. If a
+throw ever flies straight, that wrench was dropped — the parabola assumed
+here is only as good as that restore.
 """
 
 from __future__ import annotations

@@ -21,6 +21,9 @@
   <!-- Gazebo bridge (depth image + point cloud) -->
   <depend>ros_gz_image</depend>
   <depend>ros_gz_bridge</depend>
+  <!-- EntityWrench/Entity: spawn_projectile.WrenchThrower publishes the launch
+       impulse + gravity-restore wrench through the ROS->gz bridge. -->
+  <depend>ros_gz_interfaces</depend>
 
   <!-- Point cloud processing (numpy-only path; open3d optional) -->
   <depend>sensor_msgs_py</depend>
