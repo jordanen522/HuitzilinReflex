@@ -103,6 +103,11 @@ class DetectorNode(Node):
         self.declare_parameter("compensate_egomotion", True)
         self.declare_parameter("odom_topic", "/huitzilin/odom")
         self.declare_parameter("debug_funnel", False)  # W3-15 diagnostic: log per-stage counts
+        # Funnel-log throttle. 1.0 keeps a 15 Hz stream readable, but it also
+        # hides most of a projectile pass: a ball is inside the range gate for
+        # only ~0.6 s, so a whole throw collapses to one line. Drop this to 0.0
+        # to get every frame while diagnosing a specific throw.
+        self.declare_parameter("debug_funnel_throttle_s", 1.0)
         self.declare_parameter("cloud_convention", "gz_flu")  # gz_flu | optical (see detector.yaml)
         self.declare_parameter("fg_max_points", 5000)  # skip frame if foreground explodes (egomotion flood)
         self.declare_parameter("cluster_max_extent_m", 0.35)  # reject clusters physically larger than the projectile
@@ -186,6 +191,8 @@ class DetectorNode(Node):
             "cluster_max_extent_m": self.get_parameter("cluster_max_extent_m").value,
             "fixed_frame":        self.get_parameter("fixed_frame").value,
         }
+        self._funnel_throttle_s = float(
+            self.get_parameter("debug_funnel_throttle_s").value)
 
     # ── Odom callback ─────────────────────────────────────────────────────────
 
@@ -221,7 +228,7 @@ class DetectorNode(Node):
         raw = pc2.read_points_numpy(msg, field_names=("x", "y", "z"), skip_nans=True)
         if raw is None or raw.shape[0] == 0:
             if dbg:
-                self.get_logger().info("funnel: raw=0 (empty cloud)", throttle_duration_sec=1.0)
+                self.get_logger().info("funnel: raw=0 (empty cloud)", throttle_duration_sec=self._funnel_throttle_s)
             return
         pts = raw.astype(np.float32)
 
@@ -239,7 +246,7 @@ class DetectorNode(Node):
         if pts.shape[0] == 0:
             if dbg:
                 self.get_logger().info("funnel: raw>0 but finite=0 (all inf)",
-                                       throttle_duration_sec=1.0)
+                                       throttle_duration_sec=self._funnel_throttle_s)
             return
 
         n_raw = pts.shape[0]
@@ -249,7 +256,7 @@ class DetectorNode(Node):
                 f"x[{pts[:,0].min():.2f},{pts[:,0].max():.2f}] "
                 f"y[{pts[:,1].min():.2f},{pts[:,1].max():.2f}] "
                 f"z[{pts[:,2].min():.2f},{pts[:,2].max():.2f}]",
-                throttle_duration_sec=1.0)
+                throttle_duration_sec=self._funnel_throttle_s)
 
         depth = pts[:, 2]
         range_mask = (depth >= self._p["roi_min_range_m"]) & \
@@ -261,7 +268,7 @@ class DetectorNode(Node):
                 self.get_logger().info(
                     f"funnel: raw={n_raw} range=0 "
                     f"(nothing on Z in {self._p['roi_min_range_m']}-{self._p['roi_max_range_m']} m)",
-                    throttle_duration_sec=1.0)
+                    throttle_duration_sec=self._funnel_throttle_s)
             return
 
         half_angle_rad = math.radians(self._p["roi_half_angle_deg"])
@@ -272,7 +279,7 @@ class DetectorNode(Node):
         if pts.shape[0] == 0:
             if dbg:
                 self.get_logger().info(f"funnel: raw={n_raw} range={n_range} angle=0",
-                                       throttle_duration_sec=1.0)
+                                       throttle_duration_sec=self._funnel_throttle_s)
             return
 
         pts = voxel_downsample(pts, self._p["voxel_leaf_m"])
@@ -314,7 +321,7 @@ class DetectorNode(Node):
                 self.get_logger().info(
                     f"funnel: raw={n_raw} range={n_range} angle={n_angle} "
                     f"voxel={n_voxel} bg={len(self._bg_buffer)} fg=0",
-                    throttle_duration_sec=1.0)
+                    throttle_duration_sec=self._funnel_throttle_s)
             return
 
         if fg_pts.shape[0] > self._p["fg_max_points"]:
@@ -324,7 +331,7 @@ class DetectorNode(Node):
                 self.get_logger().info(
                     f"funnel: fg={n_fg} > fg_max_points={self._p['fg_max_points']} "
                     "-> egomotion flood, skip frame",
-                    throttle_duration_sec=1.0)
+                    throttle_duration_sec=self._funnel_throttle_s)
             return
 
         clusters = euclidean_cluster(
@@ -350,7 +357,7 @@ class DetectorNode(Node):
                 f"funnel: raw={n_raw} range={n_range} angle={n_angle} voxel={n_voxel} "
                 f"fg={n_fg} clusters={len(clusters)} ball_sized={len(ball_sized)} "
                 f"(size,extent)={desc}",
-                throttle_duration_sec=1.0)
+                throttle_duration_sec=self._funnel_throttle_s)
         if not ball_sized:
             return
 
@@ -361,7 +368,7 @@ class DetectorNode(Node):
                 self.get_logger().info(
                     f"funnel: best={best_cluster.shape[0]} score={score:.3f} "
                     f"< min_publish={self._p['min_publish_score']} -> reject",
-                    throttle_duration_sec=1.0)
+                    throttle_duration_sec=self._funnel_throttle_s)
             return
 
         centroid = best_cluster.mean(axis=0)
@@ -378,7 +385,7 @@ class DetectorNode(Node):
         if centroid_bl is None:
             if dbg:
                 self.get_logger().info("funnel: TF to base_link FAILED",
-                                       throttle_duration_sec=1.0)
+                                       throttle_duration_sec=self._funnel_throttle_s)
             return
 
         self._publish_centroid(centroid_bl, msg.header.stamp)
