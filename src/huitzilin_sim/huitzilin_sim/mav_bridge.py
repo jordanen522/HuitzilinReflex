@@ -22,6 +22,11 @@ MASK_VEL_ONLY = 0b0000111111000111   # use velocity x/y/z only            (4039)
 MASK_POS_ONLY = 0b0000111111111000   # use position x/y/z only            (4088)
 MASK_POS_YAW  = 0b0000101111111000   # use position x/y/z + yaw           (clears yaw bit)
 
+# Max MAVLink messages get_state() drains per call. Comfortably above one
+# stream period's worth at 15 Hz telemetry, but bounded so a backlog cannot
+# stall the caller's timer tick.
+_DRAIN_MAX_MSGS = 200
+
 
 class MavBridge:
     def __init__(self, connect="udp:127.0.0.1:14550", source_system=255):
@@ -146,17 +151,41 @@ class MavBridge:
     def get_state(self):
         """Non-blocking snapshot of pose + attitude + velocity in NED.
 
-        Cached: recv_match(type=X) silently discards non-X messages it scans
-        past, so in any single tick ATTITUDE or LOCAL_POSITION_NED may be
-        missing — the cache keeps the last known value (≤1 stream period old).
+        Drains the whole receive buffer and dispatches by type. It must NOT be
+        written as two type-filtered calls:
+
+            lp  = recv_match(type="LOCAL_POSITION_NED", blocking=False)
+            att = recv_match(type="ATTITUDE",           blocking=False)
+
+        because recv_match(type=X) *discards* every message it scans past. The
+        first call throws away the ATTITUDE messages queued ahead of the
+        position it wants, so attitude only survives when one happens to land
+        after a LOCAL_POSITION_NED. Position stays perfectly fresh (it is
+        fetched first) while yaw silently freezes at a value minutes old —
+        measured live 2026-07-26: odom position matched Gazebo truth to the
+        millimetre while odom yaw read 180.0 deg against a true 85.8 deg.
+
+        That asymmetry is expensive. Every consumer of the odom quaternion
+        breaks with it: spawn_projectile threw the ball ~94 deg away from where
+        the camera was actually looking (so the detector never saw it), and the
+        detector's egomotion compensation rotated clouds by a dead attitude, so
+        static ground stopped cancelling and 76% of frames tripped the
+        fg_max_points flood guard. It hid for a whole session because a stale
+        yaw is still correct for a while right after takeoff.
+
+        The drain is capped so a backlog cannot starve the caller's tick.
         """
-        lp = self.master.recv_match(type="LOCAL_POSITION_NED", blocking=False)
-        att = self.master.recv_match(type="ATTITUDE", blocking=False)
-        if lp:
-            self._state.update(dict(n=lp.x, e=lp.y, d=lp.z,
-                                    vn=lp.vx, ve=lp.vy, vd=lp.vz))
-        if att:
-            self._state.update(dict(roll=att.roll, pitch=att.pitch, yaw=att.yaw))
+        for _ in range(_DRAIN_MAX_MSGS):
+            msg = self.master.recv_match(blocking=False)
+            if msg is None:
+                break
+            kind = msg.get_type()
+            if kind == "LOCAL_POSITION_NED":
+                self._state.update(dict(n=msg.x, e=msg.y, d=msg.z,
+                                        vn=msg.vx, ve=msg.vy, vd=msg.vz))
+            elif kind == "ATTITUDE":
+                self._state.update(dict(roll=msg.roll, pitch=msg.pitch,
+                                        yaw=msg.yaw))
         return dict(self._state)
 
     # -- frame helpers (NED <-> ENU) used by the ROS node ---------------------
