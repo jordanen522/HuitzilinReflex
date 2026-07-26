@@ -115,6 +115,8 @@ class DetectorNode(Node):
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
+        self._funnel_throttle_s = float(
+            self.get_parameter("debug_funnel_throttle_s").value)
 
         # ── TF buffer ────────────────────────────────────────────────────────
         self._tf_buffer = tf2_ros.Buffer()
@@ -191,8 +193,6 @@ class DetectorNode(Node):
             "cluster_max_extent_m": self.get_parameter("cluster_max_extent_m").value,
             "fixed_frame":        self.get_parameter("fixed_frame").value,
         }
-        self._funnel_throttle_s = float(
-            self.get_parameter("debug_funnel_throttle_s").value)
 
     # ── Odom callback ─────────────────────────────────────────────────────────
 
