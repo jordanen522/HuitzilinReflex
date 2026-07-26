@@ -28,6 +28,23 @@
           <sphere><radius>0.040</radius></sphere>  <!-- 80 mm diameter -->
         </geometry>
         <surface>
+          <!-- collide_bitmask 0 = the ball collides with NOTHING: it flies its
+               parabola through the airframe and the runway alike.
+               This is a measurement decision, not a fidelity shortcut. A 150 g
+               ball at 8-14 m/s does tumble a 3.5" quad, and it did: 2026-07-26
+               the battery scored B03 r0 as dodged=True min=0.27 m (a real
+               miss-distance failure), then the contact flipped the vehicle,
+               ArduPilot crash-checked (AngErr=170>30) and disarmed, and every
+               remaining run aborted on MIN_SPAWN_Z with the wreck on the
+               ground. One marginal dodge destroyed the other ~50 runs, and a
+               flipped vehicle cannot be recovered in-harness because ArduPilot
+               refuses to arm inverted.
+               Nothing is lost: hits are scored from min_dist_m, computed
+               geometrically from /gz/dynamic_poses against hit_radius, so the
+               verdict is unchanged and better resolved than "did the physics
+               engine flip it". Restore contact only for a deliberate
+               impact-damage study, and expect one run per stack restart. -->
+          <collide_bitmask>0x00</collide_bitmask>
           <contact><ode/></contact>
           <friction><ode><mu>0.5</mu><mu2>0.5</mu2></ode></friction>
         </surface>
