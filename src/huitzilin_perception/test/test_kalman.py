@@ -1,4 +1,6 @@
 """Unit tests for kalman.py — pure math, no ROS."""
+import math
+
 import numpy as np
 import pytest
 
@@ -188,9 +190,10 @@ def test_clearance_leaves_upward_dodge_untouched():
 def test_clearance_leaves_affordable_descent_untouched():
     # 2 m up, 1 m floor -> 1 m of headroom; a 1.5 m dodge descending at 0.5
     # of full speed travels 0.75 m. Affordable, so pass it through.
-    d = clamp_dodge_to_clearance([0.0, 0.866, -0.5], altitude_m=2.0,
-                                 floor_m=1.0, descent_len_m=1.5)
-    np.testing.assert_allclose(d, [0.0, 0.866, -0.5], atol=1e-9)
+    d = clamp_dodge_to_clearance([0.0, math.sqrt(3.0) / 2.0, -0.5],
+                                 altitude_m=2.0, floor_m=1.0,
+                                 descent_len_m=1.5)
+    np.testing.assert_allclose(d, [0.0, math.sqrt(3.0) / 2.0, -0.5], atol=1e-9)
 
 
 def test_clearance_reaims_steep_dodge_horizontally_keeping_unit_speed():
@@ -218,11 +221,12 @@ def test_clearance_straight_down_escape_becomes_horizontal():
 
 
 def test_plan_dodge_applies_clearance_when_altitude_given():
-    # Descending throw from ahead-and-above: unclamped escape points down.
-    v0 = np.array([-8.0, 0.0, -2.0])
+    # Lofted enough to still be ABOVE the drone at closest approach, so the
+    # "away" side is downward — the live crash geometry.
+    v0 = np.array([-8.0, 0.0, 4.5])
     kw = dict(altitude_m=1.2, floor_m=1.0, descent_len_m=1.5)
-    free = plan_dodge([6.0, 0.0, 1.6], v0, [0.0, 0.0, 1.2], [0.0, 0.0, 0.0])
-    clamped = plan_dodge([6.0, 0.0, 1.6], v0, [0.0, 0.0, 1.2],
+    free = plan_dodge([6.0, 0.0, 1.2], v0, [0.0, 0.0, 1.2], [0.0, 0.0, 0.0])
+    clamped = plan_dodge([6.0, 0.0, 1.2], v0, [0.0, 0.0, 1.2],
                          [0.0, 0.0, 0.0], **kw)
     assert free.direction[2] < -0.3                     # would fly downward
     assert clamped.direction[2] >= -0.2 / 1.5 - 1e-9    # 0.2 m of headroom
