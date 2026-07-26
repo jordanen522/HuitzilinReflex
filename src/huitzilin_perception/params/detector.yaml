@@ -17,6 +17,10 @@ detector:
     # set here and the node restarted. Revert to false once live detection
     # is confirmed; it is chatty (throttled to ~1 Hz per stage).
     debug_funnel: true
+    # TEMPORARY (Week 4 bring-up): 0.0 = log every frame. Revert to 1.0 - and
+    # debug_funnel to false - before closing Week 4; run_regression.sh uses the
+    # installed copy and would otherwise be unreadable.
+    debug_funnel_throttle_s: 0.0
 
     # ── Input cloud axis convention (W3-15) ───────────────────────────────────
     # gz-sim PointCloudPacked stays in the gz sensor body frame (X fwd, Y left,
