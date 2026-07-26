@@ -10,6 +10,7 @@
 | FC failsafe | ArduPilot internal fault | Loss of flight control | FC status message | → FAILSAFE | Critical |
 | Uncommanded flyaway | Software bug / bad command | Uncontrolled flight | Geofence breach | Kill-switch / RTL | Critical |
 | GUIDED setpoint stream loss | patrol/evasion node stalls or `cmd_vel` stops | Stale velocity setpoint → risk of coast/lunge | Bridge watchdog (`cmd_timeout_s`) | → zero-velocity hold; then mode → LOITER/RTL | High |
+| Dodge into the ground | Descending threat → geometric escape perpendicular points down (measured `dir_body` z = −0.83 at 2 m AGL) | Drone flies itself into the surface; observed `Crash`/`Disarm` in SITL | Pre-command: altitude vs planned descent | `clamp_dodge_to_clearance` caps descent to the headroom above `dodge_floor_m` (1.0 m) and re-aims horizontally; never escapes upward into a descending threat | Critical |
 | GPIO/payload fault | Wiring fault | LED/buzzer fails | Node error | Log + continue | Low |
 | Pi power brownout | Inference power spike (5V/5A) | Companion computer resets | Heartbeat loss | → FAILSAFE | High |
 
