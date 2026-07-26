@@ -256,13 +256,18 @@ class WrenchThrower:
         Without this the first throw is silently dropped: a ROS publisher with
         no matched subscriber discards the message, and the ball just hangs
         motionless where it spawned.
+
+        Sleeps rather than spins: subscription counts come straight from the
+        middleware, and spinning here would be a nested spin whenever a caller
+        throws from inside a subscription callback ("Executor is already
+        spinning", which is exactly how the spawn node first failed).
         """
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             if (self._impulse_pub.get_subscription_count() > 0
                     and self._gravity_pub.get_subscription_count() > 0):
                 return True
-            rclpy.spin_once(self._node, timeout_sec=0.05)
+            time.sleep(0.05)
         return False
 
     def throw(self, model_name: str, velocity,
@@ -277,7 +282,6 @@ class WrenchThrower:
         self._impulse_pub.publish(self._msg(model_name, link_name, force))
         self._gravity_pub.publish(self._msg(
             model_name, link_name, (0.0, 0.0, -self._mass * self._g)))
-        rclpy.spin_once(self._node, timeout_sec=0.05)   # flush both
         return True, (f"thrown via warm bridge: impulse "
                       f"({force[0]:.0f}, {force[1]:.0f}, {force[2]:.0f}) N "
                       f"for one {self._step * 1e3:.0f} ms step + gravity restored")
