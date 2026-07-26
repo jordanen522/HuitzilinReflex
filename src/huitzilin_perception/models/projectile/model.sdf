@@ -3,6 +3,17 @@
   <model name="projectile">
     <pose>0 0 0 0 0 0</pose>
     <link name="link">
+      <!-- Gravity OFF so the ball hangs motionless from the instant it is
+           created until it is thrown. The `gz` CLI costs ~0.5 s of SIM time
+           per call, so with gravity on the ball free-fell 1.55 m and hit the
+           ground before its impulse arrived, then rolled away along z=0.040
+           and never crossed the camera frustum (measured 2026-07-26).
+           spawn_projectile restores gravity as a persistent wrench of
+           -mass*g on /world/<world>/wrench/persistent, published from the
+           same warm publisher as the launch impulse so both land within a
+           step or two and the parabola stays exact (ballistics.py, kalman.py
+           both assume a = -g). -->
+      <gravity>false</gravity>
       <inertial>
         <mass>0.150</mass>  <!-- 150 g — baseball-class -->
         <inertia>
