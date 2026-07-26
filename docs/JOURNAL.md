@@ -73,3 +73,73 @@ Train recall had collapsed to 60%. Three independent defects:
 - `detector.yaml` @ `454e312` as the tuned operating point (imperfect, best measured).
 - Bag library at `/data/huitzilin_bags` (17 scenario bags + acceptance bag);
   re-capture procedure in `docs/week3_capture_runbook.md`.
+
+## Week 4 (in progress, live bring-up 2026-07-26) — Kalman + dodge trigger
+
+First live bring-up on the Dell over SSH. Three root causes found and fixed; the
+dodge mechanism is proven end-to-end but the battery is not yet passing.
+
+### Fixed
+
+- **Stray projectile aborts the physics engine** (`cbfda03`). A ball left in the
+  world has link gravity off and no rolling resistance, so it rolls until its AABB
+  no longer fits ODE's hash-space int quantization and Gazebo aborts the *whole
+  world*: `ODE INTERNAL ERROR 1: assertion "aabbBound >= dMinIntExact && aabbBound
+  < dMaxIntExact" failed in collide()`. Killed the world after ~9 idle hours, taking
+  SITL's FDM link with it. Leftovers had been seen at x=-42 m and x=-207 m and
+  dismissed as litter. `spawn_projectile` now self-removes after `lifetime_s`
+  (default 20 s wall); `dodge_battery` already called `gz_remove`.
+- **`/oak/points` starved the detector** (`cfd3f3a`). The cloud is a 7.37 MB sample
+  (640×480 × 24 B) fragmented across thousands of UDP datagrams against a 208 KB
+  `net.core.rmem_max`; under BEST_EFFORT one lost fragment discards the entire
+  sample with no retransmit. Measured on the same topic, one variable changed:
+  best_effort depth=1 → **3.99 Hz**, reliable depth=10 → **14.43 Hz**. The detector
+  itself was down to **1.25 Hz**, so a ball crossing the frustum in ~0.75 s of sim
+  time was seen once and no track could mature. Now RELIABLE depth=5 → **13.7 Hz**
+  (11× more frames). `cloud_reliable: false` for a real OAK-D.
+- **odom yaw froze at a value minutes old** (`8205e98`). `MavBridge.get_state()`
+  used two type-filtered `recv_match` calls; `recv_match(type=X)` discards every
+  message it scans past, so the position fetch threw away the queued ATTITUDE
+  messages. Position stayed exact while yaw went stale — measured: odom position
+  matched Gazebo truth to the millimetre while odom yaw read **180.0°** against a
+  true **85.8°** (AP NED yaw 4.18°; `ned_rpy_to_enu_quat` was correct all along).
+  Consequences: `spawn_projectile` threw the ball ~94° away from where the camera
+  pointed, so the detector never saw it; and the detector rotated clouds by a dead
+  attitude. Hid for a whole session because a stale yaw is still right just after
+  takeoff — exactly when the one successful smoke throw ran. Now drains by type.
+
+### Measured
+
+- **Dodge works, hovering.** Ball tracked continuously 4.40→0.28 m with
+  `ball_sized=1` every frame (extent 0.09–0.13 m, correct for the 80 mm ball),
+  9 centroids, then `DODGE: miss=0.04 m tca=0.46 s latency=112 ms`.
+- **Battery (patrolling), before the yaw fix: 0/18.** After: **2/18 (11%)**,
+  0/2 false dodges, latency mean 213 ms / max 337 ms against a 150 ms budget.
+  One run made budget: B03 r0 (14 m/s) dodged at 89 ms, miss 0.303 m.
+  Results kept on the Dell: `/tmp/week4_battery{,_patrol,_hover,_fgmax}.csv`.
+- With the duplicate stack gone the Dell runs near **real-time**, not the 0.33 RTF
+  recorded earlier — that figure came from two stacks competing.
+
+### Open blocker — detector is blind while the drone translates
+
+81% of frames trip `fg_max_points` during patrol (floods of 17k–34k) while a
+hovering drone gives `fg=0`. This is **not** the stale yaw (it persists with yaw
+correct to 0.2°) and **not** the flood guard: raising `fg_max_points` 5000 → 45000
+gave 1/18, no better than 2/18, and cost 2 Hz of frame rate. The leading
+explanation is inherent to fixed-frame differencing — translating ~1 m across the
+5-frame background window reveals ground never previously observed, and those
+points have no near neighbour in the buffer regardless of transform accuracy.
+Flooded frames often still hold a clean ball cluster next to a metre-scale blob
+(`fg=223 clusters=2 (182, 0.84), (41, 0.09)`), so the ball is being discarded with
+the noise. Alternative not yet excluded: attitude-dependent residual error.
+
+**Settle this before tuning triggers.** The parameter sweep was deliberately NOT
+run: at 11% detection its numbers would be detection noise, not
+`dodge_speed_mps × trigger_horizon_s` signal.
+
+### Still temporary
+
+`params/detector.yaml` carries `debug_funnel: true` **and**
+`debug_funnel_throttle_s: 0.0` (per-frame logging). Both must be reverted before
+Week 4 closes — `run_regression.sh` uses the installed copy. `docs/WEEK4_PLAN.md`
+stays until then.
