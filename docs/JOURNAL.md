@@ -143,3 +143,50 @@ run: at 11% detection its numbers would be detection noise, not
 `debug_funnel_throttle_s: 0.0` (per-frame logging). Both must be reverted before
 Week 4 closes — `run_regression.sh` uses the installed copy. `docs/WEEK4_PLAN.md`
 stays until then.
+
+### Correction + two new findings (same day, after the fixes above)
+
+**The "detector is blind while translating" blocker was wrong.** Re-measured with
+all three fixes in place, thresholds at their Week-3 tuned values, and the drone
+patrolling normally: **7 floods / 275 frames (2.5%)**, and across a whole battery
+**22 floods / 1499 frames (1.5%)** with 30 centroids published. The earlier 81%
+figure was measured during battery activity and is not a property of patrol.
+
+What is true is a sharp **rate dependence**, measured with `cmd_vel` (which does
+work — 15 m in 12 s — contrary to the Week 3 open item):
+
+| motion | max fg |
+|---|---|
+| hover | 0 |
+| translate 1.5 m/s | ~0 |
+| translate 4 m/s | 38631 |
+| yaw 1.5 rad/s | 15504 |
+
+Patrol only flies **0.18–0.48 m/s**, well under the onset, which is why it is clean.
+Note `patrol.yaml`'s `cruise_speed_ms: 1.5` is silently ignored in `mode: "position"`
+(ArduPilot's WPNAV owns the speed there). The onset near 2–3 m/s is consistent with
+odom stamp latency: `mav_bridge_node` stamps odom with `get_clock().now()`
+(publication time, not measurement time), and at 4 m/s a 25 ms error equals 0.1 m —
+exactly `diff_threshold_m`. Raising `diff_threshold_m` 0.10 → 0.25 cut max fg
+38631 → 26137 but left 32/106 frames flooding, so timing is a contributor, not the
+whole story. Reverted (it is a Week-3 tuned value). Fix the stamp before retuning.
+
+**Finding 1 — the dodge fires, and the trigger works.** `B03 r1 dodged=True
+lat=64 ms` (inside the 150 ms budget), `B03 r2 dodged=True lat=404 ms`. Both scored
+✗ only on clearance: `min_dist` 0.25 m and 0.134 m, inside `hit_radius`. **The
+parameter sweep is now unblocked and meaningful** — clearance is exactly what
+`dodge_speed_mps × trigger_horizon_s` controls.
+
+**Finding 2 (safety, blocking) — the dodge direction has no ground clearance
+constraint.** Gravity-compensated throws arrive descending, so the perpendicular
+escape vector points *down*: measured `dir_body=(+0.01,+0.68,-0.74)` and
+`(+0.03,+0.56,-0.83)` in body FLU. From 2 m the drone dodges into the runway —
+MAVProxy logged `Crash` then `Disarm`, and the battery's last 10 runs aborted on the
+`MIN_SPAWN_Z` guard (`spawn z=0.03 < 0.3`) because the vehicle was on the ground.
+The evasion node must clamp the downward component against altitude (prefer
+horizontal/upward escape below some floor) before any hardware flight. This belongs
+in `docs/SAFETY_CASE.md` too.
+
+Battery results so far: patrol 0/18 (pre-yaw-fix) → 2/18 → v4 aborted at 10 runs by
+the crash, but with dodges firing at 64 ms. CSVs on the Dell:
+`/tmp/week4_battery{,_patrol,_hover,_fgmax,_v4}.csv`.
