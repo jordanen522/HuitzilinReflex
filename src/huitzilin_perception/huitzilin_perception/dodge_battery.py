@@ -733,6 +733,15 @@ class DodgeBatteryNode(Node):
 
         dodged = len(events) > 0
         latency_ms = round(events[0]["latency_s"] * 1000.0, 1) if dodged else None
+        # tca at the moment the dodge committed: how much time the manoeuvre
+        # actually had. This is the binding constraint on dodge authority, not
+        # dodge_speed_mps and not latency — measured across every dodge on
+        # record, tca is 0.07-0.28 s while latency spans 51-271 ms, and at
+        # 1.5 m/s that window buys 0.10-0.42 m against a 0.30 m hit radius.
+        # Recorded per run so a change meant to buy TIME can be judged on time.
+        tca_s = round(events[0]["tca_s"], 3) if dodged else None
+        trigger_miss_m = (round(events[0]["miss_m"], 3)
+                          if dodged and "miss_m" in events[0] else None)
         if min_dist == float("inf"):
             return {**base, "error": True, "success": False, "dodged": dodged,
                     "note": f"ball '{name}' never seen on /gz/dynamic_poses "
@@ -774,6 +783,7 @@ class DodgeBatteryNode(Node):
                                  else round(lead_err.cross_m, 3)),
                 "lead_vert_m": (None if lead_err is None
                                 else round(lead_err.vert_m, 3)),
+                "tca_s": tca_s, "trigger_miss_m": trigger_miss_m,
                 "ball_speed_mps": ball_speed,
                 "t_flight_assumed_s": round(t_flight, 3),
                 "flight_to_ca_s": flight_ca,
@@ -1117,6 +1127,17 @@ class DodgeBatteryNode(Node):
                     f"    flight launch->closest approach: mean {got.mean():.3f} s "
                     f"vs assumed {want.mean():.3f} s "
                     f"(excess {(got - want).mean():+.3f} s)")
+            # Time the manoeuvre actually had. Reported next to the displacement
+            # it can buy, because that product — not dodge_speed_mps alone — is
+            # what has to clear the hit radius.
+            tcas = [r["tca_s"] for r in sub if r.get("tca_s") is not None]
+            if tcas:
+                reach = np.array(tcas) * 1.5   # nominal dodge_speed_mps
+                lines.append(
+                    f"    tca at dodge commit: mean {np.mean(tcas):.3f} s, "
+                    f"range {np.min(tcas):.3f}-{np.max(tcas):.3f} s "
+                    f"=> {reach.min():.2f}-{reach.max():.2f} m of travel at "
+                    f"1.5 m/s vs {self._hit_radius} m hit radius")
             if lats:
                 lines.append(
                     f"    latency: mean {np.mean(lats):.0f} ms, "
@@ -1162,7 +1183,7 @@ class DodgeBatteryNode(Node):
                     "miss_along_m", "miss_cross_m", "miss_vert_m",
                     "lead_along_m", "lead_cross_m", "lead_vert_m",
                     "ball_speed_mps", "t_flight_assumed_s",
-                    "flight_to_ca_s"])
+                    "flight_to_ca_s", "tca_s", "trigger_miss_m"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})
