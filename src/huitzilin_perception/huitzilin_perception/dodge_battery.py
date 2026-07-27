@@ -194,6 +194,18 @@ class DodgeBatteryNode(Node):
         # scenario's miss_distance_m did not test what the scenario claims.
         # Reported separately so aiming error is never read as trigger error.
         self.declare_parameter("off_target_tol_m", 0.5)
+        # How closely a centroid's own range must match the ball's true range to
+        # count as a detection OF THE BALL rather than of patrol clutter. Sized
+        # above the detector's centroid error on a partly-observed sphere and
+        # well below the spacing between the ball and anything else in frame.
+        self.declare_parameter("det_match_tol_m", 0.75)
+        # A ball measured slower than this fraction of its scenario speed never
+        # launched — the impulse wrench was dropped. That is a harness failure,
+        # and it must be reported as one rather than scored: one such run
+        # (ball_speed 0.0) put a 1312 s "flight time" and a 7.98 m "aim error"
+        # into the 2026-07-27 means, moving the reported aim error 0.41 -> 1.44 m.
+        # Averaging a throw that never happened is worse than losing the row.
+        self.declare_parameter("min_launch_speed_frac", 0.25)
 
         self._battery_f = Path(self.get_parameter("battery_config").value)
         self._sweep_f = self.get_parameter("sweep_config").value
@@ -216,6 +228,10 @@ class DodgeBatteryNode(Node):
             self.get_parameter("steady_vel_timeout_s").value)
         self._off_target_tol = float(
             self.get_parameter("off_target_tol_m").value)
+        self._det_match_tol = float(
+            self.get_parameter("det_match_tol_m").value)
+        self._min_launch_frac = float(
+            self.get_parameter("min_launch_speed_frac").value)
         self._require_window = bool(
             self.get_parameter("require_throw_window").value)
         self._window_margin_s = float(
@@ -373,18 +389,30 @@ class DodgeBatteryNode(Node):
                     self._closest_sim = self._sim_now()
 
     def _centroid_cb(self, msg: PointStamped) -> None:
-        """Stamp the first detection of the run with the ball's true range.
+        """Stamp the first detection OF THE BALL with the ball's true range.
 
-        Detector output is not trusted for the range itself — the point is to
-        pair "the detector spoke" with ground truth, so a stale or spurious
-        centroid cannot flatter the number. Only the first per run: later ones
-        just track the ball inbound.
+        The match test is not optional. The detector emits a steady false-positive
+        stream during patrol (~1/s, measured), so the first centroid inside a 5 s
+        run window is more often clutter than the ball: the unmatched version of
+        this read 7.03 m and 6.39 m against a 5.0 m range gate, which the ball
+        cannot produce. Those were false positives being recorded as detections.
+
+        The centroid is in `base_link`, so its norm is the target's range from the
+        drone — directly comparable to the true separation without needing the
+        attitude. Requiring the two to agree admits the ball and rejects clutter
+        elsewhere in the frame. The range is still taken from ground truth, not
+        from the detector's estimate, so a noisy centroid cannot flatter it.
         """
         with self._lock:
             if not self._listening or self._first_det_range is not None:
                 return
-            if self._cur_dist is not None:
-                self._first_det_range = round(self._cur_dist, 3)
+            if self._cur_dist is None:
+                return
+            rng = math.sqrt(msg.point.x ** 2 + msg.point.y ** 2
+                            + msg.point.z ** 2)
+            if abs(rng - self._cur_dist) > self._det_match_tol:
+                return   # something else in the frame, not the ball
+            self._first_det_range = round(self._cur_dist, 3)
 
     def _patrol_cb(self, msg: String) -> None:
         try:
@@ -777,6 +805,21 @@ class DodgeBatteryNode(Node):
             return {**base, "error": True, "success": False, "dodged": dodged,
                     "note": f"ball '{name}' never seen on /gz/dynamic_poses "
                             f"(check drone_model:={self._drone_model})"}
+
+        # A ball that never launched tests nothing, and every downstream number
+        # it produces is garbage: min_dist becomes the distance to a stationary
+        # ball at the spawn point, and the "flight time" becomes however long the
+        # drone took to fly past it. Report it as the harness failure it is.
+        if speed > 0.0 and ball_speed is not None:
+            if ball_speed < self._min_launch_frac * speed:
+                return {**base, "error": True, "success": False,
+                        "dodged": dodged, "min_dist_m": round(min_dist, 3),
+                        "ball_speed_mps": ball_speed,
+                        "note": f"ball never launched: measured "
+                                f"{ball_speed:.2f} m/s vs {speed:.1f} m/s "
+                                f"specified — impulse wrench dropped (see the "
+                                f"duplicate/missing wrench-bridge note in "
+                                f"docs/week4_dodge_runbook.md)"}
 
         if base["expect_dodge"]:
             success = dodged and min_dist > self._hit_radius
