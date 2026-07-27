@@ -97,6 +97,21 @@ class DodgeBatteryNode(Node):
         self.declare_parameter("settle_s", 6.0)        # sim s between runs
         self.declare_parameter("latency_budget_s", 0.15)
         self.declare_parameter("evasion_node_name", "/evasion")
+        # Lead the throw at the drone's PREDICTED position. Without this the aim
+        # is a stale snapshot and a patrolling drone (measured 2.5-3.2 m/s on a
+        # single clean stack) walks clear on its own: 8 m/s "direct hit" runs
+        # measured 1.3-2.6 m closest approach, ~= |v| * t_flight, so the trigger
+        # correctly ignored them and they scored as dodge failures. Leading the
+        # same throw measures ~0.33 m. Set false only to reproduce old reports.
+        self.declare_parameter("lead_target", True)
+        # Dead time between sampling odom and the ball actually launching.
+        # CALIBRATED to 0.0 on the Dell 2026-07-26 by sweeping it against
+        # measured closest approach: 0.0 -> 0.32/0.35 m, 0.25 -> 1.44/0.50/2.70,
+        # 0.5 -> 1.27/1.34/1.57. The warm wrench bridge launches effectively
+        # immediately, so despite the `gz` create call's documented ~0.5 s of
+        # sim time there is no dead time left to compensate. Re-measure if the
+        # throw path ever falls back to the CLI (which restores gravity late).
+        self.declare_parameter("spawn_latency_s", 0.0)
 
         self._battery_f = Path(self.get_parameter("battery_config").value)
         self._sweep_f = self.get_parameter("sweep_config").value
@@ -109,6 +124,9 @@ class DodgeBatteryNode(Node):
         self._window_s = float(self.get_parameter("run_window_s").value)
         self._settle_s = float(self.get_parameter("settle_s").value)
         self._budget_s = float(self.get_parameter("latency_budget_s").value)
+        self._lead_target = bool(self.get_parameter("lead_target").value)
+        self._spawn_latency_s = float(
+            self.get_parameter("spawn_latency_s").value)
         self._evasion_name = self.get_parameter("evasion_node_name").value
 
         # Warm wrench publishers, built once: every throw needs its impulse and
@@ -324,15 +342,27 @@ class DodgeBatteryNode(Node):
         q = odom.pose.pose.orientation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        # twist.linear is world ENU here (mav_bridge_node publishes
+        # ned_to_enu(vn, ve, vd)), NOT body FLU as REP-103 would imply for
+        # child_frame_id=base_link. compute_spawn's lead assumes ENU, so this
+        # pairing is only correct as long as the bridge keeps doing that.
+        tw = odom.twist.twist.linear
+        speed = float(scen["speed_mps"])
+        # A speed-0 scenario (the Week 3 matrix has some) has no flight time to
+        # lead over, and compute_spawn rejects the combination; degrade instead
+        # of failing the run.
+        lead = (tw.x, tw.y, tw.z) if (self._lead_target and speed > 0.0) else None
         plan = compute_spawn(
             (p.x, p.y, p.z), yaw,
-            speed_mps=float(scen["speed_mps"]),
+            speed_mps=speed,
             approach_angle_deg=float(scen.get("approach_angle_deg", 0.0)),
             miss_distance_m=float(scen.get("miss_distance_m", 0.0)),
             offset_forward_m=float(scen.get("offset_forward_m", 6.0)),
             offset_vertical_m=float(scen.get("offset_vertical_m", 0.0)),
             compensate_gravity=bool(scen.get("compensate_gravity", True)),
             aim_at_drone=bool(scen.get("aim_at_drone", False)),
+            target_vel_enu=lead,
+            spawn_latency_s=self._spawn_latency_s,
         )
         if plan.position[2] < MIN_SPAWN_Z:
             return {**base, "error": True, "success": False,
@@ -468,6 +498,11 @@ class DodgeBatteryNode(Node):
             f"  Battery: {self._battery_f.name}   "
             f"Sweep: {Path(self._sweep_f).name if self._sweep_f else '—'}   "
             f"hit_radius: {self._hit_radius} m   window: {self._window_s} s",
+            f"  lead_target: {self._lead_target}   "
+            f"spawn_latency_s: {self._spawn_latency_s} s"
+            + ("" if self._lead_target else
+               "   << UNLED: throws aim at a stale point, so a patrolling "
+               "drone walks clear on its own"),
             "═" * 72,
             "",
             f"  {'Combo':<26} {'ID':>4} {'Rep':>3} {'Dodge':>5} "
