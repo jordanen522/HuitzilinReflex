@@ -243,3 +243,72 @@ compute cost.
 Dell helper: `/tmp/hz_restart.sh` does the full teardown+restart (world → SITL →
 MAVProxy → ROS stack) that any crash requires. CSVs: `/tmp/week4_battery*.csv`,
 logs `/tmp/battery_v{5,6}.log`.
+
+### Throw aiming: root-caused, fixed, and what it uncovered (2026-07-26, later)
+
+**Finding 4 resolved — root cause was a missing target lead, not the wrench, not
+`aim_at_drone`, not stale config.** Ruled out in this order:
+
+- **Config was fine.** `week4_battery.yaml` sets `aim_at_drone: true` and
+  `compensate_gravity: true` in `defaults:`, and `_one_run` merges them
+  (`{**defaults, **r}`), so both did reach `compute_spawn`.
+- **The gravity wrench was fine.** A probe (`/tmp/hz_throw_probe.py`) logged the ball
+  against `/gz/dynamic_poses` and compared measured z to both hypotheses: it tracked the
+  predicted parabola to within **0.01 m** the whole flight. The arithmetic that made
+  "dropped wrench" look attractive (flat-throw drop of 2.76 m at 8 m/s ≈ the observed
+  2.75 m miss) was a coincidence.
+- **The aim math was fine for a stationary target.** Same throw, drone hovering:
+  measured closest approach **0.114 m** against a `miss_distance_m: 0.0` spec.
+- **The drone was moving much faster than recorded.** `/huitzilin/odom` twist during
+  patrol reads **2.5–3.2 m/s**, not the 0.18–0.48 m/s in the Week-3 notes (that figure
+  came from two competing stacks at ~0.33 RTF). With patrol running, the identical
+  throw missed by **2.191 m** ≈ `|v| * t_flight`. `yaw_rate` was 0.00 throughout, so
+  the 6 m lever arm was never involved — it is pure translation lead.
+
+Fix: `compute_spawn` gained `target_vel_enu` + `spawn_latency_s` and advances the aim
+point by `v * (latency + offset_forward/speed)`. No iteration is needed because
+`offset_forward` is measured *from the aim point*, so flight time is unchanged.
+`spawn_latency_s` was **calibrated to 0.0** by sweeping it against measured closest
+approach (0.0 → 0.32/0.35 m, 0.25 → 1.44/0.50/2.70, 0.5 → 1.27/1.34/1.57): the warm
+wrench bridge launches effectively immediately, so the `gz` create call's documented
+~0.5 s of sim time leaves no dead time to compensate. Note `twist.linear` is world
+**ENU** here (`mav_bridge_node` publishes `ned_to_enu(vn,ve,vd)`), not body FLU as
+REP-103 would imply for `child_frame_id: base_link`; the lead depends on that.
+
+**Battery v8 (lead + steady-flight gate + honest scoring):**
+
+| metric | v6/v7 | v8 |
+|---|---|---|
+| dodge success, all runs | 3/18, 2/18 | 3/18 (17%) |
+| **dodge success, on-target runs only** | not measured | **3/7 (43%)** |
+| false dodges | 0/2 (invalid, see below) | 0/1 (valid) |
+| off-target throws | ~15/20 | 12/20 |
+| aim error, no-dodge runs | ~2.6 m systematic | mean 1.36 m, max 3.93 m |
+| latency | mean 378, max 455 ms | mean 210, max 320 ms |
+
+**The old "0/2 false dodges" was false credit.** B07 specifies a 1.5 m wide miss but
+v7 delivered it at 0.298 m and 0.717 m, so the trigger was being praised for ignoring
+a near-hit. Rows now carry `spec_miss_m`, `aim_err_m`, `off_target`, `steady`, and the
+report prints on-target-only rates plus the aim-error spread, so aiming error can
+never again be read as trigger error.
+
+**Finding 5 (now the top blocker) — the trigger does not fire on genuine threats.**
+With throws finally on target, the failures moved: v8 has runs at **0.54, 0.58, 0.67,
+0.74, 0.88, 0.97 m** with `no dodge fired`, and v7 had 0.136/0.258/0.328 m ignored
+outright. This was invisible while the throws were 2 m wide. Suspects, in order:
+detector not yielding `min_track_updates: 3` centroids inside the window; the KF's
+predicted miss disagreeing with the geometric one; and the stamping question below.
+Latency also still misses budget (mean 210 ms vs 150 ms).
+
+**Finding 6 — the steady-flight gate helps less than expected, and the reason is
+structural.** `steady_vel_gate_mps` only guarantees velocity is steady *at throw time*;
+B01's 4 m/s throw flies for 1.5 s, and patrol waypoints are ~5 m apart at ~3 m/s, so
+that flight nearly always spans a turn (B01 still missed by 3.1–3.9 m). Constant-velocity
+extrapolation cannot fix that. **The clean instrument is a hover battery** — patrol off
+and `auto_resume_patrol: false` on `/evasion` — where aim error is 0.11 m and the
+dodge chain is still fully exercised. Keep patrol batteries for realism, but do not
+read trigger rates off them at low projectile speed.
+
+Dell helpers now live in `~/hz_tools/` (`hz_restart.sh`, `hz_env.sh`, `hz_env_sitl.sh`)
+because `/tmp` is wiped by reboot; `hz_restart.sh` locates its own env via `$SCRIPT_DIR`.
+Logs `/tmp/battery_v{7,8}.log`, probe `/tmp/hz_throw_probe.py`.
