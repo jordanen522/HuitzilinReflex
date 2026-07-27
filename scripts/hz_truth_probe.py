@@ -58,8 +58,9 @@ def _stamp_s(header) -> float:
 
 
 class TruthProbe(Node):
-    def __init__(self, out_path: str) -> None:
+    def __init__(self, out_path: str, drone_model: str) -> None:
         super().__init__("hz_truth_probe")
+        self._drone_model = drone_model
         # The stack runs on sim time; a probe on wall time would stamp its own
         # rows with a clock the dump cannot be joined to.
         self.set_parameters([Parameter("use_sim_time", value=True)])
@@ -91,15 +92,20 @@ class TruthProbe(Node):
         self._csv.writerow([kind, f"{stamp:.6f}", f"{recv:.6f}", name,
                             f"{x:.4f}", f"{y:.4f}", f"{z:.4f}"])
         self._n += 1
-        # Flush every row: the interesting window is the ~0.5 s before a kill,
-        # and a buffered writer is exactly where that window would be lost.
-        self._fh.flush()
 
     def _pose_cb(self, msg: TFMessage) -> None:
         for tr in msg.transforms:
+            # /gz/dynamic_poses carries every link in the world — rotor_0..3,
+            # imu_link, camera_link, base_link, link — none of which anything
+            # downstream reads. Recording them made the probe write ~1400
+            # rows/s, and the load measurably blinded the detector it was
+            # meant to observe (first detection 4.08 m -> 1.83 m). Keep only
+            # the two models the analysis needs.
+            name = tr.child_frame_id
+            if name != self._drone_model and not name.startswith("ball"):
+                continue
             t = tr.transform.translation
-            self._row("pose", _stamp_s(tr.header), tr.child_frame_id,
-                      t.x, t.y, t.z)
+            self._row("pose", _stamp_s(tr.header), name, t.x, t.y, t.z)
 
     def _odom_cb(self, msg: Odometry) -> None:
         p = msg.pose.pose.position
@@ -110,6 +116,10 @@ class TruthProbe(Node):
                   msg.point.x, msg.point.y, msg.point.z)
 
     def _heartbeat(self) -> None:
+        # Flush on a timer rather than per row. Per-row flushing was the other
+        # half of the load that blinded the detector; a 2 s window is a
+        # negligible loss against a battery that runs for minutes.
+        self._fh.flush()
         self.get_logger().info(f"{self._n} rows", throttle_duration_sec=10.0)
 
     def close(self) -> None:
@@ -119,10 +129,11 @@ class TruthProbe(Node):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="/tmp/truth.csv")
+    ap.add_argument("--drone-model", default="iris_depth")
     args = ap.parse_args()
 
     rclpy.init()
-    node = TruthProbe(args.out)
+    node = TruthProbe(args.out, args.drone_model)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
