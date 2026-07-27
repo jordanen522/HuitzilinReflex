@@ -605,7 +605,9 @@ class DodgeBatteryNode(Node):
                 return {**base, "error": True, "success": False,
                         "note": f"hover_mode: {hover_reason}"}
 
-        steady, vel = self._wait_steady_velocity()
+        # Return value deliberately dropped: this is a CHECK that the velocity
+        # has stopped changing, not the aim sample. See the re-read below.
+        steady, _ = self._wait_steady_velocity()
         if not steady:
             self.get_logger().warn(
                 f"{rid} r{rep}: velocity still changing after "
@@ -623,10 +625,28 @@ class DodgeBatteryNode(Node):
                             f"{win_reason} | best leg seen "
                             f"{win_leg:.2f} s over {self._window_timeout_s:.0f} s"}
 
-        # Re-read odom AFTER the waits so position matches that velocity.
+        # Re-read position AND VELOCITY from the same odom message, after both
+        # waits. The velocity from _wait_steady_velocity above must NOT be used
+        # to aim: _wait_throw_window sits between them and can block for up to
+        # throw_window_timeout_s (40 s), so the two samples describe different
+        # instants — and the bias has a sign, because that gate waits until the
+        # speed reaches 95% of cruise. Aiming with the pre-gate velocity
+        # therefore leads with a systematically SLOWER speed than the drone has
+        # at launch, i.e. a systematic under-lead.
+        #
+        # Measured 2026-07-27, which is how this was found: the drone arrived at
+        # closest approach 0.217 s ahead of the assumed flight time and
+        # lead_along sat at -1.40 m (= 1.14 m at the 5.26 m/s cruise) — two
+        # independent measurements of the same ~0.22 s. Ball speed was verified
+        # correct (3.90-14.09 m/s against 4/8/14 specs) and odom velocity
+        # verified accurate to 0.4%, so a stale-but-accurate sample was what was
+        # left. _wait_steady_velocity's return value is now used only for the
+        # `steady` flag it reports, never as an aim input.
         odom = self._latest_odom
         p = odom.pose.pose.position
         q = odom.pose.pose.orientation
+        tw = odom.twist.twist.linear
+        vel = np.array([tw.x, tw.y, tw.z])
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         # twist.linear is world ENU here (mav_bridge_node publishes
