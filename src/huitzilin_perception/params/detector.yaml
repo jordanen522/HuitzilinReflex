@@ -16,11 +16,27 @@ detector:
     # callback, so this cannot be flipped with `ros2 param set` — it must be
     # set here and the node restarted. Revert to false once live detection
     # is confirmed; it is chatty (throttled to ~1 Hz per stage).
-    debug_funnel: true
-    # TEMPORARY (Week 4 bring-up): 0.0 = log every frame. Revert to 1.0 - and
-    # debug_funnel to false - before closing Week 4; run_regression.sh uses the
-    # installed copy and would otherwise be unreadable.
-    debug_funnel_throttle_s: 0.0
+    # Reverted to false 2026-07-27 (live detection confirmed; the persistent
+    # background map closed the patrol blindness). It is ALSO not free: the
+    # funnel's min/max block runs six reductions over the full ~200k-point cloud
+    # before the range gate discards most of it, which is real cost inside the
+    # 77 ms/frame budget the detector is currently overrunning. Set true again
+    # only while diagnosing a specific throw's survivor counts.
+    debug_funnel: false
+    debug_funnel_throttle_s: 1.0
+
+    # ── Per-stage latency profiling (W4, 2026-07-27) ──────────────────────────
+    # Dodge latency was root-caused to detector COMPUTE, not transport: clouds
+    # arrive every ~77 ms wall (15 Hz at the measured RTF 0.864) and _cloud_cb
+    # was taking ~160 ms, so the depth-5 queue backs up and every cloud is stale
+    # on arrival. Transport is the symptom. This logs a wall-time breakdown per
+    # stage (hottest first) every profile_window_frames clouds, so the
+    # optimisation targets the measured hot stage instead of a guess.
+    # Deliberately independent of debug_funnel — leave that false while
+    # profiling. Same restart caveat as debug_funnel: params are cached at
+    # construction, so `ros2 param set` has no effect.
+    profile_stages: true
+    profile_window_frames: 30
 
     # ── Cloud transport (W4 live bring-up, 2026-07-26) ────────────────────────
     # /oak/points is a 7.37 MB sample; BEST_EFFORT lost ~75% of it to UDP

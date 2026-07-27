@@ -59,6 +59,7 @@ from huitzilin_perception.cloud_geometry import (
     make_transform,
     voxel_downsample,
 )
+from huitzilin_perception.stage_profiler import StageProfiler
 
 
 # ── QoS profiles ──────────────────────────────────────────────────────────────
@@ -145,6 +146,13 @@ class DetectorNode(Node):
         # publishes best-effort and dropping a frame beats queueing it.
         self.declare_parameter("cloud_reliable", True)
         self.declare_parameter("cloud_queue_depth", 5)
+        # ── Per-stage latency profiling (W4, 2026-07-27) ──────────────────────
+        # Independent of debug_funnel on purpose: the funnel's own min/max
+        # logging runs six reductions over the full ~200k-point cloud, so
+        # profiling with it on measures the instrument as much as the pipeline.
+        # Turn this on with debug_funnel OFF to get a clean stage breakdown.
+        self.declare_parameter("profile_stages", False)
+        self.declare_parameter("profile_window_frames", 30)
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
@@ -177,6 +185,15 @@ class DetectorNode(Node):
         # frames must never be mixed in one buffer.
         self._bg_mode: str = "camera"
         self._warned_no_attitude = False
+
+        # ── Latency profiling ────────────────────────────────────────────────
+        # Always instrumented, only reported when profile_stages is set: the
+        # context managers cost ~1 us each against ms-scale stages, and an
+        # always-live instrument cannot drift out of step with the pipeline the
+        # way a separately-maintained profiling script would.
+        self._prof = StageProfiler(
+            int(self.get_parameter("profile_window_frames").value))
+        self._profile_on = bool(self.get_parameter("profile_stages").value)
 
         # ── Subscribers ──────────────────────────────────────────────────────
         # See the cloud_reliable comment above for why this is not BEST_EFFORT.
@@ -280,6 +297,27 @@ class DetectorNode(Node):
     # ── Main cloud callback ───────────────────────────────────────────────────
 
     def _cloud_cb(self, msg: PointCloud2) -> None:
+        """Count and time every arriving cloud, then run the pipeline.
+
+        Every callback counts as a frame, including the eight early-out paths.
+        The executor is single-threaded, so whatever this callback spends —
+        publishing a centroid or bailing at the range gate — is what delays the
+        next cloud. The mean over ALL callbacks is therefore the figure that has
+        to fit inside the ~77 ms wall arrival period (15 Hz at RTF 0.864); a
+        mean taken over publishing frames only would flatter the pipeline.
+
+        try/finally so a raised exception still records the frame: a pipeline
+        that throws on the interesting frames must not go silent in the report.
+        """
+        try:
+            self._cloud_cb_impl(msg)
+        finally:
+            self._prof.frame_done()
+            if self._profile_on and self._prof.due():
+                self.get_logger().info(
+                    self._prof.report() + " [budget 77 ms/frame wall]")
+
+    def _cloud_cb_impl(self, msg: PointCloud2) -> None:
         t0 = time.monotonic()
         # Sim clock at callback entry, so the reported dodge latency can be
         # split into transport (sensor stamp -> here) and compute (here ->
@@ -297,12 +335,17 @@ class DetectorNode(Node):
         sim0 = self.get_clock().now().nanoseconds * 1e-9
         dbg = self._p.get("debug_funnel", False)
 
-        raw = pc2.read_points_numpy(msg, field_names=("x", "y", "z"), skip_nans=True)
-        if raw is None or raw.shape[0] == 0:
+        prof = self._prof
+
+        with prof.stage("deserialize"):
+            raw = pc2.read_points_numpy(msg, field_names=("x", "y", "z"),
+                                        skip_nans=True)
+            empty = raw is None or raw.shape[0] == 0
+            pts = None if empty else raw.astype(np.float32)
+        if pts is None:
             if dbg:
                 self.get_logger().info("funnel: raw=0 (empty cloud)", throttle_duration_sec=self._funnel_throttle_s)
             return
-        pts = raw.astype(np.float32)
 
         # W3-15 root cause of 0% recall: gz-sim fills PointCloudPacked in the
         # gz sensor BODY frame (X fwd, Y left, Z up). <optical_frame_id> in the
@@ -311,10 +354,12 @@ class DetectorNode(Node):
         # frustum angle, and TF into base_link all see what they expect.
         # cloud_convention: "optical" = passthrough (real OAK-D via DepthAI).
         if self._p["cloud_convention"] == "gz_flu":
-            pts = np.stack((-pts[:, 1], -pts[:, 2], pts[:, 0]), axis=1)
+            with prof.stage("convention"):
+                pts = np.stack((-pts[:, 1], -pts[:, 2], pts[:, 0]), axis=1)
 
         # Drop non-finite returns: sky pixels are +inf, which skip_nans keeps.
-        pts = pts[np.isfinite(pts).all(axis=1)]
+        with prof.stage("finite"):
+            pts = pts[np.isfinite(pts).all(axis=1)]
         if pts.shape[0] == 0:
             if dbg:
                 self.get_logger().info("funnel: raw>0 but finite=0 (all inf)",
@@ -323,17 +368,22 @@ class DetectorNode(Node):
 
         n_raw = pts.shape[0]
         if dbg:
-            self.get_logger().info(
-                f"funnel: raw={n_raw} "
-                f"x[{pts[:,0].min():.2f},{pts[:,0].max():.2f}] "
-                f"y[{pts[:,1].min():.2f},{pts[:,1].max():.2f}] "
-                f"z[{pts[:,2].min():.2f},{pts[:,2].max():.2f}]",
-                throttle_duration_sec=self._funnel_throttle_s)
+            # Six full-cloud reductions on ~200k points, and they run BEFORE the
+            # range gate throws most of it away. Measured as its own stage so a
+            # profiling run can tell the instrument from the pipeline.
+            with prof.stage("funnel_log_minmax"):
+                self.get_logger().info(
+                    f"funnel: raw={n_raw} "
+                    f"x[{pts[:,0].min():.2f},{pts[:,0].max():.2f}] "
+                    f"y[{pts[:,1].min():.2f},{pts[:,1].max():.2f}] "
+                    f"z[{pts[:,2].min():.2f},{pts[:,2].max():.2f}]",
+                    throttle_duration_sec=self._funnel_throttle_s)
 
-        depth = pts[:, 2]
-        range_mask = (depth >= self._p["roi_min_range_m"]) & \
-                     (depth <= self._p["roi_max_range_m"])
-        pts = pts[range_mask]
+        with prof.stage("range_gate"):
+            depth = pts[:, 2]
+            range_mask = (depth >= self._p["roi_min_range_m"]) & \
+                         (depth <= self._p["roi_max_range_m"])
+            pts = pts[range_mask]
         n_range = pts.shape[0]
         if pts.shape[0] == 0:
             if dbg:
@@ -343,10 +393,11 @@ class DetectorNode(Node):
                     throttle_duration_sec=self._funnel_throttle_s)
             return
 
-        half_angle_rad = math.radians(self._p["roi_half_angle_deg"])
-        lateral = np.sqrt(pts[:, 0] ** 2 + pts[:, 1] ** 2)
-        angle_mask = np.arctan2(lateral, pts[:, 2]) < half_angle_rad
-        pts = pts[angle_mask]
+        with prof.stage("angle_gate"):
+            half_angle_rad = math.radians(self._p["roi_half_angle_deg"])
+            lateral = np.sqrt(pts[:, 0] ** 2 + pts[:, 1] ** 2)
+            angle_mask = np.arctan2(lateral, pts[:, 2]) < half_angle_rad
+            pts = pts[angle_mask]
         n_angle = pts.shape[0]
         if pts.shape[0] == 0:
             if dbg:
@@ -354,7 +405,8 @@ class DetectorNode(Node):
                                        throttle_duration_sec=self._funnel_throttle_s)
             return
 
-        pts = voxel_downsample(pts, self._p["voxel_leaf_m"])
+        with prof.stage("voxel"):
+            pts = voxel_downsample(pts, self._p["voxel_leaf_m"])
         n_voxel = pts.shape[0]
         if pts.shape[0] == 0:
             return
@@ -367,8 +419,10 @@ class DetectorNode(Node):
         # Needs odom with a valid quaternion; old bags fall back to camera mode.
         T_fixed_cam = None
         if self._p["compensate_egomotion"]:
-            T_fixed_cam = self._lookup_matrix(
-                self._p["fixed_frame"], msg.header.frame_id, msg.header.stamp)
+            with prof.stage("tf_lookup"):
+                T_fixed_cam = self._lookup_matrix(
+                    self._p["fixed_frame"], msg.header.frame_id,
+                    msg.header.stamp)
         mode = "fixed" if T_fixed_cam is not None else "camera"
         if mode != self._bg_mode:
             # Never mix frames inside one background model.
@@ -379,28 +433,35 @@ class DetectorNode(Node):
                 f"({'odom TF available' if mode == 'fixed' else 'no odom TF — uncompensated'})")
             self._bg_mode = mode
         if mode == "fixed":
-            pts = apply_transform(T_fixed_cam, pts)
+            with prof.stage("ego_transform"):
+                pts = apply_transform(T_fixed_cam, pts)
 
         # Persistent voxel map only in a fixed frame — see __init__.
         use_map = bool(self._p["use_persistent_bg"]) and mode == "fixed"
         if use_map:
             stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-            fg_mask = self._bg_map.foreground(pts)
+            with prof.stage("bg_query"):
+                fg_mask = self._bg_map.foreground(pts)
             n_bg = len(self._bg_map)
             # Insert AFTER querying, or the frame is its own background.
-            self._bg_map.insert(pts, stamp_s)
-            self._bg_map.prune(stamp_s)
+            with prof.stage("bg_insert"):
+                self._bg_map.insert(pts, stamp_s)
+            with prof.stage("bg_prune"):
+                self._bg_map.prune(stamp_s)
             fg_pts = pts[fg_mask]
         else:
-            self._bg_buffer.append(pts.copy())
-            if len(self._bg_buffer) < 2:
+            with prof.stage("bg_deque_diff"):
+                self._bg_buffer.append(pts.copy())
+                short = len(self._bg_buffer) < 2
+                if not short:
+                    bg_all = np.vstack(list(self._bg_buffer)[:-1])
+                    current = self._bg_buffer[-1]
+                    n_bg = bg_all.shape[0]
+                    fg_mask = foreground_mask(current, bg_all,
+                                              self._p["diff_threshold_m"])
+                    fg_pts = current[fg_mask]
+            if short:
                 return
-            bg_all = np.vstack(list(self._bg_buffer)[:-1])
-            current = self._bg_buffer[-1]
-            n_bg = bg_all.shape[0]
-            fg_mask = foreground_mask(current, bg_all,
-                                      self._p["diff_threshold_m"])
-            fg_pts = current[fg_mask]
         n_fg = fg_pts.shape[0]
         if fg_pts.shape[0] == 0:
             if dbg:
@@ -432,14 +493,15 @@ class DetectorNode(Node):
         # blob at tol=0.20 and was being thrown away with it. One pass only —
         # recursive shrinking shatters surfaces into ball-sized false positives.
         # See cluster_and_split().
-        split = cluster_and_split(
-            fg_pts,
-            tol=self._p["cluster_tolerance_m"],
-            min_pts=self._p["cluster_min_points"],
-            max_extent=self._p["cluster_max_extent_m"],
-            split_tol=self._p["cluster_split_tol_m"],
-            max_split_points=self._p["cluster_split_max_points"],
-        )
+        with prof.stage("cluster"):
+            split = cluster_and_split(
+                fg_pts,
+                tol=self._p["cluster_tolerance_m"],
+                min_pts=self._p["cluster_min_points"],
+                max_extent=self._p["cluster_max_extent_m"],
+                split_tol=self._p["cluster_split_tol_m"],
+                max_split_points=self._p["cluster_split_max_points"],
+            )
         # cluster_max_points still applies, but only AFTER splitting: a dense
         # sub-0.35 m blob is not a ball, and it would otherwise out-vote the ball
         # in the largest-cluster pick below. Pre-split it discarded the ball.
@@ -466,17 +528,18 @@ class DetectorNode(Node):
                     throttle_duration_sec=self._funnel_throttle_s)
             return
 
-        centroid = best_cluster.mean(axis=0)
-        if self._bg_mode == "fixed":
-            # cluster lives in the fixed odom frame
-            T_bl_fixed = self._lookup_matrix(
-                "base_link", self._p["fixed_frame"], msg.header.stamp)
-            centroid_bl = (apply_transform(T_bl_fixed, centroid[None, :])[0]
-                           if T_bl_fixed is not None else None)
-        else:
-            centroid_bl = self._transform_to_base_link(
-                centroid, msg.header.stamp, msg.header.frame_id
-            )
+        with prof.stage("centroid_tf"):
+            centroid = best_cluster.mean(axis=0)
+            if self._bg_mode == "fixed":
+                # cluster lives in the fixed odom frame
+                T_bl_fixed = self._lookup_matrix(
+                    "base_link", self._p["fixed_frame"], msg.header.stamp)
+                centroid_bl = (apply_transform(T_bl_fixed, centroid[None, :])[0]
+                               if T_bl_fixed is not None else None)
+            else:
+                centroid_bl = self._transform_to_base_link(
+                    centroid, msg.header.stamp, msg.header.frame_id
+                )
         if centroid_bl is None:
             if dbg:
                 self.get_logger().info("funnel: TF to base_link FAILED",
@@ -496,8 +559,9 @@ class DetectorNode(Node):
                 f"compute={wall_ms:.0f} ms(wall, budget 77) raw={n_raw}",
                 throttle_duration_sec=self._funnel_throttle_s)
 
-        self._publish_centroid(centroid_bl, msg.header.stamp)
-        self._publish_marker(centroid_bl, msg.header.stamp)
+        with prof.stage("publish"):
+            self._publish_centroid(centroid_bl, msg.header.stamp)
+            self._publish_marker(centroid_bl, msg.header.stamp)
         if dbg:
             self.get_logger().info(
                 f"funnel: *** PUBLISHED *** best={best_cluster.shape[0]} score={score:.3f}",
