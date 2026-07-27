@@ -17,11 +17,15 @@ detector:
     # set here and the node restarted. Revert to false once live detection
     # is confirmed; it is chatty (throttled to ~1 Hz per stage).
     # Reverted to false 2026-07-27 (live detection confirmed; the persistent
-    # background map closed the patrol blindness). It is ALSO not free: the
-    # funnel's min/max block runs six reductions over the full ~200k-point cloud
-    # before the range gate discards most of it, which is real cost inside the
-    # 77 ms/frame budget the detector is currently overrunning. Set true again
-    # only while diagnosing a specific throw's survivor counts.
+    # background map closed the patrol blindness). Set true again only while
+    # diagnosing a specific throw's survivor counts.
+    #
+    # It is NOT the latency problem, contrary to what was assumed when profiling
+    # started. Its min/max block does run six reductions over the full
+    # ~200k-point cloud before the range gate discards most of it, but measured
+    # as its own stage (funnel_log_minmax) at throttle 0.0 that costs only
+    # 1.4-2.3 ms/frame — 4-5% of the frame. The ~160 ms figure was the cost of a
+    # PUBLISHING frame, and it was voxel (66-74 ms) plus cluster (30-70 ms).
     debug_funnel: false
     debug_funnel_throttle_s: 1.0
 
