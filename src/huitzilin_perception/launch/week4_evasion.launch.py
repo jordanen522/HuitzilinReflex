@@ -57,6 +57,15 @@ def generate_launch_description() -> LaunchDescription:
                 get_package_share_directory("huitzilin_sim"),
                 "params", "week4_patrol.yaml"),
         ),
+        # Forwarded to week3_perception so a diagnostic run (debug_funnel,
+        # debug_dump_dir) can point the detector at a throwaway yaml instead of
+        # editing the shipped one. --symlink-install makes the installed
+        # detector.yaml a symlink back into src/, so "just edit the build copy"
+        # dirties the repo and risks a diagnostic being committed as a setting.
+        DeclareLaunchArgument(
+            "detector_params",
+            default_value=os.path.join(pkg, "params", "detector.yaml"),
+        ),
     ]
 
     week3 = IncludeLaunchDescription(
@@ -66,6 +75,7 @@ def generate_launch_description() -> LaunchDescription:
             "mode": "live",
             "with_patrol": LaunchConfiguration("with_patrol"),
             "patrol_params": LaunchConfiguration("patrol_params"),
+            "detector_params": LaunchConfiguration("detector_params"),
             "use_sim_time": LaunchConfiguration("use_sim_time"),
         }.items(),
     )
