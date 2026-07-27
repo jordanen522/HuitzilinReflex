@@ -1337,3 +1337,78 @@ shipped `detector.yaml`:
 - on-target dodge success 11/15 (73%) and 11/14 (79%) on the best settled runs
 - latency 75-94 ms mean against a 150 ms budget
 - `tca` 0.18-0.26 s — still the number to move, now with a named cause to test
+
+---
+
+## 2026-07-27 (night, cont.) — Dodge authority root-caused: a false positive poisons the ball's track
+
+The trace above cleared the detector. The cause is in `ProjectileTracker`, it is
+reproducible offline with no sim at all, and it is worth 0.267 s — more than any
+detector threshold ever tried.
+
+### The mechanism
+
+`ProjectileTracker` is **single-target**: one `_x`, fed by every centroid the
+detector publishes. The detector emits ~1.4 false positives per second (673
+reseeds per battery: 153 reject, 520 timeout), so a stale FP track is usually
+alive when a ball arrives. What happens then is not "the ball is ignored":
+
+| frame | outcome | velocity error |
+|---|---|---|
+| f0 | reject | 8.0 m/s (seeded at zero) |
+| f1 | **ACCEPTED** | **38.6 m/s** — fits a line from the FP to the ball |
+| f2 | reject | 38.6 |
+| f3 | reject | 38.6 |
+| f4 | reseed from the ball, `n_updates` back to **1** | 8.0 |
+| f5 | accept | **0.48** |
+
+After a single rejection the incumbent's covariance has inflated enough
+(`init_vel_std` 15 m/s, so one 66 ms prediction gives ~1 m of position sigma) to
+**swallow the ball as a legitimate update**. The filter then fits a velocity
+along the false-positive-to-ball line — 38 m/s in the wrong direction — and
+spends the next two true detections contradicting the fiction it just built.
+
+**The control, with no incumbent, reaches 0.48 m/s velocity error at f1.** The
+ball needs six frames to reach what takes two: a **4-frame, 0.267 s penalty**.
+`tca` at commit measures 0.18-0.26 s, so this is the entire missing warning.
+
+Pinned in `test/test_kalman.py` (`test_ball_alone_pins_velocity_by_the_second_frame`,
+`test_an_incumbent_false_positive_corrupts_the_balls_velocity_estimate`,
+`test_the_incumbent_costs_four_frames_of_warning`). No behaviour was changed —
+the tests describe today's tracker so the fix has something to beat.
+
+### It resolves two results that never made sense
+
+- **The invariant 0.132 s / 3-update track age at commit.** The track that fires
+  is always the *reseeded* one, which starts at `n_updates = 1` by construction,
+  so it is always exactly 2 gaps old when it reaches 3. Nothing about detection
+  rate was ever going to move that.
+- **Why `min_track_updates` 3->2 bought only 0.003 s.** The binding constraint
+  is *when the reseed happens*, not the count that follows it. Lowering the
+  count just shortens a wait that begins too late.
+
+It also supersedes the earlier "KF velocity convergence" entry. That entry was
+right that the trigger waits on velocity quality and right that
+`predict_closest_approach` starts with `miss ~= current range`. It attributed
+that to a zero-velocity prior converging slowly. The real cause is worse: the
+prior is not merely uninformative, it is actively **wrong**, having been fitted
+across a jump between two different objects.
+
+### What to do about it, and what not to
+
+The obvious knobs are traps. `max_consecutive_rejects` 3->1 would reseed sooner
+but destroy a mature ball track on a single outlier. Raising the chi2 gate makes
+the swallowing worse. Lowering `init_vel_std` slows genuine convergence.
+
+The fix that matches the diagnosis is to stop forcing one filter to represent
+whatever arrived last: keep a small set of candidate tracks, associate each
+centroid to the best gate-passing one, start a new track for anything
+unassociated, and let the trigger act on whichever *confirmed* track threatens.
+The ball's opening detections then accumulate on their own hypothesis instead of
+being spent correcting someone else's, and confirmation should arrive ~4 frames
+sooner.
+
+Predicted effect if that holds: `tca` 0.18-0.26 s -> ~0.45-0.53 s, i.e.
+0.67-0.79 m of dodge travel at 1.5 m/s against a 0.30 m hit radius. That is the
+number to check, and it is the first change all night with a mechanism behind it
+rather than a threshold.
