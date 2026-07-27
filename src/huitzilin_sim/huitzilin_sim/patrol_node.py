@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Patrol path-follower: walk a closed loop of NED waypoints, advance on arrival."""
+import json
 import math
 
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from std_msgs.msg import String
 from std_srvs.srv import SetBool
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -48,6 +50,13 @@ class PatrolNode(Node):
         self.create_service(SetBool, "/huitzilin/start_patrol", self._srv_start)
         self.marker_pub = self.create_publisher(
             MarkerArray, "/huitzilin/mission_marker", 1)
+        # Which leg we are on, and how much of it is left. The Week 4 dodge
+        # battery needs this to avoid spending a throw across a corner: its
+        # aim leads the drone at constant velocity, which is false while
+        # ArduPilot decelerates into a waypoint (see throw_window.py).
+        # JSON String, matching the /huitzilin/state convention.
+        self.state_pub = self.create_publisher(
+            String, "/huitzilin/patrol_state", 10)
         self.create_timer(0.1, self._tick)          # 10 Hz control
         self.create_timer(1.0, self._publish_markers)
         self.get_logger().info(
@@ -63,11 +72,41 @@ class PatrolNode(Node):
         p = msg.pose.pose.position
         self.cur_enu = (p.x, p.y, p.z)
 
+    def _target(self):
+        # On a non-looping mission that has finished, idx sits one past the end
+        # and running is False; clamp so the state publisher cannot IndexError.
+        return self.wps[min(self.idx, len(self.wps) - 1)]
+
+    def _dist_to_target(self, n, e, d):
+        tn, te, td = self._target()
+        return math.sqrt((tn - n) ** 2 + (te - e) ** 2 + (td - d) ** 2)
+
+    def _publish_state(self, dist_m):
+        """Publish the current leg so the dodge battery can time its throws.
+
+        dist_m is None when there is no odom yet — consumers must treat a
+        missing distance as "do not throw", never as "clear to throw".
+        """
+        m = String()
+        m.data = json.dumps({
+            "running": bool(self.running),
+            "idx": int(self.idx),
+            "target_ned": list(self._target()),
+            "dist_m": None if dist_m is None else round(float(dist_m), 3),
+            "accept_radius_m": self.accept,
+            "cruise_speed_ms": self.cruise,
+        })
+        self.state_pub.publish(m)
+
     def _tick(self):
-        if not self.running or self.cur_enu is None:
+        if self.cur_enu is None:
+            self._publish_state(None)
             return
         # convert current ENU pose back to NED to compare with NED waypoints
         n, e, d = MavBridge.enu_to_ned(*self.cur_enu)
+        if not self.running:
+            self._publish_state(self._dist_to_target(n, e, d))
+            return
         tn, te, td = self.wps[self.idx]
         dist = math.sqrt((tn - n) ** 2 + (te - e) ** 2 + (td - d) ** 2)
 
@@ -80,9 +119,13 @@ class PatrolNode(Node):
                 else:
                     self.running = False
                     self.get_logger().info("patrol complete")
+                    self._publish_state(self._dist_to_target(n, e, d))
                     return
 
         tn, te, td = self.wps[self.idx]
+        # Recompute against the (possibly new) target so the published leg is
+        # never the stale ~0 m from the tick that crossed the corner.
+        self._publish_state(self._dist_to_target(n, e, d))
         if self.mode == "position":
             # let ArduPilot fly to the absolute NED setpoint
             self.mav.send_position_ned(tn, te, td)

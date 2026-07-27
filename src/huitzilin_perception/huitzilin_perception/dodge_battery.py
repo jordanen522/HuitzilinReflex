@@ -50,6 +50,10 @@ from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 
 from huitzilin_perception.ballistics import compute_spawn
+from huitzilin_perception.throw_window import (
+    straight_leg_time_s,
+    throw_window_ok,
+)
 from huitzilin_perception.spawn_projectile import (
     MIN_SPAWN_Z,
     WrenchThrower,
@@ -120,6 +124,18 @@ class DodgeBatteryNode(Node):
         # assumption true before spending a throw on it.
         self.declare_parameter("steady_vel_gate_mps", 0.35)
         self.declare_parameter("steady_vel_timeout_s", 5.0)  # wall
+        # The steady-velocity gate above is necessary but NOT sufficient: it
+        # samples |dv| over 0.15 s, and ArduPilot decelerating into a waypoint
+        # looks smooth by that measure while the path is still about to bend.
+        # Battery v9 shipped with only that gate and still put 11/17 throws
+        # off-target (aim error mean 1.50 m, max 3.79 m). The geometric gate
+        # below refuses any throw whose flight would span a patrol corner —
+        # see throw_window.py. Requires /huitzilin/patrol_state (patrol_node
+        # >= 2026-07-26); with require_throw_window true and no such topic,
+        # every run is skipped rather than thrown blind.
+        self.declare_parameter("require_throw_window", True)
+        self.declare_parameter("throw_window_margin_s", 0.30)
+        self.declare_parameter("throw_window_timeout_s", 25.0)  # wall
         # A throw whose measured closest approach is this far from the
         # scenario's miss_distance_m did not test what the scenario claims.
         # Reported separately so aiming error is never read as trigger error.
@@ -145,6 +161,12 @@ class DodgeBatteryNode(Node):
             self.get_parameter("steady_vel_timeout_s").value)
         self._off_target_tol = float(
             self.get_parameter("off_target_tol_m").value)
+        self._require_window = bool(
+            self.get_parameter("require_throw_window").value)
+        self._window_margin_s = float(
+            self.get_parameter("throw_window_margin_s").value)
+        self._window_timeout_s = float(
+            self.get_parameter("throw_window_timeout_s").value)
         self._evasion_name = self.get_parameter("evasion_node_name").value
 
         # Warm wrench publishers, built once: every throw needs its impulse and
@@ -154,6 +176,7 @@ class DodgeBatteryNode(Node):
 
         self._lock = threading.Lock()
         self._latest_odom = None
+        self._latest_patrol = None    # None until /huitzilin/patrol_state arrives
         self._pose_stream_seen = False
         self._active_ball = None
         self._min_dist = float("inf")
@@ -166,6 +189,8 @@ class DodgeBatteryNode(Node):
                                  self._pose_cb, SENSOR_QOS)
         self.create_subscription(String, "/threat/evade_event",
                                  self._event_cb, RELIABLE_QOS)
+        self.create_subscription(String, "/huitzilin/patrol_state",
+                                 self._patrol_cb, RELIABLE_QOS)
 
         # Created once and reused for every sweep combo + the baseline
         # snapshot/restore — avoids leaking a service client per combo.
@@ -203,6 +228,12 @@ class DodgeBatteryNode(Node):
                 d = float(np.linalg.norm(ball - drone))
                 if d < self._min_dist:
                     self._min_dist = d
+
+    def _patrol_cb(self, msg: String) -> None:
+        try:
+            self._latest_patrol = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self.get_logger().warn("unparseable /huitzilin/patrol_state payload")
 
     def _event_cb(self, msg: String) -> None:
         with self._lock:
@@ -263,6 +294,48 @@ class DodgeBatteryNode(Node):
                 return True, cur
             prev = cur
         return False, self._odom_vel()
+
+    def _wait_throw_window(self, t_flight_s: float):
+        """Block until enough straight patrol leg remains to aim this throw.
+
+        Returns (ok, reason, best_leg_s, needed_s). best_leg_s is the longest
+        window actually observed while waiting, which is the evidence for
+        whether a scenario is measurable on this patrol loop at all: if the
+        best window over 25 s is still short of needed_s, the loop's legs are
+        too short for that flight time and no amount of retrying will help.
+        """
+        needed_s = float(t_flight_s) + self._window_margin_s
+        if not self._require_window:
+            return True, "throw window not enforced", None, needed_s
+
+        t0 = time.monotonic()
+        best_leg = 0.0
+        reason = "no patrol state on /huitzilin/patrol_state"
+        while time.monotonic() - t0 < self._window_timeout_s:
+            st = self._latest_patrol
+            speed = float(np.linalg.norm(self._odom_vel()))
+            if st is None:
+                ok, reason = throw_window_ok(
+                    dist_to_wp_m=None, accept_radius_m=0.6,
+                    speed_mps=speed, t_flight_s=t_flight_s,
+                    margin_s=self._window_margin_s)
+            else:
+                accept = float(st.get("accept_radius_m", 0.6))
+                dist = st.get("dist_m")
+                running = bool(st.get("running", True))
+                ok, reason = throw_window_ok(
+                    dist_to_wp_m=dist, accept_radius_m=accept,
+                    speed_mps=speed, t_flight_s=t_flight_s,
+                    margin_s=self._window_margin_s,
+                    patrol_running=running)
+                if dist is not None:
+                    leg = straight_leg_time_s(dist, accept, speed)
+                    if leg != math.inf:
+                        best_leg = max(best_leg, leg)
+            if ok:
+                return True, reason, best_leg, needed_s
+            time.sleep(0.05)
+        return False, reason, best_leg, needed_s
 
     # ── Main flow ────────────────────────────────────────────────────────
 
@@ -378,13 +451,33 @@ class DodgeBatteryNode(Node):
         base = {"combo": self._combo_str(combo), "id": rid, "rep": rep,
                 "expect_dodge": bool(scen["expect_dodge"])}
 
+        speed = float(scen["speed_mps"])
+        spec_miss = float(scen.get("miss_distance_m", 0.0))
+        offset_forward = float(scen.get("offset_forward_m", 6.0))
+        # Ball flight time: the horizon the constant-velocity lead has to
+        # extrapolate over, and therefore the length of straight patrol leg
+        # this throw needs in order to test what the scenario claims.
+        t_flight = offset_forward / speed if speed > 0.0 else 0.0
+
         steady, vel = self._wait_steady_velocity()
         if not steady:
             self.get_logger().warn(
                 f"{rid} r{rep}: velocity still changing after "
                 f"{self._steady_timeout:.0f} s (|dv| > {self._steady_gate} m/s) "
-                "— throwing anyway; the constant-velocity lead may be off")
-        # Re-read odom AFTER the steady wait so position matches that velocity.
+                "— the constant-velocity lead may be off")
+        # Geometric gate LAST, so the window is fresh when the ball launches.
+        win_ok, win_reason, win_leg, win_needed = self._wait_throw_window(t_flight)
+        if not win_ok:
+            self.get_logger().warn(f"{rid} r{rep}: no aimable window — {win_reason}")
+            return {**base, "error": False, "skipped": True, "success": False,
+                    "steady": steady,
+                    "window_s": round(win_leg, 3) if win_leg is not None else None,
+                    "needed_window_s": round(win_needed, 3),
+                    "note": f"SKIPPED, not thrown (no aimable window): "
+                            f"{win_reason} | best leg seen "
+                            f"{win_leg:.2f} s over {self._window_timeout_s:.0f} s"}
+
+        # Re-read odom AFTER the waits so position matches that velocity.
         odom = self._latest_odom
         p = odom.pose.pose.position
         q = odom.pose.pose.orientation
@@ -394,8 +487,6 @@ class DodgeBatteryNode(Node):
         # ned_to_enu(vn, ve, vd)), NOT body FLU as REP-103 would imply for
         # child_frame_id=base_link. compute_spawn's lead assumes ENU, so this
         # pairing is only correct as long as the bridge keeps doing that.
-        speed = float(scen["speed_mps"])
-        spec_miss = float(scen.get("miss_distance_m", 0.0))
         # A speed-0 scenario (the Week 3 matrix has some) has no flight time to
         # lead over, and compute_spawn rejects the combination; degrade instead
         # of failing the run.
@@ -405,7 +496,7 @@ class DodgeBatteryNode(Node):
             speed_mps=speed,
             approach_angle_deg=float(scen.get("approach_angle_deg", 0.0)),
             miss_distance_m=spec_miss,
-            offset_forward_m=float(scen.get("offset_forward_m", 6.0)),
+            offset_forward_m=offset_forward,
             offset_vertical_m=float(scen.get("offset_vertical_m", 0.0)),
             compensate_gravity=bool(scen.get("compensate_gravity", True)),
             aim_at_drone=bool(scen.get("aim_at_drone", False)),
@@ -479,10 +570,12 @@ class DodgeBatteryNode(Node):
         if not steady:
             note += " | unsteady aim"
 
-        return {**base, "error": False, "dodged": dodged,
+        return {**base, "error": False, "skipped": False, "dodged": dodged,
                 "latency_ms": latency_ms, "min_dist_m": round(min_dist, 3),
                 "spec_miss_m": spec_miss, "aim_err_m": round(aim_err, 3),
                 "off_target": off_target, "steady": steady,
+                "window_s": round(win_leg, 3) if win_leg is not None else None,
+                "needed_window_s": round(win_needed, 3),
                 "success": success, "note": note}
 
     def _snapshot_params(self, names: list) -> dict | None:
@@ -550,7 +643,12 @@ class DodgeBatteryNode(Node):
 
     def _report(self, rows: list) -> int:
         errors = [r for r in rows if r.get("error")]
-        scored = [r for r in rows if not r.get("error")]
+        # A skipped run is neither an error nor a measurement: no ball was
+        # thrown, so counting it as a dodge failure would repeat exactly the
+        # v9 mistake of reading aiming problems as trigger problems.
+        skipped = [r for r in rows if r.get("skipped") and not r.get("error")]
+        scored = [r for r in rows
+                  if not r.get("error") and not r.get("skipped")]
 
         lines = [
             "",
@@ -564,6 +662,10 @@ class DodgeBatteryNode(Node):
             + ("" if self._lead_target else
                "   << UNLED: throws aim at a stale point, so a patrolling "
                "drone walks clear on its own"),
+            f"  throw window: {'enforced' if self._require_window else 'OFF'}"
+            + (f"   margin: {self._window_margin_s} s   "
+               f"wait: {self._window_timeout_s} s" if self._require_window else
+               "   << throws may span a patrol corner; aim error will be large"),
             "═" * 72,
             "",
             f"  {'Combo':<26} {'ID':>4} {'Rep':>3} {'Dodge':>5} "
@@ -626,6 +728,27 @@ class DodgeBatteryNode(Node):
                     f"max {np.max(lats):.0f} ms "
                     f"(budget {self._budget_s * 1000:.0f} ms)")
 
+        if skipped:
+            # Per-scenario, because the constraint is per flight time: a 4 m/s
+            # throw needs 1.5 s of straight leg, a 14 m/s throw only 0.43 s.
+            lines += ["", f"  [skipped: {len(skipped)}/{len(rows)} runs never "
+                          f"thrown — no aimable window]"]
+            for rid in sorted({r["id"] for r in skipped}):
+                sub = [r for r in skipped if r["id"] == rid]
+                legs = [r["window_s"] for r in sub if r.get("window_s") is not None]
+                need = next((r["needed_window_s"] for r in sub
+                             if r.get("needed_window_s") is not None), None)
+                best = f"{max(legs):.2f}" if legs else "?"
+                lines.append(
+                    f"    {rid}: {len(sub)} skipped | best straight leg seen "
+                    f"{best} s, needed {need} s")
+            lines += [
+                "    A scenario skipped every time is UNMEASURABLE on this",
+                "    patrol loop: its flight time exceeds the longest leg.",
+                "    Lengthen the loop (patrol.yaml waypoints_ned) or shorten",
+                "    the flight (offset_forward_m) — do not lower the margin.",
+            ]
+
         verdict = ("HARNESS ERRORS — see rows above" if errors
                    else "COMPLETE (no hard gate; judge rates above)")
         lines += ["", f"  {verdict}", "═" * 72, ""]
@@ -639,7 +762,8 @@ class DodgeBatteryNode(Node):
                 w = csv.DictWriter(f, fieldnames=[
                     "combo", "id", "rep", "expect_dodge", "dodged",
                     "latency_ms", "min_dist_m", "spec_miss_m", "aim_err_m",
-                    "off_target", "steady", "success", "error", "note"])
+                    "off_target", "steady", "success", "error", "note",
+                    "skipped", "window_s", "needed_window_s"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})
