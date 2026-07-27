@@ -281,6 +281,14 @@ class DetectorNode(Node):
 
     def _cloud_cb(self, msg: PointCloud2) -> None:
         t0 = time.monotonic()
+        # Sim clock at callback entry, so the reported dodge latency can be
+        # split into transport (sensor stamp -> here) and compute (here ->
+        # centroid published). NOTE both clocks are needed: latency is judged
+        # in SIM time, but at the Dell's ~0.33 RTF sim time advances 3x slower
+        # than wall, so a compute-bound millisecond costs only ~0.33 ms of the
+        # sim-time budget. Sim-time latency therefore UNDERSTATES what the same
+        # code will cost on real hardware at RTF 1.0.
+        sim0 = self.get_clock().now().nanoseconds * 1e-9
         dbg = self._p.get("debug_funnel", False)
 
         raw = pc2.read_points_numpy(msg, field_names=("x", "y", "z"), skip_nans=True)
@@ -468,6 +476,21 @@ class DetectorNode(Node):
                 self.get_logger().info("funnel: TF to base_link FAILED",
                                        throttle_duration_sec=self._funnel_throttle_s)
             return
+
+        if dbg:
+            stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            sim_pub = self.get_clock().now().nanoseconds * 1e-9
+            wall_ms = (time.monotonic() - t0) * 1000.0
+            sim_compute_ms = (sim_pub - sim0) * 1000.0
+            # rtf is derived, not assumed: it is the exchange rate between the
+            # two compute figures, and it is what scales this measurement to
+            # real hardware.
+            rtf = (sim_compute_ms / wall_ms) if wall_ms > 0.0 else float("nan")
+            self.get_logger().info(
+                f"timing: transport={((sim0 - stamp_s) * 1000.0):.0f} ms(sim) "
+                f"compute={sim_compute_ms:.0f} ms(sim)/{wall_ms:.0f} ms(wall) "
+                f"rtf={rtf:.2f} raw={n_raw}",
+                throttle_duration_sec=self._funnel_throttle_s)
 
         self._publish_centroid(centroid_bl, msg.header.stamp)
         self._publish_marker(centroid_bl, msg.header.stamp)
