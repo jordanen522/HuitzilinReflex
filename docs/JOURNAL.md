@@ -395,3 +395,81 @@ Also measured, and unchanged by any of the above: **latency is 271–375 ms agai
 150 ms budget**, and the dodge itself blinds the detector — `fg=52442` the moment the
 maneuver starts. Hover throws remain the only trustworthy instrument for trigger work
 (`auto_resume_patrol: false` on `/evasion`).
+
+### The background-model fix, built and measured (2026-07-26, `af50089`)
+
+Both recommended changes are in, param-gated, and measured live on the Dell.
+
+**(1) `background_map.py` — `VoxelBackgroundMap` replaces the 5-frame deque.** Every
+voxel the camera has observed in the fixed `odom` frame stays known, TTL- and
+size-bounded (`bg_map_ttl_s: 20.0`, `bg_map_max_voxels: 400000`). Lookup is a
+`searchsorted` over a sorted int64 key array, not a rebuilt cKDTree — a persistent
+background is 10^5–10^6 points and the tree build alone would eat the 66 ms frame
+budget. Background means "own voxel or any of the 26 neighbours occupied", so the
+effective tolerance is `leaf .. leaf*sqrt(3)`; keep `bg_map_leaf_m` equal to
+`diff_threshold_m`. Camera mode (pre-b0eedd5 bags) and `use_persistent_bg: false` both
+fall back to the deque, so the Week-3 recall figures stay reproducible.
+
+**(2) `cluster_and_split()` — oversized clusters are re-clustered, not discarded.**
+`cluster_max_points` now applies only *after* splitting; applying it first is what threw
+the ball away. **Recursive shrinking was implemented first and rejected on evidence:**
+at a radius near a surface's own point spacing it shatters the surface into ball-sized
+fragments that all pass the extent gate — 29 of them in
+`test_recursive_shrinking_would_shatter_the_wall`. One pass at an explicit intermediate
+`cluster_split_tol_m: 0.10` separates a detached object without shattering. That test is
+kept precisely so nobody re-adds the recursion.
+
+**Foreground under patrol, same stack, before → after:**
+
+| | max fg | mean fg | flood-skipped frames |
+|---|---|---|---|
+| 5-frame deque | 43810–48232 | — | 23+ per throw |
+| persistent map | **4961** | **581** | **0** in 400 frames |
+
+The map converged to 1373 voxels hovering and 77517 patrolling — far under the cap.
+
+**Centroids on a patrol throw went 0–1 → 6–11.** The detector is no longer blind while
+translating. Hover is unregressed: 10 centroids, predicted miss 0.035 m vs truth
+0.128 m, dodge fired.
+
+**Battery v9 vs v8 (same 17-throw battery):**
+
+| | v8 | v9 |
+|---|---|---|
+| on-target dodge success | 3/7 (43%) | **4/6 (67%)** |
+| overall | 3/18 (17%) | 4/16 (25%) |
+| false dodges | 0/1 | **0/1** |
+| latency | mean 210 / max 320 ms | mean 179 / max 297 ms |
+
+**The honest caveats, all measured:**
+
+- **The map helps *revisited* scene by construction, not first-pass novel scene.** A
+  region never looked at is still novel however long the map has run. Patrol is a closed
+  loop with waypoints inside the 5 m ROI, so it re-sees most of its route — that is why
+  the flood collapsed — but a genuinely new environment will still flood on entry.
+- **New false-positive stream.** The pipeline now clusters foreground it previously
+  skipped: **71 spurious `/threat/centroid` in 60 s of patrol with no ball thrown**
+  (~30% of frames), where the old config published ~nothing. It caused **0 evade events**
+  in that window and **0 false dodges** across the battery — the chi2 gate,
+  `min_track_updates`, and `threat_radius_m` filter all of it. Layered defence working,
+  but it is a real regression in detector precision and the margin is not measured.
+  Likely mechanism (unverified): novel regions are now small, so their fragments pass the
+  0.35 m extent gate where metre-scale blobs did not. The cheap discriminator to try is
+  isolation — an airborne ball has no *non-foreground* points adjacent to it, a
+  scene-entry fragment sits on the seen/unseen boundary and does.
+- **Latency is still over budget** (mean 179, max 297 vs 150 ms), though better.
+- **Aiming under patrol is now the dominant limit, not the trigger**: 11/17 throws landed
+  off-target, aim error mean 1.50 m / max 3.79 m, because a throw spans a patrol turn.
+  The battery cannot measure dodge performance well while two thirds of its throws miss
+  by design. Fix the harness (hover instrument, or lead through the turn) before reading
+  much into the overall rate. Genuine remaining trigger failures are just B03 r1/r2
+  (0.591, 0.589 m); B06 r2 at 0.890 m is correctly ignored, and B05 r0 dodged at 80 ms
+  latency but still took the hit at 0.173 m — late *detection*, not slow reaction.
+- **The odom stamp fix is deliberately NOT done.** `mav_bridge_node` still stamps odom
+  with `get_clock().now()`. It needs an offset estimate between the autopilot's
+  `time_boot_ms` and Gazebo `/clock` (min-filter on `now - boot_ms`, plus a clamp so a
+  stamp never lands in the future and breaks TF), and that is a clock-sync change to a
+  working flight path whose payoff just shrank: it was a contributor to the *flood*, and
+  the flood is now 10x smaller. It deserves its own measurement window, not a ride-along.
+- 3/17 rows were harness spawn flakes (`create service did not confirm the spawn`),
+  pre-existing.
