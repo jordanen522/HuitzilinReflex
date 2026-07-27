@@ -218,6 +218,17 @@ class DodgeBatteryNode(Node):
         self._speed_lock = threading.Lock()
         self._pose_stream_seen = False
         self._active_ball = None
+        # Sim time at which the spawned ball first appeared on
+        # /gz/dynamic_poses. Paired with the sim time the odom sample was taken,
+        # this measures the spawn dead time the lead has to compensate for --
+        # compute_spawn's spawn_latency_s. It is currently parameterised at 0.0
+        # while the docstring estimates ~0.5 s of sim time for the gz create
+        # call, and at a 5.26 m/s cruise every 0.1 s of it is 0.5 m of aim
+        # error. The hover control (2026-07-27) showed the spawn geometry is
+        # exact (aim error 0.10 m mean, 0/19 off-target), so this dead time is
+        # the leading candidate for the whole patrol aim error -- measure it
+        # rather than assume the 0.5 s.
+        self._ball_seen_sim = None
         self._min_dist = float("inf")
         self._events = []
         self._listening = False
@@ -287,6 +298,11 @@ class DodgeBatteryNode(Node):
                 elif tr.child_frame_id == ball_name:
                     t = tr.transform.translation
                     ball = np.array([t.x, t.y, t.z])
+            if ball is not None and self._ball_seen_sim is None:
+                # First sighting only — this is a launch timestamp, not a
+                # tracking one, and /gz/dynamic_poses keeps reporting the ball
+                # for the rest of the window.
+                self._ball_seen_sim = self._sim_now()
             if drone is not None and ball is not None:
                 d = float(np.linalg.norm(ball - drone))
                 if d < self._min_dist:
@@ -587,9 +603,14 @@ class DodgeBatteryNode(Node):
             return {**base, "error": True, "success": False,
                     "note": f"spawn z={plan.position[2]:.2f} < {MIN_SPAWN_Z}"}
 
+        # Sim time of the state the plan was computed from. Taken here, after
+        # compute_spawn and immediately before the create call, so the measured
+        # dead time covers exactly what the lead fails to account for.
+        sample_sim = self._sim_now()
         name = f"ball_{rid}_r{rep}_{int(time.time())}"
         with self._lock:
             self._active_ball = name
+            self._ball_seen_sim = None
             self._min_dist = float("inf")
             self._events = []
             self._listening = True
@@ -617,6 +638,9 @@ class DodgeBatteryNode(Node):
             self._active_ball = None
             min_dist = self._min_dist
             events = list(self._events)
+            seen_sim = self._ball_seen_sim
+        dead_s = (None if seen_sim is None
+                  else round(seen_sim - sample_sim, 3))
 
         gz_remove(self._world, name)
         self._wait_sim(self._settle_s)   # let patrol resume + bg model settle
@@ -656,6 +680,7 @@ class DodgeBatteryNode(Node):
                 "off_target": off_target, "steady": steady,
                 "window_s": round(win_leg, 3) if win_leg is not None else None,
                 "needed_window_s": round(win_needed, 3),
+                "spawn_dead_s": dead_s,
                 "success": success, "note": note}
 
     def _enter_hover(self) -> tuple[bool, str]:
@@ -844,6 +869,22 @@ class DodgeBatteryNode(Node):
                 lines.append(
                     f"    aim error (no-dodge runs): mean "
                     f"{np.mean(aim_errs):.2f} m, max {np.max(aim_errs):.2f} m")
+            # Spawn dead time: sim seconds between the odom sample the plan was
+            # built from and the ball actually existing. The lead only
+            # compensates for the part declared in spawn_latency_s, so the
+            # undeclared remainder becomes aim error at the target's speed.
+            deads = [r["spawn_dead_s"] for r in sub
+                     if r.get("spawn_dead_s") is not None]
+            if deads:
+                undeclared = float(np.mean(deads)) - self._spawn_latency_s
+                cruise = self._cruise_est()
+                lines.append(
+                    f"    spawn dead time: mean {np.mean(deads):.3f} s, "
+                    f"max {np.max(deads):.3f} s (sim) — declared "
+                    f"spawn_latency_s {self._spawn_latency_s:.3f} s, "
+                    f"undeclared {undeclared:+.3f} s "
+                    f"= {abs(undeclared) * cruise:.2f} m of aim error at "
+                    f"{cruise:.2f} m/s")
             if lats:
                 lines.append(
                     f"    latency: mean {np.mean(lats):.0f} ms, "
@@ -885,7 +926,7 @@ class DodgeBatteryNode(Node):
                     "combo", "id", "rep", "expect_dodge", "dodged",
                     "latency_ms", "min_dist_m", "spec_miss_m", "aim_err_m",
                     "off_target", "steady", "success", "error", "note",
-                    "skipped", "window_s", "needed_window_s"])
+                    "skipped", "window_s", "needed_window_s", "spawn_dead_s"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})
