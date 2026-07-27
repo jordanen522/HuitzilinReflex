@@ -162,7 +162,13 @@ work — 15 m in 12 s — contrary to the Week 3 open item):
 | translate 4 m/s | 38631 |
 | yaw 1.5 rad/s | 15504 |
 
-Patrol only flies **0.18–0.48 m/s**, well under the onset, which is why it is clean.
+Patrol was measured at **0.18–0.48 m/s**, well under the onset, which is why it looked
+clean. **Superseded 2026-07-26 — that figure was an artifact of two competing stacks
+running at ~0.33 RTF.** On a single clean stack near real-time, patrol translates at
+**2.5–3.2 m/s** (measured from `/huitzilin/odom` twist across nine throws), i.e. right
+at the flood onset rather than far below it. So "patrol never reaches onset" does not
+hold; the clean 1.5–2.5% flood rate seen during patrol needs re-explaining, and the
+rate-dependence numbers below should be redone against a single-stack baseline.
 Note `patrol.yaml`'s `cruise_speed_ms: 1.5` is silently ignored in `mode: "position"`
 (ArduPilot's WPNAV owns the speed there). The onset near 2–3 m/s is consistent with
 odom stamp latency: `mav_bridge_node` stamps odom with `get_clock().now()`

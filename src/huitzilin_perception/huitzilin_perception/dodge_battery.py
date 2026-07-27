@@ -112,6 +112,18 @@ class DodgeBatteryNode(Node):
         # sim time there is no dead time left to compensate. Re-measure if the
         # throw path ever falls back to the CLI (which restores gravity late).
         self.declare_parameter("spawn_latency_s", 0.0)
+        # The lead extrapolates the drone at CONSTANT velocity across the
+        # ball's flight (0.43 s at 14 m/s, 1.5 s at 4 m/s). That is false while
+        # patrol is turning a waypoint, which is what still spoiled battery v7:
+        # slow B01 runs missed by 1.0-4.2 m and B07's nominal 1.5 m wide miss
+        # arrived at 0.30 m. Waiting for the velocity to stop changing makes the
+        # assumption true before spending a throw on it.
+        self.declare_parameter("steady_vel_gate_mps", 0.35)
+        self.declare_parameter("steady_vel_timeout_s", 5.0)  # wall
+        # A throw whose measured closest approach is this far from the
+        # scenario's miss_distance_m did not test what the scenario claims.
+        # Reported separately so aiming error is never read as trigger error.
+        self.declare_parameter("off_target_tol_m", 0.5)
 
         self._battery_f = Path(self.get_parameter("battery_config").value)
         self._sweep_f = self.get_parameter("sweep_config").value
@@ -127,6 +139,12 @@ class DodgeBatteryNode(Node):
         self._lead_target = bool(self.get_parameter("lead_target").value)
         self._spawn_latency_s = float(
             self.get_parameter("spawn_latency_s").value)
+        self._steady_gate = float(
+            self.get_parameter("steady_vel_gate_mps").value)
+        self._steady_timeout = float(
+            self.get_parameter("steady_vel_timeout_s").value)
+        self._off_target_tol = float(
+            self.get_parameter("off_target_tol_m").value)
         self._evasion_name = self.get_parameter("evasion_node_name").value
 
         # Warm wrench publishers, built once: every throw needs its impulse and
@@ -222,6 +240,29 @@ class DodgeBatteryNode(Node):
                 return True
             time.sleep(0.1)
         return False
+
+    def _odom_vel(self) -> np.ndarray:
+        tw = self._latest_odom.twist.twist.linear
+        return np.array([tw.x, tw.y, tw.z])
+
+    def _wait_steady_velocity(self) -> tuple[bool, np.ndarray]:
+        """Block until the drone's velocity stops changing.
+
+        compute_spawn's lead assumes constant velocity over the whole flight,
+        so throwing mid-turn aims at a point the drone never reaches. Returns
+        (steady, velocity); on timeout returns the latest velocity anyway so a
+        stuck-in-a-turn patrol cannot deadlock the battery — the run is then
+        tagged off-target rather than silently trusted.
+        """
+        t0 = time.monotonic()
+        prev = self._odom_vel()
+        while time.monotonic() - t0 < self._steady_timeout:
+            time.sleep(0.15)
+            cur = self._odom_vel()
+            if float(np.linalg.norm(cur - prev)) <= self._steady_gate:
+                return True, cur
+            prev = cur
+        return False, self._odom_vel()
 
     # ── Main flow ────────────────────────────────────────────────────────
 
@@ -337,6 +378,13 @@ class DodgeBatteryNode(Node):
         base = {"combo": self._combo_str(combo), "id": rid, "rep": rep,
                 "expect_dodge": bool(scen["expect_dodge"])}
 
+        steady, vel = self._wait_steady_velocity()
+        if not steady:
+            self.get_logger().warn(
+                f"{rid} r{rep}: velocity still changing after "
+                f"{self._steady_timeout:.0f} s (|dv| > {self._steady_gate} m/s) "
+                "— throwing anyway; the constant-velocity lead may be off")
+        # Re-read odom AFTER the steady wait so position matches that velocity.
         odom = self._latest_odom
         p = odom.pose.pose.position
         q = odom.pose.pose.orientation
@@ -346,17 +394,17 @@ class DodgeBatteryNode(Node):
         # ned_to_enu(vn, ve, vd)), NOT body FLU as REP-103 would imply for
         # child_frame_id=base_link. compute_spawn's lead assumes ENU, so this
         # pairing is only correct as long as the bridge keeps doing that.
-        tw = odom.twist.twist.linear
         speed = float(scen["speed_mps"])
+        spec_miss = float(scen.get("miss_distance_m", 0.0))
         # A speed-0 scenario (the Week 3 matrix has some) has no flight time to
         # lead over, and compute_spawn rejects the combination; degrade instead
         # of failing the run.
-        lead = (tw.x, tw.y, tw.z) if (self._lead_target and speed > 0.0) else None
+        lead = tuple(vel) if (self._lead_target and speed > 0.0) else None
         plan = compute_spawn(
             (p.x, p.y, p.z), yaw,
             speed_mps=speed,
             approach_angle_deg=float(scen.get("approach_angle_deg", 0.0)),
-            miss_distance_m=float(scen.get("miss_distance_m", 0.0)),
+            miss_distance_m=spec_miss,
             offset_forward_m=float(scen.get("offset_forward_m", 6.0)),
             offset_vertical_m=float(scen.get("offset_vertical_m", 0.0)),
             compensate_gravity=bool(scen.get("compensate_gravity", True)),
@@ -420,8 +468,21 @@ class DodgeBatteryNode(Node):
             success = not dodged
             note = "correctly ignored" if success else "FALSE DODGE"
 
+        # Did this throw actually test the specified geometry? A dodge changes
+        # min_dist by design, so aim error is only meaningful when no dodge
+        # fired; a successful dodge is credited as on-target.
+        aim_err = abs(min_dist - spec_miss)
+        off_target = (not dodged) and aim_err > self._off_target_tol
+        if off_target:
+            note += (f" | OFF-TARGET: spec miss {spec_miss:.2f} m, "
+                     f"measured {min_dist:.2f} m — aiming, not trigger")
+        if not steady:
+            note += " | unsteady aim"
+
         return {**base, "error": False, "dodged": dodged,
                 "latency_ms": latency_ms, "min_dist_m": round(min_dist, 3),
+                "spec_miss_m": spec_miss, "aim_err_m": round(aim_err, 3),
+                "off_target": off_target, "steady": steady,
                 "success": success, "note": note}
 
     def _snapshot_params(self, names: list) -> dict | None:
@@ -526,13 +587,39 @@ class DodgeBatteryNode(Node):
             n_dodge_ok = sum(1 for r in hits if r["success"])
             n_false = sum(1 for r in wides if not r["success"])
             lats = [r["latency_ms"] for r in sub if r.get("latency_ms") is not None]
+            # On-target subsets: a throw that missed its specified geometry
+            # tests the throw harness, not the dodge. Battery v7 (2026-07-26)
+            # is why this is printed: 3 of 3 B01 runs missed by 1.0-4.2 m and
+            # B07's nominal 1.5 m wide miss arrived at 0.30 m, so its
+            # "0/2 false dodges" was crediting the trigger for ignoring a
+            # near-hit.
+            on_hits = [r for r in hits if not r.get("off_target")]
+            on_wides = [r for r in wides if not r.get("off_target")]
+            n_on_ok = sum(1 for r in on_hits if r["success"])
+            n_on_false = sum(1 for r in on_wides if not r["success"])
+            n_off = sum(1 for r in sub if r.get("off_target"))
+            n_unsteady = sum(1 for r in sub if not r.get("steady", True))
+            aim_errs = [r["aim_err_m"] for r in sub
+                        if r.get("aim_err_m") is not None
+                        and not r.get("dodged")]
             lines += [
                 "",
                 f"  [{combo}]",
                 f"    dodge success: {n_dodge_ok}/{len(hits)}"
                 + (f"  ({100.0 * n_dodge_ok / len(hits):.0f}%)" if hits else ""),
                 f"    false dodges:  {n_false}/{len(wides)}",
+                f"    -- on-target runs only (valid dodge measurement) --",
+                f"    dodge success: {n_on_ok}/{len(on_hits)}"
+                + (f"  ({100.0 * n_on_ok / len(on_hits):.0f}%)" if on_hits else ""),
+                f"    false dodges:  {n_on_false}/{len(on_wides)}",
+                f"    off-target: {n_off}/{len(sub)} throws "
+                f"(> {self._off_target_tol} m from spec)"
+                + (f"   unsteady aim: {n_unsteady}" if n_unsteady else ""),
             ]
+            if aim_errs:
+                lines.append(
+                    f"    aim error (no-dodge runs): mean "
+                    f"{np.mean(aim_errs):.2f} m, max {np.max(aim_errs):.2f} m")
             if lats:
                 lines.append(
                     f"    latency: mean {np.mean(lats):.0f} ms, "
@@ -551,7 +638,8 @@ class DodgeBatteryNode(Node):
             with open(self._csv_f, "w", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=[
                     "combo", "id", "rep", "expect_dodge", "dodged",
-                    "latency_ms", "min_dist_m", "success", "error", "note"])
+                    "latency_ms", "min_dist_m", "spec_miss_m", "aim_err_m",
+                    "off_target", "steady", "success", "error", "note"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})
