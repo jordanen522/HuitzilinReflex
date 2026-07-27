@@ -46,6 +46,24 @@ detector:
     profile_stages: false
     profile_window_frames: 30
 
+    # ── Per-frame dump (W4, 2026-07-27) ───────────────────────────────────────
+    # Set to a directory to write one .npz per cloud frame: the post-voxel,
+    # egomotion-compensated cloud, its foreground mask, every cluster the
+    # splitter produced, and the publish decision.
+    #
+    # Why this exists when the funnel log does not suffice: the funnel reports
+    # survivor COUNTS, which cannot attribute a miss. A frame with 40 foreground
+    # points and no ball-sized cluster reads identically whether the background
+    # map absorbed the ball or the ball merely fell under cluster_min_points.
+    # With the cloud and the mask on disk, and the ball's true pose known from
+    # /gz/dynamic_poses, the attribution is exact — that is the measurement the
+    # detection-consistency gap (~1.7 m detected then discarded) needs.
+    #
+    # Costs latency and ~250 KB/frame at 15 Hz. Empty string = off, and it must
+    # be left off: added latency drops frames, which corrupts the very
+    # consistency it is measuring.
+    debug_dump_dir: ""
+
     # ── Cloud transport (W4 live bring-up, 2026-07-26) ────────────────────────
     # /oak/points is a 7.37 MB sample; BEST_EFFORT lost ~75% of it to UDP
     # fragmentation (measured: best_effort 3.99 Hz vs reliable 14.43 Hz on the

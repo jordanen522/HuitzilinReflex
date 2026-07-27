@@ -29,6 +29,7 @@ Coordinate frames:
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections import deque
 from typing import Optional
@@ -153,6 +154,17 @@ class DetectorNode(Node):
         # Turn this on with debug_funnel OFF to get a clean stage breakdown.
         self.declare_parameter("profile_stages", False)
         self.declare_parameter("profile_window_frames", 30)
+        # ── Per-frame dump (W4, 2026-07-27) ───────────────────────────────────
+        # The funnel log answers "how many survived each stage", which cannot
+        # attribute a MISS: a frame with 40 foreground points and no ball-sized
+        # cluster looks identical whether the ball was absorbed into the
+        # background map or merely fell below cluster_min_points. Dumping the
+        # post-voxel cloud plus the foreground mask makes the attribution exact
+        # offline, because the ball's true position is known from
+        # /gz/dynamic_poses and can be intersected with the dumped points.
+        # Empty string = off. ~250 KB/frame at 15 Hz — a diagnostic, never a
+        # setting to leave on.
+        self.declare_parameter("debug_dump_dir", "")
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
@@ -194,6 +206,15 @@ class DetectorNode(Node):
         self._prof = StageProfiler(
             int(self.get_parameter("profile_window_frames").value))
         self._profile_on = bool(self.get_parameter("profile_stages").value)
+
+        # ── Per-frame dump ────────────────────────────────────────────────────
+        self._dump_dir = str(self.get_parameter("debug_dump_dir").value).strip()
+        self._dump: Optional[dict] = None
+        if self._dump_dir:
+            os.makedirs(self._dump_dir, exist_ok=True)
+            self.get_logger().warn(
+                f"debug_dump_dir={self._dump_dir} — writing one .npz per cloud "
+                "frame. Diagnostic only; this costs latency and disk.")
 
         # ── Subscribers ──────────────────────────────────────────────────────
         # See the cloud_reliable comment above for why this is not BEST_EFFORT.
@@ -309,6 +330,8 @@ class DetectorNode(Node):
         try/finally so a raised exception still records the frame: a pipeline
         that throws on the interesting frames must not go silent in the report.
         """
+        if self._dump_dir:
+            self._dump = {}
         try:
             self._cloud_cb_impl(msg)
         finally:
@@ -316,6 +339,10 @@ class DetectorNode(Node):
             if self._profile_on and self._prof.due():
                 self.get_logger().info(
                     self._prof.report() + " [budget 77 ms/frame wall]")
+            # In the finally so the eight early-out paths are dumped too — a
+            # frame the pipeline discarded is exactly the frame worth reading.
+            if self._dump_dir and self._dump:
+                self._write_dump(msg)
 
     def _cloud_cb_impl(self, msg: PointCloud2) -> None:
         t0 = time.monotonic()
@@ -334,6 +361,11 @@ class DetectorNode(Node):
         # ~77 ms of wall time, and that is the real budget per frame).
         sim0 = self.get_clock().now().nanoseconds * 1e-9
         dbg = self._p.get("debug_funnel", False)
+        d = self._dump
+        if d is not None:
+            d["stamp_s"] = (msg.header.stamp.sec
+                            + msg.header.stamp.nanosec * 1e-9)
+            d["sim_entry_s"] = sim0
 
         prof = self._prof
 
@@ -367,6 +399,8 @@ class DetectorNode(Node):
             return
 
         n_raw = pts.shape[0]
+        if d is not None:
+            d["n_raw"] = n_raw
         if dbg:
             # Six full-cloud reductions on ~200k points, and they run BEFORE the
             # range gate throws most of it away. Measured as its own stage so a
@@ -385,6 +419,8 @@ class DetectorNode(Node):
                          (depth <= self._p["roi_max_range_m"])
             pts = pts[range_mask]
         n_range = pts.shape[0]
+        if d is not None:
+            d["n_range"] = n_range
         if pts.shape[0] == 0:
             if dbg:
                 self.get_logger().info(
@@ -399,6 +435,8 @@ class DetectorNode(Node):
             angle_mask = np.arctan2(lateral, pts[:, 2]) < half_angle_rad
             pts = pts[angle_mask]
         n_angle = pts.shape[0]
+        if d is not None:
+            d["n_angle"] = n_angle
         if pts.shape[0] == 0:
             if dbg:
                 self.get_logger().info(f"funnel: raw={n_raw} range={n_range} angle=0",
@@ -408,6 +446,8 @@ class DetectorNode(Node):
         with prof.stage("voxel"):
             pts = voxel_downsample(pts, self._p["voxel_leaf_m"])
         n_voxel = pts.shape[0]
+        if d is not None:
+            d["n_voxel"] = n_voxel
         if pts.shape[0] == 0:
             return
 
@@ -463,6 +503,16 @@ class DetectorNode(Node):
             if short:
                 return
         n_fg = fg_pts.shape[0]
+        if d is not None:
+            # `pts` is post-voxel, post-egomotion — i.e. the fixed(odom)-frame
+            # cloud the background map actually saw. fg_mask indexes it, so the
+            # two together separate "the ball was never in the cloud" from "the
+            # ball was in the cloud and the background map swallowed it".
+            d["pts"] = pts.astype(np.float32)
+            d["fg"] = np.asarray(fg_mask, dtype=bool)
+            d["n_bg"] = int(n_bg)
+            d["n_fg"] = int(n_fg)
+            d["mode"] = mode
         if fg_pts.shape[0] == 0:
             if dbg:
                 self.get_logger().info(
@@ -471,6 +521,8 @@ class DetectorNode(Node):
                     throttle_duration_sec=self._funnel_throttle_s)
             return
 
+        if d is not None:
+            d["fg_flood"] = bool(n_fg > self._p["fg_max_points"])
         if fg_pts.shape[0] > self._p["fg_max_points"]:
             # Whole-scene depth change (patrol turn / aggressive egomotion) —
             # not a projectile signature. Skip rather than cluster 10k+ points.
@@ -507,6 +559,18 @@ class DetectorNode(Node):
         # in the largest-cluster pick below. Pre-split it discarded the ball.
         ball_sized = [c for c in split
                       if c.shape[0] <= self._p["cluster_max_points"]]
+        if d is not None:
+            # Every cluster the splitter produced, BEFORE cluster_max_points, so
+            # the dump can tell "no cluster near the ball" (lost upstream, at the
+            # diff or at cluster_min_points) from "a cluster sat on the ball and
+            # a later gate discarded it".
+            d["cl_size"] = np.array([c.shape[0] for c in split], dtype=np.int32)
+            d["cl_extent"] = np.array([cluster_extent(c) for c in split],
+                                      dtype=np.float32)
+            d["cl_centroid"] = (np.array([c.mean(axis=0) for c in split],
+                                         dtype=np.float32)
+                                if split else np.zeros((0, 3), np.float32))
+            d["n_ball_sized"] = len(ball_sized)
         if dbg:
             desc = sorted(((c.shape[0], round(cluster_extent(c), 2))
                            for c in ball_sized), reverse=True)[:5]
@@ -520,6 +584,10 @@ class DetectorNode(Node):
 
         best_cluster = max(ball_sized, key=lambda c: c.shape[0])
         score = best_cluster.shape[0] / self._p["cluster_max_points"]
+        if d is not None:
+            d["best_size"] = int(best_cluster.shape[0])
+            d["best_centroid"] = best_cluster.mean(axis=0).astype(np.float32)
+            d["score"] = float(score)
         if score < self._p["min_publish_score"]:
             if dbg:
                 self.get_logger().info(
@@ -559,6 +627,9 @@ class DetectorNode(Node):
                 f"compute={wall_ms:.0f} ms(wall, budget 77) raw={n_raw}",
                 throttle_duration_sec=self._funnel_throttle_s)
 
+        if d is not None:
+            d["published"] = True
+            d["centroid_bl"] = np.asarray(centroid_bl, dtype=np.float32)
         with prof.stage("publish"):
             self._publish_centroid(centroid_bl, msg.header.stamp)
             self._publish_marker(centroid_bl, msg.header.stamp)
@@ -568,6 +639,31 @@ class DetectorNode(Node):
                 throttle_duration_sec=0.5)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _write_dump(self, msg: PointCloud2) -> None:
+        """Write one frame's per-stage record to debug_dump_dir.
+
+        Keyed by the cloud's SIM stamp in nanoseconds, which is the only clock
+        that joins this to the ball's true pose. Wall time cannot: the callback
+        blocks the executor for ~80 ms, which is more than a frame period, so a
+        wall-time join is ambiguous by a whole frame.
+
+        Failures are logged, never raised — an instrument that can kill the
+        pipeline it is measuring is worse than no instrument.
+        """
+        d = self._dump
+        self._dump = None
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        try:
+            # Uncompressed on purpose: this runs inside the callback that the
+            # single-threaded executor uses to keep up with 15 Hz clouds, so
+            # zlib on ~250 KB would cost more latency than the disk write it
+            # saves — and added latency drops frames, corrupting exactly the
+            # detection-consistency measurement this dump exists to make.
+            np.savez(os.path.join(self._dump_dir, f"f_{stamp_ns}.npz"), **d)
+        except Exception as e:  # noqa: BLE001 — diagnostic must not propagate
+            self.get_logger().warn(f"debug dump write failed: {e}",
+                                   throttle_duration_sec=5.0)
 
     def _lookup_matrix(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         """
