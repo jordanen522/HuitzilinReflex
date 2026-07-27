@@ -21,6 +21,23 @@ The accept radius is subtracted because patrol reassigns its target the moment
 it lands inside it (patrol_node.py `if dist < self.accept`), so those last
 metres are not straight flight.
 
+Two conditions, not one — learned the hard way. Battery v10 gated on leg time
+alone, computed as (dist - accept)/*instantaneous* speed, and came out WORSE
+than v9: 16/20 off-target, aim error mean 1.60 m / max 4.96 m, with the gate
+never once refusing a throw. The quotient is inverted near a corner, where the
+speed collapses toward zero and inflates the window:
+
+    window_s  aim_err_m
+      0.76      0.18      <- fast, mid-leg: best throws of the run
+      2.48      0.21
+      5.86      3.22      <- slow, just out of a corner: worst
+      8.20      0.94
+
+So the gate also requires the drone to be AT CRUISE, and computes leg time at
+the cruise estimate rather than the current speed. A drone accelerating out of
+a corner breaks the lead even on a long leg, because compute_spawn extrapolates
+from the velocity it is handed and the drone then speeds up and leaves.
+
 Note what this does NOT do: it never adjusts the aim. An unaimable moment is
 skipped, not compensated. A scenario whose flight time exceeds the longest
 available leg is therefore unmeasurable on that patrol loop, and the battery
@@ -42,29 +59,58 @@ HOVER_SPEED_MPS = 0.05
 # at 15 Hz = 0.2 s), so a leg that ends exactly at impact is still too short.
 DEFAULT_MARGIN_S = 0.30
 
+# Fraction of cruise the drone must actually be doing before a throw is worth
+# spending. Measured on the Dell 2026-07-26 over 45 s of patrol (1350 odom
+# samples): median 2.09 m/s, p90 3.35, max 3.49 — and only 30% of the time
+# above 80% of max. The other 70% is corner transitions, which is why v10
+# threw 16/20 off-target while believing every window was safe.
+DEFAULT_MIN_CRUISE_FRAC = 0.80
+
 
 def straight_leg_time_s(dist_to_wp_m: float,
                         accept_radius_m: float,
-                        speed_mps: float) -> float:
+                        cruise_mps: float) -> float:
     """Seconds of straight flight left before patrol snaps to the next waypoint.
 
-    Returns ``inf`` when the drone is hovering (see HOVER_SPEED_MPS): there is
-    no corner ahead, so the window is not a constraint.
+    cruise_mps must be the drone's CRUISE speed, not its instantaneous speed.
+    Dividing by the instantaneous speed is what made battery v10 worse than v9
+    (see the module docstring): near a corner the speed collapses, so the
+    quotient inflates into a huge "safe" window at exactly the moment the aim
+    is least predictable. Cruise is the conservative choice — the drone will
+    accelerate back up to it during the ball's flight, so it reaches the corner
+    at least this soon.
+
+    Returns ``inf`` when cruise is below HOVER_SPEED_MPS: the drone is parked,
+    there is no corner ahead, and the lead is trivially exact.
     """
-    if speed_mps < HOVER_SPEED_MPS:
+    if cruise_mps < HOVER_SPEED_MPS:
         return math.inf
     remaining_m = max(0.0, float(dist_to_wp_m) - float(accept_radius_m))
-    return remaining_m / float(speed_mps)
+    return remaining_m / float(cruise_mps)
 
 
 def throw_window_ok(*,
                     dist_to_wp_m: float | None,
                     accept_radius_m: float,
                     speed_mps: float,
+                    cruise_mps: float,
                     t_flight_s: float,
                     margin_s: float = DEFAULT_MARGIN_S,
+                    min_cruise_frac: float = DEFAULT_MIN_CRUISE_FRAC,
                     patrol_running: bool = True) -> tuple[bool, str]:
     """Decide whether to spend a throw now, with a reason for the report.
+
+    Two independent conditions, both measured as necessary:
+
+    1. **At cruise** — ``speed_mps >= min_cruise_frac * cruise_mps``. A drone
+       accelerating out of a corner breaks the constant-velocity lead even on
+       a long leg, because the lead extrapolates from the *current* (low)
+       velocity and the drone then speeds up and walks away from the aim point.
+    2. **Enough leg** — the remaining straight run, evaluated at cruise,
+       covers the flight plus margin.
+
+    cruise_mps is passed in rather than defaulted so the broken v10 usage
+    (instantaneous speed for both roles) is not expressible.
 
     The reason string is carried into the battery row so a refusal is never
     read as a trigger failure — the v9 report conflated the two.
@@ -79,11 +125,19 @@ def throw_window_ok(*,
                        "tell how much straight leg remains")
 
     needed_s = float(t_flight_s) + float(margin_s)
-    leg_s = straight_leg_time_s(dist_to_wp_m, accept_radius_m, speed_mps)
+    leg_s = straight_leg_time_s(dist_to_wp_m, accept_radius_m, cruise_mps)
     if leg_s == math.inf:
         return True, "drone hovering — lead is exact"
+
+    floor_mps = float(min_cruise_frac) * float(cruise_mps)
+    if speed_mps < floor_mps:
+        return False, (f"speed {speed_mps:.2f} m/s is below "
+                       f"{floor_mps:.2f} m/s ({min_cruise_frac:.0%} of cruise "
+                       f"{cruise_mps:.2f}) — still accelerating out of a "
+                       f"corner, the lead would aim short")
     if leg_s >= needed_s:
         return True, f"leg {leg_s:.2f} s >= needed {needed_s:.2f} s"
-    return False, (f"only {leg_s:.2f} s of straight leg left, need "
-                   f"{needed_s:.2f} s ({t_flight_s:.2f} s flight + "
-                   f"{margin_s:.2f} s margin) — throw would span a corner")
+    return False, (f"only {leg_s:.2f} s of straight leg left at cruise "
+                   f"{cruise_mps:.2f} m/s, need {needed_s:.2f} s "
+                   f"({t_flight_s:.2f} s flight + {margin_s:.2f} s margin) "
+                   f"— throw would span a corner")

@@ -28,6 +28,7 @@ All run windows are timed in SIM time (use_sim_time:=true required).
 
 from __future__ import annotations
 
+import collections
 import csv
 import itertools
 import json
@@ -135,7 +136,13 @@ class DodgeBatteryNode(Node):
         # every run is skipped rather than thrown blind.
         self.declare_parameter("require_throw_window", True)
         self.declare_parameter("throw_window_margin_s", 0.30)
-        self.declare_parameter("throw_window_timeout_s", 25.0)  # wall
+        self.declare_parameter("throw_window_timeout_s", 40.0)  # wall
+        # Cruise is ESTIMATED from odom (rolling max over this window) rather
+        # than read from patrol's cruise_speed_ms: patrol flies position mode,
+        # so ArduPilot's WPNAV_SPEED governs, not patrol's parameter. Measured
+        # 3.49 m/s max against a patrol.yaml cruise_speed_ms of 1.5.
+        self.declare_parameter("cruise_estimate_window_s", 20.0)  # wall
+        self.declare_parameter("min_cruise_frac", 0.80)
         # A throw whose measured closest approach is this far from the
         # scenario's miss_distance_m did not test what the scenario claims.
         # Reported separately so aiming error is never read as trigger error.
@@ -167,6 +174,10 @@ class DodgeBatteryNode(Node):
             self.get_parameter("throw_window_margin_s").value)
         self._window_timeout_s = float(
             self.get_parameter("throw_window_timeout_s").value)
+        self._cruise_win_s = float(
+            self.get_parameter("cruise_estimate_window_s").value)
+        self._min_cruise_frac = float(
+            self.get_parameter("min_cruise_frac").value)
         self._evasion_name = self.get_parameter("evasion_node_name").value
 
         # Warm wrench publishers, built once: every throw needs its impulse and
@@ -177,6 +188,7 @@ class DodgeBatteryNode(Node):
         self._lock = threading.Lock()
         self._latest_odom = None
         self._latest_patrol = None    # None until /huitzilin/patrol_state arrives
+        self._speed_hist = collections.deque()   # (wall_t, |v|) for cruise est
         self._pose_stream_seen = False
         self._active_ball = None
         self._min_dist = float("inf")
@@ -209,6 +221,26 @@ class DodgeBatteryNode(Node):
 
     def _odom_cb(self, msg: Odometry) -> None:
         self._latest_odom = msg
+        tw = msg.twist.twist.linear
+        speed = math.sqrt(tw.x * tw.x + tw.y * tw.y + tw.z * tw.z)
+        now = time.monotonic()
+        self._speed_hist.append((now, speed))
+        cutoff = now - self._cruise_win_s
+        while self._speed_hist and self._speed_hist[0][0] < cutoff:
+            self._speed_hist.popleft()
+
+    def _cruise_est(self) -> float:
+        """Rolling max odom speed — the drone's actual cruise.
+
+        Max rather than mean because the mean is dragged down by the corner
+        transitions the gate exists to avoid (measured median 2.09 m/s vs max
+        3.49 m/s over the same 45 s). Returns 0.0 before any odom, which makes
+        straight_leg_time_s report inf; that is safe because run() will not
+        start a run until odom exists.
+        """
+        if not self._speed_hist:
+            return 0.0
+        return max(s for _, s in self._speed_hist)
 
     def _pose_cb(self, msg: TFMessage) -> None:
         self._pose_stream_seen = True
@@ -314,22 +346,30 @@ class DodgeBatteryNode(Node):
         while time.monotonic() - t0 < self._window_timeout_s:
             st = self._latest_patrol
             speed = float(np.linalg.norm(self._odom_vel()))
+            cruise = self._cruise_est()
             if st is None:
                 ok, reason = throw_window_ok(
                     dist_to_wp_m=None, accept_radius_m=0.6,
-                    speed_mps=speed, t_flight_s=t_flight_s,
-                    margin_s=self._window_margin_s)
+                    speed_mps=speed, cruise_mps=cruise,
+                    t_flight_s=t_flight_s,
+                    margin_s=self._window_margin_s,
+                    min_cruise_frac=self._min_cruise_frac)
             else:
                 accept = float(st.get("accept_radius_m", 0.6))
                 dist = st.get("dist_m")
                 running = bool(st.get("running", True))
                 ok, reason = throw_window_ok(
                     dist_to_wp_m=dist, accept_radius_m=accept,
-                    speed_mps=speed, t_flight_s=t_flight_s,
+                    speed_mps=speed, cruise_mps=cruise,
+                    t_flight_s=t_flight_s,
                     margin_s=self._window_margin_s,
+                    min_cruise_frac=self._min_cruise_frac,
                     patrol_running=running)
                 if dist is not None:
-                    leg = straight_leg_time_s(dist, accept, speed)
+                    # Evaluated at cruise, so best_leg is the honest ceiling
+                    # this patrol loop can offer — the evidence for whether a
+                    # scenario is measurable at all.
+                    leg = straight_leg_time_s(dist, accept, cruise)
                     if leg != math.inf:
                         best_leg = max(best_leg, leg)
             if ok:
@@ -664,7 +704,9 @@ class DodgeBatteryNode(Node):
                "drone walks clear on its own"),
             f"  throw window: {'enforced' if self._require_window else 'OFF'}"
             + (f"   margin: {self._window_margin_s} s   "
-               f"wait: {self._window_timeout_s} s" if self._require_window else
+               f"wait: {self._window_timeout_s} s   "
+               f"cruise est: {self._cruise_est():.2f} m/s "
+               f"(floor {self._min_cruise_frac:.0%})" if self._require_window else
                "   << throws may span a patrol corner; aim error will be large"),
             "═" * 72,
             "",
