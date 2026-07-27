@@ -283,11 +283,17 @@ class DetectorNode(Node):
         t0 = time.monotonic()
         # Sim clock at callback entry, so the reported dodge latency can be
         # split into transport (sensor stamp -> here) and compute (here ->
-        # centroid published). NOTE both clocks are needed: latency is judged
-        # in SIM time, but at the Dell's ~0.33 RTF sim time advances 3x slower
-        # than wall, so a compute-bound millisecond costs only ~0.33 ms of the
-        # sim-time budget. Sim-time latency therefore UNDERSTATES what the same
-        # code will cost on real hardware at RTF 1.0.
+        # centroid published).
+        #
+        # Compute is reported in WALL time only, deliberately. Measuring it in
+        # sim time reads exactly 0 ms: this callback blocks the single-threaded
+        # executor, so no /clock message is processed while it runs and the sim
+        # clock cannot advance mid-callback. Sim-time compute is structurally
+        # unmeasurable from in here — don't re-add it.
+        #
+        # To convert, measure RTF separately (0.864 on the Dell 2026-07-27 —
+        # NOT the ~0.33 that older notes assume, so 15 Hz clouds arrive every
+        # ~77 ms of wall time, and that is the real budget per frame).
         sim0 = self.get_clock().now().nanoseconds * 1e-9
         dbg = self._p.get("debug_funnel", False)
 
@@ -479,17 +485,15 @@ class DetectorNode(Node):
 
         if dbg:
             stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-            sim_pub = self.get_clock().now().nanoseconds * 1e-9
             wall_ms = (time.monotonic() - t0) * 1000.0
-            sim_compute_ms = (sim_pub - sim0) * 1000.0
-            # rtf is derived, not assumed: it is the exchange rate between the
-            # two compute figures, and it is what scales this measurement to
-            # real hardware.
-            rtf = (sim_compute_ms / wall_ms) if wall_ms > 0.0 else float("nan")
+            # transport = how stale the cloud already was on arrival. Measured
+            # 53-348 ms (typically >300) while compute ran 63-354 ms wall
+            # against a 77 ms wall arrival period: the detector is ~2x slower
+            # than its input, the queue backs up, and THAT backlog is the
+            # transport figure. Transport is the symptom; compute is the cause.
             self.get_logger().info(
                 f"timing: transport={((sim0 - stamp_s) * 1000.0):.0f} ms(sim) "
-                f"compute={sim_compute_ms:.0f} ms(sim)/{wall_ms:.0f} ms(wall) "
-                f"rtf={rtf:.2f} raw={n_raw}",
+                f"compute={wall_ms:.0f} ms(wall, budget 77) raw={n_raw}",
                 throttle_duration_sec=self._funnel_throttle_s)
 
         self._publish_centroid(centroid_bl, msg.header.stamp)

@@ -556,3 +556,40 @@ Caveats, all still open:
 - **Latency is still over budget** (203 mean vs 150 ms) and slightly worse than v9.
 - v13 hit one `deque mutated during iteration` harness exception — `_cruise_est` racing
   `_odom_cb`. Fixed with a dedicated lock.
+
+### Latency root-caused: the detector runs ~2x slower than its input (2026-07-27, `33680e6`)
+
+The 203–233 ms dodge latency is measured from the **cloud's** `header.stamp` (the detector
+stamps centroids with `msg.header.stamp`), so it spans the whole sensor-to-actuation chain.
+There was no instrumentation to say which stage owned it. `_cloud_cb` already captured
+`t0 = time.monotonic()` and never used it.
+
+**Measured split** (`debug_funnel`, 15 samples under patrol):
+
+| | range | note |
+|---|---|---|
+| transport (stamp → callback entry) | 53–348 ms sim, typically >300 | already over the whole 150 ms budget |
+| compute (entry → centroid published) | 63–354 ms wall, mean ~160 | on raw=107k–215k points |
+
+**RTF is 0.864, not the ~0.33 older notes assume.** So 15 Hz clouds arrive every **77 ms of
+wall time**, and that is the real per-frame budget. Compute averages ~160 ms — the detector
+is **~2x slower than its input rate**. With `cloud_queue_depth: 5` the queue backs up, and
+that backlog *is* the transport figure. **Transport is the symptom; compute is the cause.**
+Optimising transport (QoS, queue depth) would be treating the wrong stage.
+
+**A measurement trap, recorded so it is not repeated:** compute measured in *sim* time reads
+exactly 0 ms. The callback blocks the single-threaded executor, so no `/clock` is processed
+while it runs and the sim clock cannot advance mid-callback. Sim-time compute is structurally
+unmeasurable from inside the callback; the first version of this instrumentation reported
+`compute=0 ms(sim)` and a derived `rtf=0.00`, both meaningless. Wall time only.
+
+Not yet attempted, and deliberately so — making the detector 2–3x faster is real performance
+work that can move the Week-3 recall numbers, so it needs per-stage profiling first rather
+than a guess at which stage is hot. Two candidates worth measuring before touching anything:
+`read_points_numpy` deserialising 640×480, and the fact that the `gz_flu` convention remap
+and the finite-filter both allocate full ~200k×3 arrays *before* `roi_max_range_m: 5.0`
+discards most of them. The range gate is invariant under that signed-axis permutation, so it
+could run first — but profile before assuming that is where the time goes.
+
+Also note raw point counts have grown (115k → 215k) since the 12 m loop; more of the scene
+falls inside the ROI, which directly inflates compute.
