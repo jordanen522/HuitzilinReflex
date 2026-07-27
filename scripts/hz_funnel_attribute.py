@@ -79,8 +79,8 @@ def load_truth(path: str) -> tuple[dict, dict]:
     return out, recv
 
 
-def fit_odom_clock_offset(truth: dict, recv: dict, drone_model: str):
-    """Seconds to ADD to a /huitzilin/odom stamp to reach the Gazebo sim clock.
+def retime_odom_to_sim(truth: dict, recv: dict) -> dict:
+    """Re-key odom samples by their ARRIVAL time on the Gazebo sim clock.
 
     Two clocks are in play, measured live 2026-07-27:
 
@@ -90,43 +90,24 @@ def fit_odom_clock_offset(truth: dict, recv: dict, drone_model: str):
 
     mav_bridge, patrol and telemetry_logger run with use_sim_time=False —
     week2_sitl.launch.py never sets it — while every Gazebo-sourced node runs on
-    sim time. So the dumped frames and the ball's true pose share a clock and
-    join directly; only odom needs shifting, and it is needed only to establish
-    the constant world->odom translation.
+    sim time. So the dumped frames and the ball's true pose already share a
+    clock and join directly; only odom is on the wrong one.
 
-    Bracketed by arrival time (recv_s is on the sim clock), then refined by the
-    only available check: the drone appears in both streams, so the right offset
-    is the one that makes its world track and its odom track differ by a pure
-    constant. The residual achieved is reported, so a bad fit cannot pass
-    silently.
+    A constant offset does NOT convert between them: the sim runs at RTF ~0.87,
+    so the clocks differ by a RATE as well, and fitting one constant over a 50 s
+    battery was measured to leave an 11.6 m residual. Rather than fit an affine
+    map, use the arrival stamp, which the probe already records on the sim
+    clock. It carries a few ms of transport delay, which is acceptable here for
+    one specific reason: odom is used ONLY to establish the constant world->odom
+    translation, and at 5 m/s a few ms is ~2 cm. The spread of that translation
+    is printed as the check.
     """
-    key = ("pose", drone_model)
-    if key not in truth:
-        return None, None, "no pose rows for the drone model"
-    if ("odom", "drone") not in truth:
-        return None, None, "no odom rows"
-
-    wt, wp = truth[key]
-    ot, op = truth[("odom", "drone")]
-    # recv - stamp is (clock constant - transport delay); the max over thousands
-    # of samples is the least-delayed one, bracketing the constant to a few ms.
-    coarse = float(np.max(recv[("odom", "drone")] - ot))
-
-    def spread(c: float) -> float:
-        t = ot + c
-        sel = (t >= wt[0]) & (t <= wt[-1])
-        if sel.sum() < 50:
-            return np.inf
-        resid = np.stack([op[sel, i] - np.interp(t[sel], wt, wp[:, i])
-                          for i in range(3)], axis=1)
-        return float(np.linalg.norm(resid.std(axis=0)))
-
-    grid = coarse + np.arange(-0.500, 0.500, 0.001)
-    scores = np.array([spread(c) for c in grid])
-    best = int(np.argmin(scores))
-    if not np.isfinite(scores[best]):
-        return None, None, "no overlap between the pose and odom streams"
-    return float(grid[best]), float(scores[best]), ""
+    out = dict(truth)
+    key = ("odom", "drone")
+    if key in truth:
+        _, p = truth[key]
+        out[key] = (recv[key], p)
+    return out
 
 
 def interp_xyz(t_query: float, times: np.ndarray, pos: np.ndarray):
@@ -229,20 +210,7 @@ def main() -> int:
     args = ap.parse_args()
 
     truth, recv = load_truth(args.truth)
-    k, fit_resid, why = fit_odom_clock_offset(truth, recv, args.drone_model)
-    if k is None:
-        print(f"cannot align clocks ({why}); "
-              f"names seen: {sorted({n for _, n in truth})}", file=sys.stderr)
-        return 1
-    print(f"odom->gz clock offset {k:.3f} s "
-          f"(drone track residual {fit_resid:.3f} m at the fit; "
-          f"a large residual here means the fit failed and every range below is "
-          f"measured at the wrong instant of the flight)")
-    # Only odom is on the wall clock; pose rows and the dumped frames are both
-    # already on the Gazebo clock and need no shift.
-    truth = {key: ((t + k, p) if key[0] == "odom" else (t, p))
-             for key, (t, p) in truth.items()}
-
+    truth = retime_odom_to_sim(truth, recv)
     offset, spread = world_to_odom_offset(truth, args.drone_model)
     if offset is None:
         print(f"no truth for drone model '{args.drone_model}' — "
