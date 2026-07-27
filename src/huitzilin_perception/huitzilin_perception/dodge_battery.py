@@ -801,6 +801,15 @@ class DodgeBatteryNode(Node):
         tca_s = round(events[0]["tca_s"], 3) if dodged else None
         trigger_miss_m = (round(events[0]["miss_m"], 3)
                           if dodged and "miss_m" in events[0] else None)
+        # Track maturity at commit. A reseed zeroes the KF velocity, which makes
+        # an inbound ball read as receding, so a run that dodged late with
+        # reseeds > 0 failed for a different reason than one that dodged late
+        # with a clean track. .get() because an older evasion node does not
+        # publish these and a missing key must not crash the run.
+        track_updates = events[0].get("track_updates") if dodged else None
+        track_reseeds = (None if not dodged else
+                         events[0].get("reseeds_reject", 0)
+                         + events[0].get("reseeds_timeout", 0))
         if min_dist == float("inf"):
             return {**base, "error": True, "success": False, "dodged": dodged,
                     "note": f"ball '{name}' never seen on /gz/dynamic_poses "
@@ -859,6 +868,8 @@ class DodgeBatteryNode(Node):
                                 else round(lead_err.vert_m, 3)),
                 "tca_s": tca_s, "trigger_miss_m": trigger_miss_m,
                 "first_det_range_m": first_det,
+                "track_updates": track_updates,
+                "track_reseeds": track_reseeds,
                 "ball_speed_mps": ball_speed,
                 "t_flight_assumed_s": round(t_flight, 3),
                 "flight_to_ca_s": flight_ca,
@@ -1216,6 +1227,20 @@ class DodgeBatteryNode(Node):
                     f"range {np.min(dets):.2f}-{np.max(dets):.2f} m "
                     f"(roi_max_range_m bounds this; if the mean sits well "
                     f"inside the gate, the gate is not the limit)")
+            # Track maturity at commit — the discriminator for WHY tca is small.
+            # Reseeds > 0 means the filter restarted mid-flight and spent the
+            # warning re-learning the ball's velocity from zero.
+            tus = [r["track_updates"] for r in sub
+                   if r.get("track_updates") is not None]
+            rss = [r["track_reseeds"] for r in sub
+                   if r.get("track_reseeds") is not None]
+            if tus:
+                lines.append(
+                    f"    track at commit: {np.mean(tus):.1f} updates "
+                    f"(range {min(tus)}-{max(tus)})"
+                    + (f", reseeds {np.mean(rss):.1f} mean / {max(rss)} max"
+                       f" — {sum(1 for r in rss if r > 0)}/{len(rss)} dodges "
+                       f"followed a restarted track" if rss else ""))
             tcas = [r["tca_s"] for r in sub if r.get("tca_s") is not None]
             if tcas:
                 reach = np.array(tcas) * 1.5   # nominal dodge_speed_mps
@@ -1270,7 +1295,7 @@ class DodgeBatteryNode(Node):
                     "lead_along_m", "lead_cross_m", "lead_vert_m",
                     "ball_speed_mps", "t_flight_assumed_s",
                     "flight_to_ca_s", "tca_s", "trigger_miss_m",
-                    "first_det_range_m"])
+                    "first_det_range_m", "track_updates", "track_reseeds"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})

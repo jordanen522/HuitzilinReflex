@@ -91,6 +91,55 @@ def test_track_times_out_and_reseeds():
     np.testing.assert_allclose(pos, [1.0, 2.0, 3.0])
 
 
+# ── Reseed counters ─────────────────────────────────────────────────────────
+# A reseed puts the velocity state back to ZERO, and a zero-velocity estimate
+# makes predict_closest_approach report tca ~ 0 with a miss equal to the current
+# range, which the trigger reads as "not a threat". Measured 2026-07-27: the
+# published predicted miss tracks the ball's current range on inbound throws —
+# exactly that signature. These counters make a mid-flight reseed visible instead
+# of inferred. They are lifetime totals, so reset() must NOT clear them.
+
+def test_reseed_counters_start_at_zero():
+    tr = ProjectileTracker()
+    assert tr.n_reseeds_reject == 0
+    assert tr.n_reseeds_timeout == 0
+
+
+def test_reject_reseed_is_counted_and_separated_from_timeout():
+    tr = ProjectileTracker(meas_std_m=0.05, max_consecutive_rejects=3)
+    t_last = _feed_ballistic(tr, [6.0, 0.0, 2.0], [-8.0, 0.0, 2.9], n=6)
+    for k in range(1, 4):
+        tr.process(t_last + k / RATE_HZ, [80.0, 80.0, 10.0])
+    assert tr.n_reseeds_reject == 1
+    assert tr.n_reseeds_timeout == 0
+
+
+def test_timeout_reseed_is_counted_and_separated_from_rejects():
+    tr = ProjectileTracker(track_timeout_s=0.5)
+    t_last = _feed_ballistic(tr, [6.0, 0.0, 2.0], [-8.0, 0.0, 2.9], n=5)
+    tr.process(t_last + 1.0, [1.0, 2.0, 3.0])
+    assert tr.n_reseeds_timeout == 1
+    assert tr.n_reseeds_reject == 0
+
+
+def test_reseed_counters_survive_an_explicit_reset():
+    """Lifetime diagnostics: if reset() cleared them, the very event they exist
+    to record would erase its own evidence."""
+    tr = ProjectileTracker(track_timeout_s=0.5)
+    t_last = _feed_ballistic(tr, [6.0, 0.0, 2.0], [-8.0, 0.0, 2.9], n=5)
+    tr.process(t_last + 1.0, [1.0, 2.0, 3.0])
+    tr.reset()
+    assert tr.n_reseeds_timeout == 1
+
+
+def test_a_clean_track_never_reseeds():
+    tr = ProjectileTracker()
+    _feed_ballistic(tr, [6.0, 0.0, 2.0], [-8.0, 0.0, 2.9], n=10)
+    assert tr.n_reseeds_reject == 0
+    assert tr.n_reseeds_timeout == 0
+    assert tr.n_updates == 10
+
+
 def test_out_of_order_stamp_rejected():
     tr = ProjectileTracker()
     tr.process(1.0, [6.0, 0.0, 2.0])

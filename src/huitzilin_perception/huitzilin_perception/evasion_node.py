@@ -149,6 +149,8 @@ class EvasionNode(Node):
         self._last_odom = None
         self._warned_no_odom = False
         self._warned_bad_quat = False
+        # Last observed (reject, timeout) reseed totals — see _centroid_cb.
+        self._last_reseeds = (0, 0)
 
         # ── ROS interfaces ───────────────────────────────────────────────
         self.create_subscription(PointStamped, self._p["centroid_topic"],
@@ -226,7 +228,29 @@ class EvasionNode(Node):
         z_bl = np.array([msg.point.x, msg.point.y, msg.point.z])
         z_odom = apply_transform(T_odom_bl, z_bl[None, :])[0].astype(np.float64)
 
-        if not self._tracker.process(self._stamp_to_sec(msg.header.stamp), z_odom):
+        accepted = self._tracker.process(
+            self._stamp_to_sec(msg.header.stamp), z_odom)
+
+        # Checked immediately AFTER process(), not before, or a reseed is only
+        # noticed on the following centroid. A reseed zeroes the velocity state,
+        # and predict_closest_approach works on v_rel = v_proj - v_drone, so a
+        # zero v_proj makes an inbound ball read as RECEDING: the relative
+        # minimum lands at t~0, giving tca~0 and a predicted miss equal to the
+        # current range, which should_dodge scores as harmless. If ball tracks
+        # reseed mid-flight then that — not the detector's range and not the
+        # manoeuvre's speed, both of which were measured and cleared on
+        # 2026-07-27 — is what delays every dodge.
+        reseeds = (self._tracker.n_reseeds_reject,
+                   self._tracker.n_reseeds_timeout)
+        if reseeds != self._last_reseeds:
+            kind = ("rejects" if reseeds[0] != self._last_reseeds[0]
+                    else "timeout")
+            self.get_logger().warn(
+                f"track RESEEDED ({kind}) — velocity estimate back to zero; "
+                f"totals reject={reseeds[0]} timeout={reseeds[1]}")
+            self._last_reseeds = reseeds
+
+        if not accepted:
             return
         if self._tracker.n_updates < int(self._p["min_track_updates"]):
             return
@@ -281,6 +305,12 @@ class EvasionNode(Node):
             "latency_s": latency,
             "tca_s": plan.tca_s,
             "miss_m": plan.miss_m,
+            # Track maturity at the moment of commit. tca is bounded by how long
+            # the filter took to believe the ball was inbound, so these say
+            # whether a late dodge was a late DETECTION or a restarted track.
+            "track_updates": self._tracker.n_updates,
+            "reseeds_reject": self._tracker.n_reseeds_reject,
+            "reseeds_timeout": self._tracker.n_reseeds_timeout,
             "dodge_body": [float(v) for v in self._dodge_cmd_body],
             "dodge_enu": [float(v) for v in plan.direction],
             "over_budget": over,

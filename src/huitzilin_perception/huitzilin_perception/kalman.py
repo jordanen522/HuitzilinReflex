@@ -60,6 +60,22 @@ class ProjectileTracker:
         self._timeout = float(track_timeout_s)
         self._max_rejects = int(max_consecutive_rejects)
         self._H = np.hstack([np.eye(3), np.zeros((3, 3))])
+        # Lifetime reseed totals. Set BEFORE reset(), which must not clear them,
+        # so a reseed cannot erase its own evidence.
+        #
+        # Why they are worth counting: a reseed returns the velocity state to
+        # ZERO, and predict_closest_approach works on v_rel = v_proj - v_drone,
+        # so a zero v_proj makes the ball look like it is receding — the relative
+        # minimum lands at t~0, giving tca~0 and a predicted miss equal to the
+        # current range. should_dodge then reads a genuine intercept as "not a
+        # threat" until the velocity re-converges. Measured 2026-07-27: the
+        # published predicted miss does track the ball's current range on inbound
+        # throws, which is that signature — these counters say whether mid-flight
+        # reseeds are the cause. The two paths are separated because their fixes
+        # differ: rejects point at the detector's false-positive stream stealing
+        # the track, timeouts at gaps in its output.
+        self._n_reseeds_reject = 0
+        self._n_reseeds_timeout = 0
         self.reset()
 
     # ── track lifecycle ──────────────────────────────────────────────────
@@ -78,6 +94,16 @@ class ProjectileTracker:
     @property
     def n_updates(self) -> int:
         return self._n_updates
+
+    @property
+    def n_reseeds_reject(self) -> int:
+        """Tracks abandoned after max_consecutive_rejects disagreements."""
+        return self._n_reseeds_reject
+
+    @property
+    def n_reseeds_timeout(self) -> int:
+        """Tracks abandoned after track_timeout_s of silence."""
+        return self._n_reseeds_timeout
 
     @property
     def last_update_t(self) -> float:
@@ -101,6 +127,7 @@ class ProjectileTracker:
         z = np.asarray(z, dtype=np.float64).reshape(3)
 
         if self._x is not None and (t - self._t) > self._timeout:
+            self._n_reseeds_timeout += 1
             self.reset()
 
         if self._x is None:
@@ -125,6 +152,7 @@ class ProjectileTracker:
             self._rejects += 1
             if self._rejects >= self._max_rejects:
                 # Persistent disagreement -> different object; reseed from it.
+                self._n_reseeds_reject += 1
                 self.reset()
                 return self.process(t, z)
             # Keep the prediction, drop the outlier.
