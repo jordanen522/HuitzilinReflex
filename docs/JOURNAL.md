@@ -991,3 +991,32 @@ battery per-run instead of trusting its means:
   Run bag work before bringing the stack up, or restart T3 afterwards.
 - Best latency recorded to date: **93 ms mean / 200 ms max** on a clean settled
   stack, comfortably inside the 150 ms mean budget.
+
+### The trigger-timing probe: contaminated, and what it still showed
+
+The measurement named above was attempted (`/tmp/trigger_timing.py` on the Dell:
+log `|/threat/intercept|` — the policy's own decision variable, published on every
+confirmed track update *before* the `should_dodge` check — against the ball's true
+range, through hover throws). **It failed for the same reason the first-detection
+instrument did: the false-positive stream.** It grouped 40 intercept messages into
+31 "throws", and the ones it printed carry predicted misses of 1.79-6.46 m at ball
+ranges of 12.65-16.54 m. Those cannot be the thrown ball. A redo needs the same
+match discipline the battery now uses — key the track to the *active* ball's name
+and require the intercept to be plausibly near it — not a bare
+`child_frame_id.startswith("ball_")`.
+
+**But it establishes one thing cleanly: the FP stream reaches CONFIRMED tracks.**
+Those spurious intercepts are published, which means clutter survives
+`min_track_updates: 3` and the chi2 gate, gets a Kalman track, and produces a dodge
+plan. What stops it is `threat_radius_m` (0.75 m) — every spurious predicted miss
+measured 1.79 m or wider. That independently explains the sweep's otherwise
+surprising result that **`min_track_updates: 2` produced 0 false dodges**: the
+update count was never what was filtering clutter, so lowering it costs no
+precision. It also means the FP stream is a *latency* and instrumentation tax, not
+a safety one, which is worth knowing before anyone spends effort on detector
+precision.
+
+Hover control alongside it: **0/6**, `tca` mean 0.205 s (0.040-0.410), first
+detection 3.67 m, latency 144 ms mean / 315 ms max. Consistent with the earlier
+hover figure — with the aim exact, the manoeuvre simply does not clear 0.30 m in
+~0.2 s at 1.5 m/s.
