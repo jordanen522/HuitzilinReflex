@@ -82,11 +82,15 @@ def foreground_mask(current: np.ndarray, background: np.ndarray,
 
 # ── Euclidean clustering (single-linkage radius, cKDTree) ────────────────────
 
-def euclidean_cluster(pts: np.ndarray, tol: float,
-                      min_pts: int, max_pts: int) -> list[np.ndarray]:
+def cluster_all(pts: np.ndarray, tol: float, min_pts: int) -> list[np.ndarray]:
     """
-    Greedy radius-based Euclidean clustering on (N, 3) float32 xyz.
-    Returns a list of (k, 3) arrays, each being one cluster.
+    Greedy radius-based Euclidean clustering on (N, 3) float32 xyz, with NO
+    upper size bound. Returns a list of (k, 3) arrays, each being one cluster.
+
+    Split out from euclidean_cluster() because an upper point cap cannot be
+    applied at this layer without destroying information: a projectile touching
+    a large surface lands in one oversized cluster, and discarding it here loses
+    the ball. cluster_and_split() re-clusters such a blob instead.
     """
     if pts.shape[0] == 0:
         return []
@@ -109,7 +113,70 @@ def euclidean_cluster(pts: np.ndarray, tol: float,
                 if not assigned[nb]:
                     assigned[nb] = True
                     queue.append(nb)
-        if min_pts <= len(members) <= max_pts:
+        if len(members) >= min_pts:
             clusters.append(pts[np.array(members)])
 
     return clusters
+
+
+def euclidean_cluster(pts: np.ndarray, tol: float,
+                      min_pts: int, max_pts: int) -> list[np.ndarray]:
+    """
+    Greedy radius-based Euclidean clustering on (N, 3) float32 xyz.
+    Returns a list of (k, 3) arrays, each being one cluster.
+
+    Clusters outside [min_pts, max_pts] are dropped. Prefer
+    cluster_and_split() in the live pipeline — see its docstring for why the
+    max_pts drop is the wrong behaviour when the scene is cluttered.
+    """
+    return [c for c in cluster_all(pts, tol, min_pts) if c.shape[0] <= max_pts]
+
+
+def cluster_extent(cluster: np.ndarray) -> float:
+    """Largest axis-aligned side length of a cluster's bounding box, in metres."""
+    if cluster.shape[0] == 0:
+        return 0.0
+    return float(np.max(cluster.max(axis=0) - cluster.min(axis=0)))
+
+
+def cluster_and_split(pts: np.ndarray, tol: float, min_pts: int,
+                      max_extent: float, split_tol: float,
+                      max_split_points: int) -> list[np.ndarray]:
+    """
+    Cluster at `tol`; any cluster too physically large to be the projectile is
+    re-clustered ONCE at the tighter `split_tol` instead of being discarded.
+    Returns only clusters with extent <= max_extent.
+
+    Why this exists (W4, 2026-07-26): the old path clustered once at
+    cluster_tolerance_m and then *discarded* anything bigger than the ball. Under
+    patrol that threw the ball away with the clutter — funnel evidence from a
+    throw that passed 0.484 m from the drone:
+
+        fg=303 clusters=2 ball_sized=1 (size,extent)=[(291, 1.42), (12, 0.18)]
+
+    The 12-point / 0.18 m cluster *is* the ball; on the frames that produced
+    `fg=2946 clusters=0` it had merged into a blob over cluster_max_points and
+    vanished. A compact object near a large surface must stay separable.
+
+    Why ONE pass and not recursive shrinking, which was the obvious first
+    implementation: recursion manufactures false positives. Measured in
+    test_background_map.py — shrinking 0.20 -> 0.10 -> 0.05 against a surface
+    whose own point spacing is 0.05 m shatters it into 29 fragments of 0.10 m
+    extent, every one of which passes the max_extent ball gate. A single
+    intermediate tolerance separates a detached object from a surface without
+    ever reaching the surface's internal spacing. Pick split_tol above the
+    voxel leaf and below the object's standoff from the scene.
+
+    max_split_points bounds the cost — a blob bigger than that is an egomotion
+    flood, handled upstream by fg_max_points, not a scene object worth splitting.
+    """
+    out: list[np.ndarray] = []
+    for c in cluster_all(pts, tol, min_pts):
+        if cluster_extent(c) <= max_extent:
+            out.append(c)
+            continue
+        if split_tol >= tol or c.shape[0] > max_split_points:
+            continue
+        out.extend(sub for sub in cluster_all(c, split_tol, min_pts)
+                   if cluster_extent(sub) <= max_extent)
+    return out

@@ -59,8 +59,23 @@ detector:
     # Larger = faster but misses small objects.
     voxel_leaf_m: 0.02   # W3-15: 0.05 m voxels are COARSER than the 80 mm projectile -> it collapsed to 1-2 pts. 0.02 m resolves it into ~10-20 pts.
 
-    # ── Background model / frame differencing (W3-13) ────────────────────────
-    # Number of past frames to keep in the rolling background buffer.
+    # ── Background model / frame differencing (W3-13, reworked W4) ───────────
+    # Persistent voxel-hashed background map in the fixed frame, replacing the
+    # rolling deque below. Root cause it fixes (measured 2026-07-26): the deque
+    # only remembers 0.267 s, so scene the camera newly sees while patrolling
+    # reads as novel, fg floods to ~48k points, and the ball is absorbed into a
+    # metre-scale cluster — every on-target patrol throw gave 0-1 centroids
+    # against a min_track_updates=3 gate. Set false to A/B against the Week-3
+    # deque (which is what the recorded W3 recall figures were scored on).
+    # Ignored in camera mode (pre-b0eedd5 bags): a persistent map needs a fixed
+    # frame, so those runs always use the deque.
+    use_persistent_bg: true
+    bg_map_leaf_m: 0.10       # keep equal to diff_threshold_m — see background_map.py
+    bg_map_ttl_s: 20.0        # forget a voxel unseen this long (bounds a drifting map)
+    bg_map_max_voxels: 400000 # hard size cap; oldest-seen voxels evicted first
+
+    # Number of past frames to keep in the rolling background buffer
+    # (only used when use_persistent_bg is false, or in camera mode).
     bg_history_frames: 5
 
     # Minimum per-voxel depth change (metres) to count as "foreground".
@@ -76,8 +91,21 @@ detector:
     cluster_tolerance_m: 0.20
 
     # Reject clusters outside this size range (number of voxel-downsampled points).
+    # W4: cluster_max_points now applies only AFTER extent splitting. Applying it
+    # first discarded the ball whenever it merged into a larger blob.
     cluster_min_points: 5     # W3-15: raised 3->5 — 3 was letting background clutter FP (N01, N03) through
     cluster_max_points: 500
+
+    # Extent splitting (W4): a cluster larger than cluster_max_extent_m is
+    # re-clustered ONCE at this tighter radius instead of being dropped, so a
+    # ball touching a surface stays separable. Keep it above voxel_leaf_m and
+    # below the ball's standoff from the scene: recursive shrinking was tried
+    # first and shatters a surface into ball-sized false positives once the
+    # radius reaches its own point spacing (29 fragments in the unit test).
+    # max_points bounds the cost — a bigger blob is an egomotion flood, which is
+    # fg_max_points' job, not a scene object worth splitting.
+    cluster_split_tol_m: 0.10
+    cluster_split_max_points: 5000
 
     # Reject clusters whose max axis extent exceeds this (metres). The 80 mm
     # ball spans <= ~0.15 m after 0.02 m voxelization; scene-entry blobs (near

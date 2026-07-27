@@ -5,9 +5,9 @@ Pipeline (one PointCloud2 callback):
   1. ROI / range gate             (W3-12)
   2. Voxel downsampling           (W3-12)
   3. NaN / outlier strip          (W3-12)
-  4. Rolling background model     (W3-13)
+  4. Background model             (W3-13; persistent voxel map since W4)
   5. Frame differencing           (W3-13)
-  6. Euclidean clustering         (W3-13)
+  6. Euclidean clustering + split (W3-13; extent split since W4)
   7. Centroid extraction          (W3-14)
   8. Publish /threat/centroid     (W3-14)
   9. Publish RViz marker          (W3-14)
@@ -49,9 +49,11 @@ from visualization_msgs.msg import Marker
 import tf2_ros
 import tf2_geometry_msgs  # noqa: F401  (registers PointStamped transform support)
 
+from huitzilin_perception.background_map import VoxelBackgroundMap
 from huitzilin_perception.cloud_geometry import (
     apply_transform,
-    euclidean_cluster,
+    cluster_and_split,
+    cluster_extent,
     foreground_mask,
     is_valid_quat,
     make_transform,
@@ -112,6 +114,21 @@ class DetectorNode(Node):
         self.declare_parameter("fg_max_points", 5000)  # skip frame if foreground explodes (egomotion flood)
         self.declare_parameter("cluster_max_extent_m", 0.35)  # reject clusters physically larger than the projectile
         self.declare_parameter("fixed_frame", "odom")  # frame for egomotion-compensated differencing
+        # ── Persistent background map (W4, 2026-07-26) ────────────────────────
+        # The bg_history_frames rolling deque only remembers 0.267 s, so any
+        # region the camera newly sees under patrol reads as novel and the
+        # foreground floods to ~48k points. See background_map.py. Set false to
+        # fall back to the Week-3 rolling deque (kept for A/B against the bag
+        # library, and it is what the recorded W3 recall numbers were scored on).
+        self.declare_parameter("use_persistent_bg", True)
+        self.declare_parameter("bg_map_leaf_m", 0.10)      # match diff_threshold_m
+        self.declare_parameter("bg_map_ttl_s", 20.0)
+        self.declare_parameter("bg_map_max_voxels", 400000)
+        # Tighter linkage radius used to re-cluster an oversized blob once.
+        # Must sit above voxel_leaf_m (below it, a surface shatters into
+        # ball-sized fragments — measured) and below the ball's standoff.
+        self.declare_parameter("cluster_split_tol_m", 0.10)
+        self.declare_parameter("cluster_split_max_points", 5000)
         # Cloud subscription reliability. TRUE is not the usual sensor-data
         # choice, and it is deliberate: /oak/points is a 7.37 MB sample
         # (640x480 x 24 B) fragmented across thousands of UDP datagrams against
@@ -138,9 +155,19 @@ class DetectorNode(Node):
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
-        # ── Rolling background buffer (deque of (M, 3) np arrays) ────────────
+        # ── Background model ─────────────────────────────────────────────────
+        # Two models, and which one runs depends on the differencing frame, not
+        # only on the param: a persistent map is only meaningful in a FIXED
+        # frame. In camera mode (no odom attitude — pre-b0eedd5 bags) the map
+        # would accumulate a smear of every past viewpoint, so those runs stay
+        # on the Week-3 rolling deque regardless of use_persistent_bg.
         self._bg_buffer: deque[np.ndarray] = deque(
             maxlen=self._p["bg_history_frames"]
+        )
+        self._bg_map = VoxelBackgroundMap(
+            leaf_m=self._p["bg_map_leaf_m"],
+            ttl_s=self._p["bg_map_ttl_s"],
+            max_voxels=self._p["bg_map_max_voxels"],
         )
 
         # ── Egomotion compensation state (W3-13) ─────────────────────────────
@@ -217,6 +244,12 @@ class DetectorNode(Node):
             "fg_max_points":      self.get_parameter("fg_max_points").value,
             "cluster_max_extent_m": self.get_parameter("cluster_max_extent_m").value,
             "fixed_frame":        self.get_parameter("fixed_frame").value,
+            "use_persistent_bg":  self.get_parameter("use_persistent_bg").value,
+            "bg_map_leaf_m":      self.get_parameter("bg_map_leaf_m").value,
+            "bg_map_ttl_s":       self.get_parameter("bg_map_ttl_s").value,
+            "bg_map_max_voxels":  self.get_parameter("bg_map_max_voxels").value,
+            "cluster_split_tol_m": self.get_parameter("cluster_split_tol_m").value,
+            "cluster_split_max_points": self.get_parameter("cluster_split_max_points").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
@@ -324,7 +357,9 @@ class DetectorNode(Node):
                 self._p["fixed_frame"], msg.header.frame_id, msg.header.stamp)
         mode = "fixed" if T_fixed_cam is not None else "camera"
         if mode != self._bg_mode:
-            self._bg_buffer.clear()  # never mix frames inside one bg buffer
+            # Never mix frames inside one background model.
+            self._bg_buffer.clear()
+            self._bg_map.clear()
             self.get_logger().info(
                 f"differencing frame -> {mode} "
                 f"({'odom TF available' if mode == 'fixed' else 'no odom TF — uncompensated'})")
@@ -332,20 +367,32 @@ class DetectorNode(Node):
         if mode == "fixed":
             pts = apply_transform(T_fixed_cam, pts)
 
-        self._bg_buffer.append(pts.copy())
-        if len(self._bg_buffer) < 2:
-            return
-
-        bg_all = np.vstack(list(self._bg_buffer)[:-1])
-        current = self._bg_buffer[-1]
-        fg_mask = foreground_mask(current, bg_all, self._p["diff_threshold_m"])
-        fg_pts = current[fg_mask]
+        # Persistent voxel map only in a fixed frame — see __init__.
+        use_map = bool(self._p["use_persistent_bg"]) and mode == "fixed"
+        if use_map:
+            stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            fg_mask = self._bg_map.foreground(pts)
+            n_bg = len(self._bg_map)
+            # Insert AFTER querying, or the frame is its own background.
+            self._bg_map.insert(pts, stamp_s)
+            self._bg_map.prune(stamp_s)
+            fg_pts = pts[fg_mask]
+        else:
+            self._bg_buffer.append(pts.copy())
+            if len(self._bg_buffer) < 2:
+                return
+            bg_all = np.vstack(list(self._bg_buffer)[:-1])
+            current = self._bg_buffer[-1]
+            n_bg = bg_all.shape[0]
+            fg_mask = foreground_mask(current, bg_all,
+                                      self._p["diff_threshold_m"])
+            fg_pts = current[fg_mask]
         n_fg = fg_pts.shape[0]
         if fg_pts.shape[0] == 0:
             if dbg:
                 self.get_logger().info(
                     f"funnel: raw={n_raw} range={n_range} angle={n_angle} "
-                    f"voxel={n_voxel} bg={len(self._bg_buffer)} fg=0",
+                    f"voxel={n_voxel} bg={n_bg} fg=0",
                     throttle_duration_sec=self._funnel_throttle_s)
             return
 
@@ -359,28 +406,37 @@ class DetectorNode(Node):
                     throttle_duration_sec=self._funnel_throttle_s)
             return
 
-        clusters = euclidean_cluster(
-            fg_pts,
-            tol=self._p["cluster_tolerance_m"],
-            min_pts=self._p["cluster_min_points"],
-            max_pts=self._p["cluster_max_points"],
-        )
         # Physical-size gate: an 80 mm ball voxelized at 0.02 m can never span
         # more than ~0.15 m, while the dominant FP mode ("scene-entry" blobs —
-        # a near wall/ground patch enters the ROI where the bg buffer had
+        # a near wall/ground patch enters the ROI where the background had
         # nothing, so fg==voxel and the whole patch clusters) spans metres.
         # Point-count caps can't separate them (ball 3-50 pts overlaps patch
         # 42-500 pts); metric extent separates them cleanly.
-        max_ext = self._p["cluster_max_extent_m"]
-        ball_sized = [c for c in clusters
-                      if float(np.max(c.max(axis=0) - c.min(axis=0))) <= max_ext]
+        #
+        # Oversized clusters are re-clustered once at a tighter tolerance rather
+        # than discarded: measured 2026-07-26, the ball merges into a metre-scale
+        # blob at tol=0.20 and was being thrown away with it. One pass only —
+        # recursive shrinking shatters surfaces into ball-sized false positives.
+        # See cluster_and_split().
+        split = cluster_and_split(
+            fg_pts,
+            tol=self._p["cluster_tolerance_m"],
+            min_pts=self._p["cluster_min_points"],
+            max_extent=self._p["cluster_max_extent_m"],
+            split_tol=self._p["cluster_split_tol_m"],
+            max_split_points=self._p["cluster_split_max_points"],
+        )
+        # cluster_max_points still applies, but only AFTER splitting: a dense
+        # sub-0.35 m blob is not a ball, and it would otherwise out-vote the ball
+        # in the largest-cluster pick below. Pre-split it discarded the ball.
+        ball_sized = [c for c in split
+                      if c.shape[0] <= self._p["cluster_max_points"]]
         if dbg:
-            desc = sorted(
-                ((c.shape[0], round(float(np.max(c.max(axis=0) - c.min(axis=0))), 2))
-                 for c in clusters), reverse=True)[:5]
+            desc = sorted(((c.shape[0], round(cluster_extent(c), 2))
+                           for c in ball_sized), reverse=True)[:5]
             self.get_logger().info(
                 f"funnel: raw={n_raw} range={n_range} angle={n_angle} voxel={n_voxel} "
-                f"fg={n_fg} clusters={len(clusters)} ball_sized={len(ball_sized)} "
+                f"bg={n_bg} fg={n_fg} split={len(split)} ball_sized={len(ball_sized)} "
                 f"(size,extent)={desc}",
                 throttle_duration_sec=self._funnel_throttle_s)
         if not ball_sized:
