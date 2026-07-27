@@ -45,6 +45,18 @@ def generate_launch_description() -> LaunchDescription:
             "evasion_params",
             default_value=os.path.join(pkg, "params", "evasion.yaml"),
         ),
+        # Week 4 flies a LONGER patrol loop than the Week 2 demo square. The
+        # battery leads its throw at constant velocity, which is only true on
+        # the steady middle of a leg; a 5 m leg offers at most 1.29 s at the
+        # measured 3.4 m/s cruise, so the slow scenarios were unmeasurable
+        # (battery v11 skipped 8/20 runs). See week4_patrol.yaml for the
+        # arithmetic. Pass the Week 2 patrol.yaml to reproduce old batteries.
+        DeclareLaunchArgument(
+            "patrol_params",
+            default_value=os.path.join(
+                get_package_share_directory("huitzilin_sim"),
+                "params", "week4_patrol.yaml"),
+        ),
     ]
 
     week3 = IncludeLaunchDescription(
@@ -53,6 +65,7 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "mode": "live",
             "with_patrol": LaunchConfiguration("with_patrol"),
+            "patrol_params": LaunchConfiguration("patrol_params"),
             "use_sim_time": LaunchConfiguration("use_sim_time"),
         }.items(),
     )

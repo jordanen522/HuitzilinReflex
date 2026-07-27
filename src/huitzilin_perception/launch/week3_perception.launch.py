@@ -72,6 +72,12 @@ def generate_launch_description() -> LaunchDescription:
                               description="live | score"),
         DeclareLaunchArgument("with_patrol", default_value="false",
                               description="Also launch the Week 2 patrol stack"),
+        # Passed straight through to week2_sitl so Week 4 can fly a longer loop
+        # (see huitzilin_sim/params/week4_patrol.yaml). Defaults to the 5 m
+        # Week 2 demo square, so week3 on its own is unchanged.
+        DeclareLaunchArgument(
+            "patrol_params",
+            default_value=os.path.join(pkg_sim, "params", "patrol.yaml")),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
 
         # Camera mount offset (provisional; update when physically measured)
@@ -218,6 +224,9 @@ def generate_launch_description() -> LaunchDescription:
         PythonLaunchDescriptionSource(
             os.path.join(pkg_sim, "launch", "week2_sitl.launch.py")
         ),
+        launch_arguments={
+            "patrol_params": LaunchConfiguration("patrol_params"),
+        }.items(),
         condition=IfCondition(with_patrol),
     )
 

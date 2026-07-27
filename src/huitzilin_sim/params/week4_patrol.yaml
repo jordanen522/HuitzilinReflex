@@ -1,0 +1,42 @@
+# week4_patrol.yaml — patrol geometry for the Week 4 dodge battery ONLY.
+#
+# Same node and same parameters as patrol.yaml; the loop is bigger. patrol.yaml
+# keeps the 5 m square because that is the Week 2 demo geometry and
+# scripts/plot_telemetry.py hardcodes it as the planned-track reference.
+#
+# WHY A BIGGER LOOP (measured, 2026-07-26 — see docs/JOURNAL.md):
+# The battery leads its throw by extrapolating the drone at constant velocity
+# over the ball's flight. patrol flies position mode, so ArduPilot decelerates
+# into every waypoint and accelerates out along a new heading — the throw is
+# only aimable on the steady middle of a leg. Measured cruise is 3.49 m/s max
+# (median 2.09), NOT the cruise_speed_ms below, which position mode ignores.
+#
+# On the 5 m loop that leaves at most (5.0 - 0.6) / 3.4 = 1.29 s of straight
+# leg. Battery v11 measured a best-ever window of 1.51 s and had to skip 8/20
+# runs; B01 (4 m/s over 6 m = 1.50 s flight + 0.30 s margin = 1.80 s needed)
+# was skipped all three times as structurally unmeasurable.
+#
+# 12 m legs give (12.0 - 0.6) / 3.4 = 3.35 s of leg. Subtracting the accel and
+# decel ramps (WPNAV_ACCEL 2.5 m/s^2 => ~2.3 m each to reach/leave 3.4 m/s)
+# leaves ~9.1 m ~= 2.7 s of genuinely constant-velocity flight, which covers
+# B01's 1.80 s with room to spare.
+#
+# Kept inside the world's 200x200 m ground plane, and the extra scanned area
+# only takes the detector's background map to roughly 190k voxels against its
+# 400k cap (77.5k measured on the 5 m loop, scaling with loop perimeter).
+
+patrol:
+  ros__parameters:
+    # 12 m x 12 m square loop at 2 m altitude (d = -2.0).
+    waypoints_ned: [12.0,  0.0, -2.0,
+                    12.0, 12.0, -2.0,
+                     0.0, 12.0, -2.0,
+                     0.0,  0.0, -2.0]
+    accept_radius_m: 0.6
+    cruise_speed_ms: 1.5    # ignored in position mode (ArduPilot WPNAV_SPEED wins)
+    mode: "position"
+    loop: true
+    autostart: false        # start via /huitzilin/start_patrol AFTER takeoff;
+                            # autostarting floods GUIDED during takeoff and the
+                            # drone never leaves the ground
+    connection: "udpin:0.0.0.0:14553"   # patrol node needs its own port
