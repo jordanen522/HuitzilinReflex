@@ -593,3 +593,157 @@ could run first — but profile before assuming that is where the time goes.
 
 Also note raw point counts have grown (115k → 215k) since the 12 m loop; more of the scene
 falls inside the ROI, which directly inflates compute.
+
+---
+
+## 2026-07-27 — Latency fixed at the hot stages, and the aim error re-diagnosed
+
+Two threads closed today, and the second overturned an item that was on the Week-4 list.
+
+### Per-stage profiling: two functions were the whole overrun
+
+The previous entry ends by refusing to optimise the detector without knowing which stage was
+hot. `stage_profiler.py` (`StageProfiler`, `profile_stages` param, default off) answers that:
+wall-time totals per named stage, reported every 30 clouds, ranked by **total** rather than
+per-call. Every arriving cloud counts as a frame, because a single-threaded executor is
+delayed by a frame that bails at the range gate as much as by one that publishes.
+
+First measurement under patrol, before any change:
+
+| stage | per call | calls / 30 frames |
+|---|---|---|
+| `voxel` | **66–74 ms** | 5–25 |
+| `cluster` | 27–70 ms | 2–14 |
+| `bg_query` | 5–25 ms | 5–25 |
+| `finite` | 6–7 ms | 30 |
+| `convention` | 4 ms | 30 |
+| `deserialize` | 2.5–3 ms | 30 |
+
+Per-frame mean swung 17–88 ms against the 77 ms wall budget. **Both hot stages were single
+numpy/scipy anti-patterns, not algorithmic cost:**
+
+- `voxel_downsample` used `np.unique(keys, axis=0)` — which views each row as a void dtype and
+  lexicographically sorts rows — plus `np.add.at`, the unbuffered scatter-add. Replaced with
+  one packed int64 key (21 bits/axis, ±21 km at a 0.02 m leaf) and `np.bincount(weights=…)`.
+  x occupies the high bits, so the lexicographic row order the old code produced is preserved
+  exactly. Microbench 17.9→3.5 / 68.6→11.3 / 164.8→26.6 ms at 20k/60k/120k points (5.4–6.7×);
+  **live 66–74 → 5–17 ms.**
+- `cluster_all` issued one Python-level `tree.query_ball_point` **per point** inside a BFS.
+  Single-linkage radius clustering *is* connected components of the radius graph, so it is now
+  one `query_pairs` plus one `connected_components`. Microbench 3.2–5.3×; **live 12–71 → 2–20 ms.**
+
+Per-frame mean is now **14–55 ms, every window under budget**. 103 tests pass, including the
+pre-rewrite implementations kept as oracles and compared element-wise / partition-identical —
+these are speed rewrites of code the detection numbers depend on, so equivalence is tested,
+not argued.
+
+Two corrections to the previous entry:
+
+- **`debug_funnel` was not a meaningful part of the latency.** I flipped it off partly on the
+  theory that its six full-cloud reductions mattered; measured as its own stage at throttle
+  0.0 it costs **1.4–2.3 ms/frame, 4–5%**. The theory was wrong.
+- **The ~160 ms figure was the cost of a *publishing* frame**, not the mean — that is the only
+  path the old dbg timing log reported. It was `voxel` + `cluster`, and both are now fixed.
+
+The pre-gate reorder floated last time (range-gate before the `gz_flu` remap and finite
+filter) is still available and still valid — it would move `finite` + `convention` from ~200k
+rows to survivors, ~10 ms/frame — but it was not needed to get under budget and is not done.
+
+### The hover control: the spawn geometry is exact, so the aim error is all lead
+
+The Week-4 list carried "oblique aim is systematically off — separate `aim_at_drone` geometry
+issue in `compute_spawn`". **That item does not exist.** B04 (+30°) sat at 0.98–1.05 m and B05
+(−30°) at 1.37–1.70 m against a 0.0 m spec, and B06 at 1.07–1.11 m against a 0.50 m spec,
+consistently across three batteries — systematic enough to look like a geometry bug.
+
+Patrol cannot distinguish a bad lead from bad geometry. Against a stationary target the lead is
+exact by construction, so a hover control separates them. That needs a battery mode, not a
+manual service call: **`evasion_node` resumes patrol when a dodge completes**, so stopping
+patrol once holds only until the first successful dodge — measured, run 1 hovered and all 17
+after it were back at cruise, and my first "hover" numbers were really patrol numbers.
+`hover_mode` re-stops patrol before every throw *and* waits for the drone to be measurably
+stationary, because stopping patrol only stops new setpoints while ArduPilot keeps flying to
+its last position target — seconds of cruise away on a 12 m loop.
+
+Hover control result — **off-target 0/19, aim error mean 0.10 m, max 0.20 m**:
+
+| scenario | spec | hover | under patrol |
+|---|---|---|---|
+| B04 +30° | 0.00 m | 0.147 / 0.160 / 0.171 | 0.98–1.05 |
+| B05 −30° | 0.00 m | 0.154 / 0.094 | 1.37–1.70 |
+| B06 near miss | 0.50 m | 0.511 / 0.496 / 0.506 | 1.07–1.11 |
+| B07 wide | 1.50 m | 1.501 / 1.496 | 1.78–1.99 |
+| B01 4 m/s | 0.00 m | 0.088 / 0.374 / 0.202 | unmeasurable (skipped) |
+
+The geometry is exact to a few centimetres at every angle and every specified miss. This also
+explains the +30°/−30° asymmetry that made it look like geometry: a lead error points along
+the drone's velocity, so its perpendicular (miss-distance) component depends on the angle
+between approach ray and velocity, while the geometry itself is symmetric.
+
+### Spawn dead time: measured, compensated, and NOT the cause
+
+The obvious suspect was spawn dead time. `compute_spawn` leads over
+`spawn_latency_s + t_flight`, `spawn_latency_s` was parameterised at **0.0**, and at 5.24 m/s
+every 0.1 s of undeclared dead time is 0.5 m of aim error — the right order for 0.98–1.70 m.
+So the battery now measures it directly (`spawn_dead_s` in the CSV): sim time of the odom
+sample the plan was built from vs. sim time the ball first appears on `/gz/dynamic_poses`.
+
+**Measured 0.216 s mean, 0.185–0.247 s over 18 throws** — tight, and entirely undeclared,
+i.e. worth 1.14 m at cruise. That looked conclusive.
+
+It was not. Re-running with `spawn_latency_s:=0.216` (report confirms undeclared −0.006 s, so
+the dead time is now fully compensated) moved the aim only ~0.1–0.2 m:
+
+| | v18, latency 0.0 | v19, latency 0.216 |
+|---|---|---|
+| aim error mean | 1.18 m | **0.96 m** |
+| off-target | 13/18 | 14/17 |
+| B04 +30° | 0.92 / 0.96 / 0.97 | 0.83 / 0.86 / 0.82 |
+| B05 −30° | 1.63 / 1.61 / 1.66 | 1.47 / 1.47 / 1.45 |
+| B06 (spec 0.50) | 1.07 / 1.08 / 1.05 | 1.02 / 1.07 / 1.08 |
+
+So the dead time is real, is now declared, is worth ~0.2 m — and something else accounts for
+the remaining ~0.8–1.5 m. (This also vindicates the 2026-07-26 sweep that calibrated it to 0.0:
+that sweep was n=2–3 per point and predates the throw-window gate, so it was measuring corner
+noise, but its conclusion that 0.25 was not a win happens to hold.)
+
+**What the geometry says about where to look next.** `min_dist` is the *perpendicular* distance
+from the ball's path to the drone. An aim-point error purely *along* the drone's velocity
+produces a perpendicular miss of |e|·sin α, which is **zero for a head-on throw** — yet head-on
+B02/B03 still measure 0.33–1.00 m under patrol against 0.11–0.17 m in hover. So the residual is
+not a pure along-track timing error; there is a cross-track and/or vertical component, and the
++30°/−30° asymmetry (0.83 vs 1.46) confirms it is not symmetric about the flight path.
+
+The battery cannot decompose this today: it records only the scalar `min_dist`. The concrete
+next step is to record the **miss vector** at closest approach and split it into along-track,
+cross-track and vertical in the ball's path frame. That turns one ambiguous scalar into three
+diagnosable numbers, and it is worth doing before touching the lead again. Prime candidates it
+would separate: stale odom position vs. velocity (the deferred `mav_bridge_node` odom-stamp
+item), a lateral deviation the window gate is not catching, and gravity-compensation error in
+the vertical.
+
+### The finding that matters most: exact aim collapses the dodge rate
+
+With the aim error removed, dodge success fell to **4/17**, and eleven runs read *"dodged but
+min_dist 0.11–0.17 ≤ hit_radius"*. The trigger fires; the manoeuvre does not clear the 0.30 m
+hit radius against a genuine intercept. Only B06 (a 0.5 m specified miss) and one B01 cleared it.
+
+So the patrol batteries' "clean dodge" successes were partly **credit for aim error** — the
+ball was already going to miss. The honest reading of Week 4 is that dodge *authority* (1.5 m/s
+for 1.0 s) and end-to-end latency, not detection, are what stand between here and a real dodge.
+
+**Latency did improve, and it is the one budget now being met.** Patrol batteries, evasion-node
+end-to-end (budget 150 ms):
+
+| battery | mean | max |
+|---|---|---|
+| v13 / v14 (before) | ~208 ms | 291 ms |
+| v15 (voxel fixed) | 168 ms | 196 ms |
+| **v18 (voxel + cluster fixed)** | **121 ms** | **175 ms** |
+
+It is no longer detector compute. With clouds arriving every 77 ms and `min_track_updates: 3`,
+the remaining floor is structurally ~2 cloud periods plus compute, so further gains have to come
+from the track-confirmation count or the camera rate, not from the numpy.
+
+Do not re-tune detection thresholds against the patrol dodge rate; it is measuring two things
+at once. Use `hover_mode` for anything about the manoeuvre and patrol for anything about the lead.

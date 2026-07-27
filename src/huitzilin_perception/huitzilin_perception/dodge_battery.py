@@ -111,13 +111,23 @@ class DodgeBatteryNode(Node):
         # same throw measures ~0.33 m. Set false only to reproduce old reports.
         self.declare_parameter("lead_target", True)
         # Dead time between sampling odom and the ball actually launching.
-        # CALIBRATED to 0.0 on the Dell 2026-07-26 by sweeping it against
-        # measured closest approach: 0.0 -> 0.32/0.35 m, 0.25 -> 1.44/0.50/2.70,
-        # 0.5 -> 1.27/1.34/1.57. The warm wrench bridge launches effectively
-        # immediately, so despite the `gz` create call's documented ~0.5 s of
-        # sim time there is no dead time left to compensate. Re-measure if the
-        # throw path ever falls back to the CLI (which restores gravity late).
-        self.declare_parameter("spawn_latency_s", 0.0)
+        #
+        # MEASURED directly 2026-07-27 (spawn_dead_s: odom-sample sim time vs.
+        # the ball's first appearance on /gz/dynamic_poses): 0.216 s mean,
+        # 0.185-0.247 s over 18 throws. So the dead time is real and it is NOT
+        # the ~0.0 s the 2026-07-26 sweep inferred — that sweep was n=2-3 per
+        # point and predates the throw-window gate, so it was reading corner
+        # noise, not latency.
+        #
+        # Set to the measured value: declaring it takes the reported undeclared
+        # remainder to -0.006 s. But note what it does NOT buy — aim error under
+        # patrol only improved 1.18 -> 0.96 m (B04 0.92-0.97 -> 0.82-0.86, B05
+        # 1.61-1.66 -> 1.45-1.47), so ~0.8-1.5 m of the patrol aim error is
+        # something else. Do not read this parameter as the fix for that; see
+        # docs/JOURNAL.md 2026-07-27 for the miss-vector decomposition that is
+        # needed next. Re-measure if the throw path ever falls back to the gz
+        # CLI (which restores gravity late).
+        self.declare_parameter("spawn_latency_s", 0.216)
         # The lead extrapolates the drone at CONSTANT velocity across the
         # ball's flight (0.43 s at 14 m/s, 1.5 s at 4 m/s). That is false while
         # patrol is turning a waypoint, which is what still spoiled battery v7:

@@ -39,7 +39,11 @@ detector:
     # Deliberately independent of debug_funnel — leave that false while
     # profiling. Same restart caveat as debug_funnel: params are cached at
     # construction, so `ros2 param set` has no effect.
-    profile_stages: true
+    # Off after the 2026-07-27 measurement: voxel_downsample (66-74 -> 5-17 ms)
+    # and cluster_all (12-71 -> 2-20 ms) were the whole overrun, and every frame
+    # now fits the budget (14-55 ms). Turn it on again before changing anything
+    # in the callback -- it is how those two were found.
+    profile_stages: false
     profile_window_frames: 30
 
     # ── Cloud transport (W4 live bring-up, 2026-07-26) ────────────────────────
