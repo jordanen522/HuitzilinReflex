@@ -84,6 +84,7 @@ class ProjectileTracker:
         self._x: Optional[np.ndarray] = None
         self._P: Optional[np.ndarray] = None
         self._t = float("nan")
+        self._t_start = float("nan")
         self._n_updates = 0
         self._rejects = 0
 
@@ -94,6 +95,24 @@ class ProjectileTracker:
     @property
     def n_updates(self) -> int:
         return self._n_updates
+
+    @property
+    def track_age_s(self) -> float:
+        """Measurement-time span of the CURRENT track, nan without one.
+
+        The discriminator for why a dodge commits late. Pair it with n_updates
+        and with how long the ball has been visible:
+          - age much shorter than the ball's visibility -> the track was
+            RESTARTED mid-flight (see the reseed counters)
+          - age comparable to visibility but n_updates small -> detection is
+            SPARSE, i.e. the detector is not reporting the ball every frame
+        Those have different fixes, and lifetime reseed totals cannot tell them
+        apart because the false-positive stream reseeds constantly between
+        throws.
+        """
+        if self._x is None:
+            return float("nan")
+        return self._t - self._t_start
 
     @property
     def n_reseeds_reject(self) -> int:
@@ -134,6 +153,7 @@ class ProjectileTracker:
             self._x = np.concatenate([z, np.zeros(3)])
             self._P = np.diag([self._R[0, 0]] * 3 + [self._init_vel_var] * 3)
             self._t = t
+            self._t_start = t
             self._n_updates = 1
             self._rejects = 0
             return True

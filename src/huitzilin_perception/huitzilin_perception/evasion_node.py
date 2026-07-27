@@ -309,6 +309,10 @@ class EvasionNode(Node):
             # the filter took to believe the ball was inbound, so these say
             # whether a late dodge was a late DETECTION or a restarted track.
             "track_updates": self._tracker.n_updates,
+            # Age of the track that fired, not lifetime totals: if it is much
+            # shorter than the ball's visibility the track restarted mid-flight,
+            # whereas a full-length track with few updates means sparse detection.
+            "track_age_s": self._tracker.track_age_s,
             "reseeds_reject": self._tracker.n_reseeds_reject,
             "reseeds_timeout": self._tracker.n_reseeds_timeout,
             "dodge_body": [float(v) for v in self._dodge_cmd_body],

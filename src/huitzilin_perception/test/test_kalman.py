@@ -132,6 +132,18 @@ def test_reseed_counters_survive_an_explicit_reset():
     assert tr.n_reseeds_timeout == 1
 
 
+def test_track_age_spans_the_measurements_and_restarts_with_the_track():
+    """Age is the discriminator between a RESTARTED track and merely SPARSE
+    detections — lifetime reseed totals cannot separate those, because the
+    false-positive stream reseeds constantly between throws."""
+    tr = ProjectileTracker(track_timeout_s=0.5)
+    assert math.isnan(tr.track_age_s)                  # no track yet
+    t_last = _feed_ballistic(tr, [6.0, 0.0, 2.0], [-8.0, 0.0, 2.9], n=5)
+    assert tr.track_age_s == pytest.approx(4.0 / RATE_HZ)   # 5 updates = 4 gaps
+    tr.process(t_last + 1.0, [1.0, 2.0, 3.0])          # timeout -> fresh track
+    assert tr.track_age_s == pytest.approx(0.0)
+
+
 def test_a_clean_track_never_reseeds():
     tr = ProjectileTracker()
     _feed_ballistic(tr, [6.0, 0.0, 2.0], [-8.0, 0.0, 2.9], n=10)

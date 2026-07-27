@@ -807,6 +807,9 @@ class DodgeBatteryNode(Node):
         # with a clean track. .get() because an older evasion node does not
         # publish these and a missing key must not crash the run.
         track_updates = events[0].get("track_updates") if dodged else None
+        track_age_s = (None if not dodged else
+                       (None if events[0].get("track_age_s") is None
+                        else round(events[0]["track_age_s"], 3)))
         track_reseeds = (None if not dodged else
                          events[0].get("reseeds_reject", 0)
                          + events[0].get("reseeds_timeout", 0))
@@ -869,6 +872,7 @@ class DodgeBatteryNode(Node):
                 "tca_s": tca_s, "trigger_miss_m": trigger_miss_m,
                 "first_det_range_m": first_det,
                 "track_updates": track_updates,
+                "track_age_s": track_age_s,
                 "track_reseeds": track_reseeds,
                 "ball_speed_mps": ball_speed,
                 "t_flight_assumed_s": round(t_flight, 3),
@@ -1228,19 +1232,34 @@ class DodgeBatteryNode(Node):
                     f"(roi_max_range_m bounds this; if the mean sits well "
                     f"inside the gate, the gate is not the limit)")
             # Track maturity at commit — the discriminator for WHY tca is small.
-            # Reseeds > 0 means the filter restarted mid-flight and spent the
-            # warning re-learning the ball's velocity from zero.
+            # AGE, not the reseed totals: those are lifetime counts dominated by
+            # the false-positive stream reseeding between throws (measured 209 in
+            # one battery), so "reseeds > 0" is nearly always true and says almost
+            # nothing about the ball's own track. Age against the ball's
+            # visibility does: an age far shorter than the ball has been visible
+            # means the track restarted mid-flight, while a full-length age with
+            # few updates means the detector is reporting the ball sparsely.
             tus = [r["track_updates"] for r in sub
                    if r.get("track_updates") is not None]
+            ages = [r["track_age_s"] for r in sub
+                    if r.get("track_age_s") is not None]
+            if tus:
+                line = (f"    track at commit: {np.mean(tus):.1f} updates "
+                        f"(range {min(tus)}-{max(tus)})")
+                if ages:
+                    rate = ((np.mean(tus) - 1) / np.mean(ages)
+                            if np.mean(ages) > 1e-6 else float("nan"))
+                    line += (f", age {np.mean(ages):.3f} s "
+                             f"({min(ages):.3f}-{max(ages):.3f}) "
+                             f"=> {rate:.1f} Hz of accepted ball detections")
+                lines.append(line)
             rss = [r["track_reseeds"] for r in sub
                    if r.get("track_reseeds") is not None]
-            if tus:
+            if rss:
                 lines.append(
-                    f"    track at commit: {np.mean(tus):.1f} updates "
-                    f"(range {min(tus)}-{max(tus)})"
-                    + (f", reseeds {np.mean(rss):.1f} mean / {max(rss)} max"
-                       f" — {sum(1 for r in rss if r > 0)}/{len(rss)} dodges "
-                       f"followed a restarted track" if rss else ""))
+                    f"      lifetime reseeds at commit: {np.mean(rss):.0f} mean "
+                    f"(mostly false-positive tracks expiring between throws — "
+                    f"read the age above, not this)")
             tcas = [r["tca_s"] for r in sub if r.get("tca_s") is not None]
             if tcas:
                 reach = np.array(tcas) * 1.5   # nominal dodge_speed_mps
@@ -1295,7 +1314,8 @@ class DodgeBatteryNode(Node):
                     "lead_along_m", "lead_cross_m", "lead_vert_m",
                     "ball_speed_mps", "t_flight_assumed_s",
                     "flight_to_ca_s", "tca_s", "trigger_miss_m",
-                    "first_det_range_m", "track_updates", "track_reseeds"])
+                    "first_det_range_m", "track_updates", "track_age_s",
+                    "track_reseeds"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})
