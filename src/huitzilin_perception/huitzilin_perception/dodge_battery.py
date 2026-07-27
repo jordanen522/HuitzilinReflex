@@ -42,6 +42,7 @@ import numpy as np
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
+from geometry_msgs.msg import PointStamped
 from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import GetParameters, SetParameters
@@ -263,6 +264,14 @@ class DodgeBatteryNode(Node):
         self._closest_pair = None
         self._closest_sim = None
         self._ball_track = []   # opening (sim_t, ball_enu) samples of the flight
+        # True separation when the detector FIRST reports the ball. This, not
+        # roi_max_range_m, is what bounds how much warning the dodge can get:
+        # measured 2026-07-27, widening the gate 5 -> 8 m left tca unchanged
+        # (0.204 -> 0.201 s) while costing 41 ms of latency, so the ball's
+        # detectable range is set by how many points it projects at distance,
+        # not by the gate that discards points beyond it.
+        self._cur_dist = None
+        self._first_det_range = None
         self._events = []
         self._listening = False
 
@@ -272,6 +281,8 @@ class DodgeBatteryNode(Node):
                                  self._pose_cb, SENSOR_QOS)
         self.create_subscription(String, "/threat/evade_event",
                                  self._event_cb, RELIABLE_QOS)
+        self.create_subscription(PointStamped, "/threat/centroid",
+                                 self._centroid_cb, RELIABLE_QOS)
         self.create_subscription(String, "/huitzilin/patrol_state",
                                  self._patrol_cb, RELIABLE_QOS)
 
@@ -347,6 +358,9 @@ class DodgeBatteryNode(Node):
                 self._ball_seen_sim = self._sim_now()
             if drone is not None and ball is not None:
                 d = float(np.linalg.norm(ball - drone))
+                # Latest true separation, so a /threat/centroid arriving now can
+                # be stamped with the range the ball was actually at.
+                self._cur_dist = d
                 if d < self._min_dist:
                     self._min_dist = d
                     # Keep the POSE PAIR, not just the scalar. The scalar is a
@@ -357,6 +371,20 @@ class DodgeBatteryNode(Node):
                     # about which sample was closest.
                     self._closest_pair = (ball.copy(), drone.copy())
                     self._closest_sim = self._sim_now()
+
+    def _centroid_cb(self, msg: PointStamped) -> None:
+        """Stamp the first detection of the run with the ball's true range.
+
+        Detector output is not trusted for the range itself — the point is to
+        pair "the detector spoke" with ground truth, so a stale or spurious
+        centroid cannot flatter the number. Only the first per run: later ones
+        just track the ball inbound.
+        """
+        with self._lock:
+            if not self._listening or self._first_det_range is not None:
+                return
+            if self._cur_dist is not None:
+                self._first_det_range = round(self._cur_dist, 3)
 
     def _patrol_cb(self, msg: String) -> None:
         try:
@@ -690,6 +718,8 @@ class DodgeBatteryNode(Node):
             self._closest_pair = None
             self._closest_sim = None
             self._ball_track = []
+            self._cur_dist = None
+            self._first_det_range = None
             self._events = []
             self._listening = True
 
@@ -718,6 +748,7 @@ class DodgeBatteryNode(Node):
             closest = self._closest_pair
             closest_sim = self._closest_sim
             ball_track = list(self._ball_track)
+            first_det = self._first_det_range
             events = list(self._events)
             seen_sim = self._ball_seen_sim
         dead_s = (None if seen_sim is None
@@ -784,6 +815,7 @@ class DodgeBatteryNode(Node):
                 "lead_vert_m": (None if lead_err is None
                                 else round(lead_err.vert_m, 3)),
                 "tca_s": tca_s, "trigger_miss_m": trigger_miss_m,
+                "first_det_range_m": first_det,
                 "ball_speed_mps": ball_speed,
                 "t_flight_assumed_s": round(t_flight, 3),
                 "flight_to_ca_s": flight_ca,
@@ -1130,6 +1162,17 @@ class DodgeBatteryNode(Node):
             # Time the manoeuvre actually had. Reported next to the displacement
             # it can buy, because that product — not dodge_speed_mps alone — is
             # what has to clear the hit radius.
+            # Where the warning actually starts. Divided by the ball's speed it
+            # is the total time budget the whole chain has to work in, so it
+            # bounds tca no matter what the trigger policy does.
+            dets = [r["first_det_range_m"] for r in sub
+                    if r.get("first_det_range_m") is not None]
+            if dets:
+                lines.append(
+                    f"    first detection at: mean {np.mean(dets):.2f} m, "
+                    f"range {np.min(dets):.2f}-{np.max(dets):.2f} m "
+                    f"(roi_max_range_m bounds this; if the mean sits well "
+                    f"inside the gate, the gate is not the limit)")
             tcas = [r["tca_s"] for r in sub if r.get("tca_s") is not None]
             if tcas:
                 reach = np.array(tcas) * 1.5   # nominal dodge_speed_mps
@@ -1183,7 +1226,8 @@ class DodgeBatteryNode(Node):
                     "miss_along_m", "miss_cross_m", "miss_vert_m",
                     "lead_along_m", "lead_cross_m", "lead_vert_m",
                     "ball_speed_mps", "t_flight_assumed_s",
-                    "flight_to_ca_s", "tca_s", "trigger_miss_m"])
+                    "flight_to_ca_s", "tca_s", "trigger_miss_m",
+                    "first_det_range_m"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})
