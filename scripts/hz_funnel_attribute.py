@@ -196,7 +196,12 @@ def classify(d: dict, ball_odom: np.ndarray) -> tuple[str, str]:
                             f"at {best_off:.2f} m")
     if not bool(d.get("published", False)):
         return "lowscore", f"{detail_cl}, score {float(d['score']):.3f}"
-    return "OK", detail_cl
+    # Registration error: how far the cluster the detector published sits from
+    # where the ball truly was at this cloud's own instant. It is not detection
+    # noise — the cloud is egomotion-compensated with whatever odom the TF
+    # buffer holds when the frame is PROCESSED, which is later than the frame,
+    # so this reads out the queue delay times the drone's speed.
+    return "OK", f"{detail_cl}, registration {best_off:.2f} m"
 
 
 def main() -> int:
