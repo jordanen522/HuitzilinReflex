@@ -87,8 +87,29 @@ sweep aborts partway, restart T3 before running the confirmation battery.
 - Battery report shows dodges firing on hit-intent runs with measured
   latency vs the 150 ms budget, and no false dodge on B07.
 - `min_dist_m` on successful dodges exceeds `hit_radius_m` (0.30 m).
-- Record the numbers + chosen params in `docs/JOURNAL.md` (Week 4 entry),
-  then delete `docs/WEEK4_PLAN.md` (closed-plan convention).
+- Record the numbers + chosen params in `docs/JOURNAL.md` (Week 4 entry).
+  (`docs/WEEK4_PLAN.md` was deleted 2026-07-27 per the closed-plan convention:
+  all nine of its tasks shipped and its `debug_funnel` revert landed.)
+
+### Reading the miss decomposition
+
+The battery reports two signed triples per combo, over no-dodge runs only (a
+dodge moves the drone, so the miss stops measuring the aim). Use them instead of
+`min_dist_m` when diagnosing *why* a throw missed — the scalar is a perpendicular
+distance and cannot tell a mistimed lead from a sideways drift:
+
+| line | frame | + means | a bias here points at |
+|---|---|---|---|
+| `miss along` | ball's heading | ball went past the drone | lead timing / target-speed estimate |
+| `miss cross` | ball's left | ball passed left of the drone | heading error — the target turned, or the lead direction was wrong |
+| `miss vert` | world z | ball passed above the drone | gravity compensation (`compensate_gravity`, `offset_vertical_m`) |
+| `lead along` | drone's heading | aimed ahead of where it got to | over-led: too much lead time (`spawn_latency_s`) or over-estimated speed |
+| `lead cross` | drone's left | aimed left of its own track | the drone turned inside the flight — a throw-window gate escape |
+
+`lead` is absent in `hover_mode`: a stationary target has no heading frame, and
+the lead is exact by construction there anyway. `miss along` is near zero at a
+true closest approach by definition, so a large value means the pose samples
+bracket the approach coarsely, not that the lead is healthy.
 
 ## Troubleshooting
 

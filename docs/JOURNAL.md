@@ -144,6 +144,10 @@ run: at 11% detection its numbers would be detection noise, not
 Week 4 closes — `run_regression.sh` uses the installed copy. `docs/WEEK4_PLAN.md`
 stays until then.
 
+> **Closed 2026-07-27.** Both keys reverted (`debug_funnel: false`, throttle
+> `1.0`) in `f4bfc95`/`5073a01`, and `docs/WEEK4_PLAN.md` deleted — all nine of
+> its tasks had shipped, only its checkboxes were never ticked.
+
 ### Correction + two new findings (same day, after the fixes above)
 
 **The "detector is blind while translating" blocker was wrong.** Re-measured with

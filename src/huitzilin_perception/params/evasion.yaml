@@ -1,4 +1,4 @@
-# evasion.yaml — Week 4 evasion-node tuning (see docs/WEEK4_PLAN.md).
+# evasion.yaml — Week 4 evasion-node tuning (see docs/week4_dodge_runbook.md).
 #
 # Sweepable at runtime via `ros2 param set /evasion <key> <val>` (the dodge
 # battery's sweep mode uses this): dodge_speed_mps, threat_radius_m,

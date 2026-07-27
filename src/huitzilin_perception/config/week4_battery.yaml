@@ -1,4 +1,4 @@
-# week4_battery.yaml — Week 4 dodge battery (see docs/WEEK4_PLAN.md).
+# week4_battery.yaml — Week 4 dodge battery (see docs/week4_dodge_runbook.md).
 #
 # Every run spawns one projectile at the patrolling drone and scores the
 # outcome against Gazebo ground truth. compensate_gravity: true makes
