@@ -84,3 +84,84 @@ def test_aim_at_drone_false_is_week3_identical():
                       aim_at_drone=False)
     np.testing.assert_allclose(a.position, b.position)
     np.testing.assert_allclose(a.velocity, b.velocity)
+
+
+# ── Target lead (W4 live bring-up, 2026-07-26) ────────────────────────────
+# Aiming at where the drone IS misses a patrolling drone by |v| * t_flight.
+# Measured on the Dell with a single clean stack: patrol flies 2.5-3.2 m/s and
+# 8 m/s "direct hit" runs missed by 1.3-2.6 m.
+
+
+def test_lead_with_zero_velocity_changes_nothing():
+    kw = dict(speed_mps=8.0, approach_angle_deg=20.0, miss_distance_m=0.3,
+              compensate_gravity=True, aim_at_drone=True)
+    a = compute_spawn((1.0, 2.0, 2.0), 0.4, **kw)
+    b = compute_spawn((1.0, 2.0, 2.0), 0.4, target_vel_enu=(0.0, 0.0, 0.0),
+                      spawn_latency_s=0.5, **kw)
+    np.testing.assert_allclose(a.position, b.position, atol=1e-12)
+    np.testing.assert_allclose(a.velocity, b.velocity, atol=1e-12)
+
+
+def test_lead_omitted_is_identical_to_before():
+    """target_vel_enu=None must leave every existing caller byte-identical."""
+    kw = dict(speed_mps=8.0, approach_angle_deg=30.0, compensate_gravity=True)
+    a = compute_spawn((0.0, 0.0, 2.0), 0.3, **kw)
+    b = compute_spawn((0.0, 0.0, 2.0), 0.3, target_vel_enu=None, **kw)
+    np.testing.assert_allclose(a.position, b.position, atol=1e-12)
+    np.testing.assert_allclose(a.velocity, b.velocity, atol=1e-12)
+
+
+def test_lead_ball_arrives_where_the_drone_will_be():
+    # The measured failure: drone translating at 2.5 m/s across its own yaw.
+    p0 = np.array([1.0, 5.0, 2.0])
+    vel = np.array([2.4, -0.7, 0.0])
+    latency, speed = 0.5, 8.0
+    plan = compute_spawn(p0, 0.34, speed_mps=speed, compensate_gravity=True,
+                         aim_at_drone=True, target_vel_enu=vel,
+                         spawn_latency_s=latency)
+    t_flight = 6.0 / speed
+    ball = ballistic_positions(plan.position, plan.velocity, t_flight)[0]
+    # The ball is launched `latency` after the odom sample and flies t_flight,
+    # so the drone has moved for (latency + t_flight) by the time it arrives.
+    drone_then = p0 + vel * (latency + t_flight)
+    np.testing.assert_allclose(ball, drone_then, atol=1e-9)
+
+
+def test_lead_without_latency_still_leads_by_flight_time():
+    p0 = np.array([0.0, 0.0, 2.0])
+    vel = np.array([0.0, 3.0, 0.0])
+    plan = compute_spawn(p0, 0.0, speed_mps=8.0, compensate_gravity=True,
+                         aim_at_drone=True, target_vel_enu=vel)
+    t_flight = 6.0 / 8.0
+    ball = ballistic_positions(plan.position, plan.velocity, t_flight)[0]
+    np.testing.assert_allclose(ball, p0 + vel * t_flight, atol=1e-9)
+
+
+def test_lead_preserves_miss_distance_about_the_predicted_point():
+    p0 = np.array([0.0, 0.0, 2.0])
+    vel = np.array([2.5, 0.0, 0.0])
+    latency, speed, miss = 0.4, 8.0, 0.5
+    plan = compute_spawn(p0, 0.0, speed_mps=speed, miss_distance_m=miss,
+                         aim_at_drone=True, compensate_gravity=True,
+                         target_vel_enu=vel, spawn_latency_s=latency)
+    t_flight = 6.0 / speed
+    ball = ballistic_positions(plan.position, plan.velocity, t_flight)[0]
+    drone_then = p0 + vel * (latency + t_flight)
+    assert np.linalg.norm(ball[:2] - drone_then[:2]) == pytest.approx(miss, abs=1e-9)
+
+
+def test_lead_requires_positive_speed():
+    with pytest.raises(ValueError):
+        compute_spawn((0.0, 0.0, 2.0), 0.0, speed_mps=0.0,
+                      target_vel_enu=(1.0, 0.0, 0.0))
+
+
+def test_lead_scales_with_latency():
+    p0, vel = (0.0, 0.0, 2.0), (3.0, 0.0, 0.0)
+    near = compute_spawn(p0, 0.0, speed_mps=8.0, target_vel_enu=vel,
+                         spawn_latency_s=0.0)
+    far = compute_spawn(p0, 0.0, speed_mps=8.0, target_vel_enu=vel,
+                        spawn_latency_s=0.5)
+    # Both spawn 6 m ahead of their aim point, so the difference is exactly the
+    # extra 0.5 s of predicted drone travel.
+    assert far.position[0] - near.position[0] == pytest.approx(0.5 * 3.0)

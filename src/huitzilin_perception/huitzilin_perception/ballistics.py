@@ -58,6 +58,8 @@ def compute_spawn(
     offset_vertical_m: float = 0.0,
     compensate_gravity: bool = False,
     aim_at_drone: bool = False,
+    target_vel_enu=None,
+    spawn_latency_s: float = 0.0,
     g: float = G_MPS2,
 ) -> SpawnPlan:
     """
@@ -89,9 +91,38 @@ def compute_spawn(
       genuinely closes on the drone with closest approach == miss_distance_m,
       regardless of approach_angle_deg. Velocity direction is unchanged
       (still -speed * unit(yaw + angle_rad)).
+
+    target_vel_enu (ENU m/s, e.g. odom twist.linear) -> LEAD the shot: aim at
+      where the drone WILL be, not where it is. Without this the whole geometry
+      above is exact about a stale point, which is only correct for a hovering
+      target. Measured on the Dell 2026-07-26 with a single clean stack: patrol
+      translates at 2.5-3.2 m/s, and 8 m/s runs specifying
+      miss_distance_m=0.0 measured closest approaches of 1.3-2.6 m -- almost
+      exactly |v| * t_flight. The same throw against a hovering drone measured
+      0.114 m, which is how we know the parabola and the gravity wrench were
+      never at fault.
+      The aim point is advanced by target_vel_enu * (spawn_latency_s +
+      offset_forward_m / speed_mps). No iteration is needed: offset_forward_m
+      is measured from the *aim point*, so the flight time stays exactly
+      offset_forward_m / speed_mps however far the lead moves it.
+      Pass None (default) to keep the legacy stale-point behaviour.
+    spawn_latency_s -> dead time between sampling the drone state and the ball
+      actually launching. The `gz` create call costs ~0.5 s of SIM time
+      (see spawn_projectile), during which the drone keeps flying, so this is
+      not negligible next to a 0.75 s flight. Folded into the lead above.
     """
     dx, dy, dz = (float(v) for v in drone_enu)
     yaw = float(drone_yaw)
+
+    if target_vel_enu is not None:
+        if speed_mps <= 0.0:
+            raise ValueError("target_vel_enu lead requires speed_mps > 0")
+        vx, vy, vz = (float(v) for v in target_vel_enu)
+        t_lead = float(spawn_latency_s) + offset_forward_m / speed_mps
+        dx += vx * t_lead
+        dy += vy * t_lead
+        dz += vz * t_lead
+
     angle_rad = math.radians(approach_angle_deg)
     ray = yaw + (angle_rad if aim_at_drone else 0.0)
 
