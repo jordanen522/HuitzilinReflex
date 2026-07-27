@@ -881,3 +881,113 @@ here, and the bags are at `/data/huitzilin_bags` (34 entries) via
 artifact and both entry points exist — and its gating item (the `debug_funnel`
 revert) landed earlier the same day; only its checkboxes were never ticked. The
 two config headers that pointed at it now point at the runbook.
+
+---
+
+## 2026-07-27 (night) — Two dodge-authority levers, both refuted
+
+With the aim fixed, dodge authority became the only blocker, and the reframing
+from the previous entry said it is a **time** problem: every dodge on record
+commits with `tca` 0.07-0.47 s, and at 1.5 m/s that buys 0.11-0.70 m against a
+0.30 m hit radius. Two candidate levers were predicted to buy time. **Both were
+measured, and both bought none.**
+
+### Lever 1: `roi_max_range_m` 5.0 -> 8.0 — refuted
+
+The cap was set in Week 3 because far background dominated the frame difference,
+which is the exact root cause the persistent voxel background map later fixed, so
+it looked like a stale workaround worth lifting. A/B on a settled 12 m loop:
+
+| | roi 5.0 | roi 8.0 |
+|---|---|---|
+| `tca` mean | 0.204 s | **0.201 s** |
+| on-target dodge | 10/15 (67%) | 9/15 (60%) |
+| latency mean | 128 ms | **169 ms** |
+| aim error | 0.41 m | 0.21 m |
+
+No time gained, 41 ms of latency lost. Reverted (build copy only; the repo value
+never moved).
+
+**Why, measured directly:** the battery now records the ball's *true* separation
+at the first `/threat/centroid` that matches it. **First detection happens at mean
+3.36 m, range 0.90-4.75 m — entirely inside the 5.0 m gate.** The gate was never
+what decides when the ball becomes trackable; the ball's own detectability at
+range is, because an 80 mm sphere projects few points at 6-8 m against
+`cluster_min_points: 5`. Widening a gate cannot reveal points that were never
+there.
+
+### Lever 2: `min_track_updates` 3 -> 2 — refuted
+
+At 15 Hz, confirming three updates spends 0.20 s of the ~0.42 s of total warning
+that a 3.36 m first detection gives against an 8 m/s ball — nearly half the
+budget, and an *evasion* parameter, so the sweep could grid it live with no
+restarts. Prediction: dropping to 2 hands ~0.067 s back.
+
+| combo | `tca` mean | on-target dodge |
+|---|---|---|
+| 1.5 m/s, mtu 2 | 0.172 s | 2/6 |
+| 1.5 m/s, mtu 3 | 0.175 s | 4/6 |
+| 2.5 m/s, mtu 2 | 0.177 s | 3/5 |
+| 2.5 m/s, mtu 3 | 0.124 s | 2/6 |
+
+`tca` moved **0.003 s**. The dodge rates scatter 33-67% with no coherent pattern —
+mtu 3 at 1.5 m/s scored best and mtu 3 at 2.5 m/s worst, which is physically
+impossible as an effect — so at n=5-6 per combo they are noise. Defaults kept
+(`min_track_updates: 3`, `dodge_speed_mps: 1.5`); nothing measured beats them.
+
+### What the two nulls together imply
+
+`tca` is pinned near 0.12-0.27 s and is invariant to **both** when detection
+starts and how many updates are required. So the trigger is not waiting on the
+*existence* of a track — it is waiting on the **quality** of one. The policy fires
+when the KF's predicted miss falls inside `threat_radius_m` (0.75 m) with
+`tca <= trigger_horizon_s` (1.5 s, never binding at these values), so if an early
+track's predicted miss is too noisy to be confidently inside 0.75 m, the commit
+waits for the ball to close regardless of how early it was first seen.
+
+The spread in first detection supports this: **0.21-5.48 m**, i.e. some throws are
+not seen until essentially point-blank. Detection is not just limited in range, it
+is *unreliable* at range.
+
+**The measurement that would settle it** (not yet done): log `/threat/intercept`
+through a single throw and find when `|intercept|` first crosses `threat_radius_m`,
+against when the track started. That separates "the KF converges late" from "the
+policy is conservative". Hover is the right instrument — in hover `|intercept|` in
+base_link *is* the miss the policy compares, and the lead is exact so the geometry
+is not a confound.
+
+Do **not** reach for `dodge_speed_mps` or `dodge_duration_s` first: `tca * speed`
+is the product that must clear the hit radius, and the sweep above shows the speed
+half is already inside the noise floor. The time half is where the leverage is.
+
+### Two instrument defects fixed along the way
+
+Both were manufacturing wrong numbers, and both were found by inspecting a
+battery per-run instead of trusting its means:
+
+- **`first_det_range_m` was counting false positives.** The detector emits a ~1/s
+  FP stream during patrol, so the first centroid in a 5 s window is more often
+  clutter than the ball — it recorded 7.03 m and 6.39 m against a 5.0 m gate,
+  which the ball cannot produce. A centroid must now *match* the ball: the
+  centroid is in `base_link`, so its norm is the target's range, comparable to the
+  true separation with no attitude needed, and the two must agree within
+  `det_match_tol_m` (0.75 m).
+- **A spawn flake was being scored as a run.** One throw's impulse wrench was
+  dropped (`ball_speed 0.00 m/s`), and everything downstream was garbage:
+  `min_dist` became the distance to a stationary ball at the spawn point and the
+  "flight time" became **1312 s**. That single row moved the battery's reported aim
+  error from 0.41 m to 1.44 m and the flight excess to +72.9 s, which reads exactly
+  like an aim regression. A ball measured below `min_launch_speed_frac` (0.25) of
+  its scenario speed is now an explicit harness error. Averaging a throw that never
+  happened is worse than losing the row.
+
+### Also worth knowing
+
+- **The bag library cannot referee detector-threshold changes at this operating
+  point.** Measured today on the train split: recall **100%** (TP=10, FN=0 — the
+  background map fixed the old S08 false negative) and false positives on **4 of 4**
+  negative bags. Saturated at both ends, so it can neither confirm nor refute.
+- **`run_regression.sh` pkills any running detector**, including a live stack's.
+  Run bag work before bringing the stack up, or restart T3 afterwards.
+- Best latency recorded to date: **93 ms mean / 200 ms max** on a clean settled
+  stack, comfortably inside the 150 ms mean budget.
