@@ -11,9 +11,12 @@ translation, while the same differencing in the fixed odom frame stays clean.
 import math
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from huitzilin_perception.cloud_geometry import (
+    _cluster_traversal,
     apply_transform,
+    cluster_all,
     euclidean_cluster,
     foreground_mask,
     is_valid_quat,
@@ -231,3 +234,92 @@ def test_voxel_downsample_far_coordinates_still_correct():
 def test_voxel_downsample_empty_input():
     empty = np.zeros((0, 3), dtype=np.float32)
     assert voxel_downsample(empty, leaf=0.02).shape[0] == 0
+
+
+# ── cluster_all: graph path vs per-point traversal ───────────────────────────
+# The second hot stage, 12-71 ms per call (up to 38% of stage time) once
+# voxel_downsample was fixed, because it ran one Python-level query_ball_point
+# per point. Replaced by one query_pairs + one connected_components. Both are
+# the connected components of the same radius graph, so these tests demand an
+# IDENTICAL partition, not merely a similar one — the fallback path is still
+# reachable, and a divergence between them would be a detection difference
+# that only appears on dense clouds.
+
+def _partition(clusters):
+    """Clusters as a comparable structure: order preserved, members sorted."""
+    return [sorted(map(tuple, np.round(c, 6).tolist())) for c in clusters]
+
+
+def test_cluster_paths_agree_on_random_cloud():
+    rng = np.random.default_rng(20260727)
+    pts = (rng.random((900, 3), dtype=np.float32) * 1.0)
+    fast = cluster_all(pts, tol=0.08, min_pts=3)
+    slow = _cluster_traversal(pts, cKDTree(pts), tol=0.08, min_pts=3)
+    assert len(fast) == len(slow)
+    assert _partition(fast) == _partition(slow)
+
+
+def test_cluster_paths_agree_on_separated_blobs():
+    rng = np.random.default_rng(3)
+    blobs = [rng.normal(c, 0.02, size=(40, 3)).astype(np.float32)
+             for c in ([0.0, 0.0, 2.0], [1.0, 0.0, 2.0], [0.0, 1.0, 2.0])]
+    pts = np.vstack(blobs)
+    fast = cluster_all(pts, tol=0.10, min_pts=5)
+    slow = _cluster_traversal(pts, cKDTree(pts), tol=0.10, min_pts=5)
+    assert len(fast) == 3, [c.shape for c in fast]
+    assert _partition(fast) == _partition(slow)
+
+
+def test_cluster_order_is_by_lowest_member_index():
+    """Downstream uses max(..., key=size), which returns the FIRST maximum.
+
+    So cluster order is observable behaviour, not an implementation detail: two
+    equal-sized clusters must resolve the same way as before the rewrite.
+    """
+    # Second blob (rows 3-5) is far from the first (rows 0-2).
+    pts = np.array([[5.0, 0.0, 0.0], [5.01, 0.0, 0.0], [5.02, 0.0, 0.0],
+                    [0.0, 0.0, 0.0], [0.01, 0.0, 0.0], [0.02, 0.0, 0.0]],
+                   dtype=np.float32)
+    out = cluster_all(pts, tol=0.05, min_pts=3)
+    assert len(out) == 2
+    # The cluster seeded at row 0 (x~5.0) must come first despite larger coords.
+    assert out[0][:, 0].min() > 4.0, out
+
+
+def test_cluster_singletons_are_dropped_by_min_pts():
+    pts = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]], dtype=np.float32)
+    assert cluster_all(pts, tol=0.05, min_pts=2) == []
+    assert len(cluster_all(pts, tol=0.05, min_pts=1)) == 2
+
+
+def test_cluster_isolated_points_get_their_own_labels():
+    # No pairs at all: the graph has no edges, and every point must still be
+    # labelled rather than collapsing into one component.
+    pts = (np.arange(5, dtype=np.float32)[:, None] * 10.0) * np.ones((1, 3),
+                                                                    np.float32)
+    assert len(cluster_all(pts, tol=0.05, min_pts=1)) == 5
+
+
+def test_cluster_empty_input():
+    assert cluster_all(np.zeros((0, 3), dtype=np.float32), 0.2, 3) == []
+
+
+def test_dense_blob_falls_back_instead_of_materialising_pairs():
+    """The memory guard, exercised by lowering the cap rather than by faking.
+
+    A dense blob at production tol would materialise a pair array far larger
+    than the cloud; the guard must route it to the O(N)-memory traversal and
+    still return the same partition.
+    """
+    import huitzilin_perception.cloud_geometry as cg
+
+    rng = np.random.default_rng(5)
+    pts = rng.normal(0.0, 0.05, size=(600, 3)).astype(np.float32)
+    expected = _partition(cluster_all(pts, tol=0.30, min_pts=3))
+    saved = cg._MAX_CLUSTER_PAIRS
+    try:
+        cg._MAX_CLUSTER_PAIRS = 10      # force the fallback
+        got = _partition(cg.cluster_all(pts, tol=0.30, min_pts=3))
+    finally:
+        cg._MAX_CLUSTER_PAIRS = saved
+    assert got == expected

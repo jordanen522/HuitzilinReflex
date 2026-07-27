@@ -8,6 +8,8 @@ No ROS imports: everything here is unit-testable on any machine
 from __future__ import annotations
 
 import numpy as np
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 
@@ -130,27 +132,65 @@ def foreground_mask(current: np.ndarray, background: np.ndarray,
 
 # ── Euclidean clustering (single-linkage radius, cKDTree) ────────────────────
 
-def cluster_all(pts: np.ndarray, tol: float, min_pts: int) -> list[np.ndarray]:
-    """
-    Greedy radius-based Euclidean clustering on (N, 3) float32 xyz, with NO
-    upper size bound. Returns a list of (k, 3) arrays, each being one cluster.
+# Cap on materialised neighbour pairs before clustering falls back to the
+# per-point traversal. 4M pairs is ~64 MB of int64 indices. The voxel stage
+# guarantees points are >= voxel_leaf_m apart and fg_max_points caps the input at
+# 5000, so a depth *surface* yields roughly pi*(tol/leaf)^2 ~ 300 neighbours per
+# point (~750k pairs at the production 0.20 m / 0.02 m); only a solid volume
+# would approach this cap. Checked with count_neighbors, which returns the pair
+# count from C without building the array.
+_MAX_CLUSTER_PAIRS = 4_000_000
 
-    Split out from euclidean_cluster() because an upper point cap cannot be
-    applied at this layer without destroying information: a projectile touching
-    a large surface lands in one oversized cluster, and discarding it here loses
-    the ball. cluster_and_split() re-clusters such a blob instead.
-    """
-    if pts.shape[0] == 0:
-        return []
 
-    tree = cKDTree(pts)
+def _cluster_components(pts: np.ndarray, tree: cKDTree, tol: float,
+                        min_pts: int) -> list[np.ndarray]:
+    """Single-linkage radius clustering as one graph problem.
+
+    Identical partition to the per-point traversal below — both are the
+    connected components of the graph joining points within `tol` — but the
+    neighbour search and the traversal each happen once, in C, instead of one
+    Python-level KD-tree query per point.
+    """
+    n = pts.shape[0]
+    pairs = tree.query_pairs(tol, output_type="ndarray")
+    if pairs.shape[0]:
+        graph = coo_matrix(
+            (np.ones(pairs.shape[0], dtype=np.int8), (pairs[:, 0], pairs[:, 1])),
+            shape=(n, n))
+    else:
+        # Every point isolated; still needs an n x n graph so each gets a label.
+        graph = coo_matrix((n, n), dtype=np.int8)
+    n_comp, labels = connected_components(graph, directed=False)
+
+    # Order components by their lowest member index, reproducing the seed-scan
+    # order of the original loop. Downstream picks the largest cluster with
+    # max(), which returns the FIRST maximum, so this ordering is observable.
+    # Reverse-order assignment leaves the minimum index without ufunc.at.
+    first_member = np.empty(n_comp, dtype=np.int64)
+    rev = np.arange(n - 1, -1, -1)
+    first_member[labels[rev]] = rev
+
+    counts = np.bincount(labels, minlength=n_comp)
+    members_by_label = np.split(np.argsort(labels, kind="stable"),
+                                np.cumsum(counts)[:-1])
+    return [pts[members_by_label[lab]]
+            for lab in np.argsort(first_member)
+            if counts[lab] >= min_pts]
+
+
+def _cluster_traversal(pts: np.ndarray, tree: cKDTree, tol: float,
+                       min_pts: int) -> list[np.ndarray]:
+    """Per-point fallback: no pair array, so memory stays O(N).
+
+    Only reached when the neighbour graph would be too large to materialise —
+    a case fg_max_points is meant to prevent upstream.
+    """
     assigned = np.zeros(len(pts), dtype=bool)
     clusters: list[np.ndarray] = []
 
     for seed_idx in range(len(pts)):
         if assigned[seed_idx]:
             continue
-        # BFS from this seed
         assigned[seed_idx] = True
         queue = [seed_idx]
         members = []
@@ -165,6 +205,35 @@ def cluster_all(pts: np.ndarray, tol: float, min_pts: int) -> list[np.ndarray]:
             clusters.append(pts[np.array(members)])
 
     return clusters
+
+
+def cluster_all(pts: np.ndarray, tol: float, min_pts: int) -> list[np.ndarray]:
+    """
+    Radius-based Euclidean clustering on (N, 3) float32 xyz, with NO upper size
+    bound. Returns a list of (k, 3) arrays, each being one cluster, ordered by
+    each cluster's lowest member index.
+
+    Split out from euclidean_cluster() because an upper point cap cannot be
+    applied at this layer without destroying information: a projectile touching
+    a large surface lands in one oversized cluster, and discarding it here loses
+    the ball. cluster_and_split() re-clusters such a blob instead.
+
+    Measured 2026-07-27 on the Dell: this was the second-hottest detector stage
+    after voxel_downsample was fixed — 12-71 ms per call, up to 38% of stage
+    time — because the original implementation issued one Python-level
+    tree.query_ball_point per point. It is now one query_pairs plus one
+    connected_components, both in C, with the per-point version kept as a
+    memory fallback.
+    """
+    n = pts.shape[0]
+    if n == 0:
+        return []
+    # count_neighbors counts ordered pairs including each point with itself.
+    tree = cKDTree(pts)
+    n_pairs = (int(tree.count_neighbors(tree, tol)) - n) // 2
+    if n_pairs > _MAX_CLUSTER_PAIRS:
+        return _cluster_traversal(pts, tree, tol, min_pts)
+    return _cluster_components(pts, tree, tol, min_pts)
 
 
 def euclidean_cluster(pts: np.ndarray, tol: float,
