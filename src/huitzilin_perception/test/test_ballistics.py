@@ -8,6 +8,7 @@ from huitzilin_perception.ballistics import (
     G_MPS2,
     ballistic_positions,
     compute_spawn,
+    miss_components,
 )
 
 
@@ -165,3 +166,127 @@ def test_lead_scales_with_latency():
     # Both spawn 6 m ahead of their aim point, so the difference is exactly the
     # extra 0.5 s of predicted drone travel.
     assert far.position[0] - near.position[0] == pytest.approx(0.5 * 3.0)
+
+
+# ── SpawnPlan.aim_point ──────────────────────────────────────────────────────
+# The point the throw was actually aimed at. Without it exposed, a battery can
+# only compare the measured miss against the SPEC, which conflates "the lead
+# predicted the wrong place" with "the geometry about the predicted place was
+# wrong". The hover control (2026-07-27) proved the geometry exact, so what is
+# left to measure is the aim point against where the drone truly went.
+
+def test_aim_point_is_the_drone_itself_without_a_lead():
+    p0 = (1.0, -2.0, 2.5)
+    plan = compute_spawn(p0, 0.7, speed_mps=8.0, compensate_gravity=True)
+    np.testing.assert_allclose(plan.aim_point, p0, atol=1e-12)
+
+
+def test_aim_point_is_the_predicted_position_when_leading():
+    p0, vel = (0.0, 0.0, 2.0), (3.0, -1.0, 0.25)
+    speed, fwd, latency = 8.0, 6.0, 0.2
+    plan = compute_spawn(p0, 0.0, speed_mps=speed, offset_forward_m=fwd,
+                         target_vel_enu=vel, spawn_latency_s=latency)
+    t_lead = latency + fwd / speed
+    expect = np.asarray(p0) + np.asarray(vel) * t_lead
+    np.testing.assert_allclose(plan.aim_point, expect, atol=1e-12)
+
+
+def test_spawn_is_offset_forward_from_the_aim_point_not_the_drone():
+    """The invariant the whole lead rests on: offset_forward_m is measured from
+    the AIM point, which is why the flight time stays offset_forward_m / speed
+    however far the lead moves the aim (see compute_spawn's docstring)."""
+    fwd, miss = 6.0, 0.5
+    plan = compute_spawn((0.0, 0.0, 2.0), 0.4, speed_mps=8.0,
+                         offset_forward_m=fwd, miss_distance_m=miss,
+                         target_vel_enu=(3.0, 2.0, 0.0), spawn_latency_s=0.2,
+                         aim_at_drone=True, approach_angle_deg=25.0)
+    horiz = np.linalg.norm((plan.position - plan.aim_point)[:2])
+    assert horiz == pytest.approx(math.hypot(fwd, miss), abs=1e-9)
+
+
+# ── miss_components ─────────────────────────────────────────────────────────
+# One scalar min_dist cannot say WHY a throw missed. These pin the sign
+# convention hard, because a sign error here would send the next round of
+# debugging in exactly the wrong direction.
+#
+# Convention: the vector is ball - drone at closest approach, resolved in the
+# ball's path frame. along > 0 = ball ended up BEYOND the drone along its own
+# heading; cross > 0 = ball passed to the LEFT of the drone (from the ball's
+# heading); vert > 0 = ball passed ABOVE the drone.
+
+def test_purely_vertical_miss_is_all_in_vert():
+    # Ball flying -x, passing 0.4 m above the drone.
+    mv = miss_components(ball_enu=(0.0, 0.0, 2.4), drone_enu=(0.0, 0.0, 2.0),
+                         ball_vel_enu=(-8.0, 0.0, 0.0))
+    assert mv.vert_m == pytest.approx(0.4)
+    assert mv.along_m == pytest.approx(0.0)
+    assert mv.cross_m == pytest.approx(0.0)
+    assert mv.dist_m == pytest.approx(0.4)
+
+
+def test_cross_track_sign_is_left_of_the_balls_heading():
+    # Ball heading -x. Its left is -y. A ball at y = -0.5 relative to the drone
+    # has therefore passed to the ball's LEFT: cross > 0.
+    mv = miss_components(ball_enu=(0.0, -0.5, 2.0), drone_enu=(0.0, 0.0, 2.0),
+                         ball_vel_enu=(-8.0, 0.0, 0.0))
+    assert mv.cross_m == pytest.approx(0.5)
+    mv_right = miss_components(ball_enu=(0.0, 0.5, 2.0),
+                               drone_enu=(0.0, 0.0, 2.0),
+                               ball_vel_enu=(-8.0, 0.0, 0.0))
+    assert mv_right.cross_m == pytest.approx(-0.5)
+
+
+def test_along_track_sign_is_positive_when_the_ball_overshot():
+    # Ball heading -x, sitting 0.3 m further along -x than the drone: it went
+    # past. This is the signature of a lead/timing error, and it is what a
+    # closest-approach sample can only show as a small residual.
+    mv = miss_components(ball_enu=(-0.3, 0.0, 2.0), drone_enu=(0.0, 0.0, 2.0),
+                         ball_vel_enu=(-8.0, 0.0, 0.0))
+    assert mv.along_m == pytest.approx(0.3)
+
+
+def test_components_are_an_orthogonal_decomposition_of_the_distance():
+    rng = np.random.default_rng(4)
+    for _ in range(50):
+        ball = rng.normal(scale=5.0, size=3)
+        drone = rng.normal(scale=5.0, size=3)
+        vel = rng.normal(scale=8.0, size=3)
+        if math.hypot(vel[0], vel[1]) < 1e-3:
+            continue
+        mv = miss_components(ball, drone, vel)
+        assert (mv.along_m ** 2 + mv.cross_m ** 2 + mv.vert_m ** 2
+                == pytest.approx(mv.dist_m ** 2))
+        assert mv.dist_m == pytest.approx(float(np.linalg.norm(ball - drone)))
+
+
+def test_components_are_invariant_under_yaw_rotation():
+    """The decomposition is in the ball's own frame, so rotating the whole
+    scene about z must not change it — otherwise a +30 deg scenario and a
+    -30 deg scenario could not be compared, which is the entire point."""
+    ball = np.array([1.0, -0.5, 2.3])
+    drone = np.array([0.2, 0.4, 2.0])
+    vel = np.array([-7.0, 3.0, 1.2])
+    base = miss_components(ball, drone, vel)
+    for yaw in (0.3, 1.1, -2.0, math.pi):
+        c, s = math.cos(yaw), math.sin(yaw)
+        rot = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+        r = miss_components(rot @ ball, rot @ drone, rot @ vel)
+        assert r.along_m == pytest.approx(base.along_m)
+        assert r.cross_m == pytest.approx(base.cross_m)
+        assert r.vert_m == pytest.approx(base.vert_m)
+
+
+def test_vertical_is_world_vertical_not_perpendicular_to_a_lofted_path():
+    """A gravity-compensated throw is lofted, so its velocity is tilted. The
+    vertical component must stay WORLD vertical: its diagnostic value is that
+    it isolates gravity-compensation error, which is a world-z quantity."""
+    ball, drone = (0.0, 0.0, 2.4), (0.0, 0.0, 2.0)
+    flat = miss_components(ball, drone, (-8.0, 0.0, 0.0))
+    lofted = miss_components(ball, drone, (-8.0, 0.0, 3.5))
+    assert lofted.vert_m == pytest.approx(flat.vert_m)
+    assert lofted.along_m == pytest.approx(flat.along_m)
+
+
+def test_degenerate_vertical_throw_has_no_path_frame():
+    with pytest.raises(ValueError):
+        miss_components((0.0, 0.0, 3.0), (0.0, 0.0, 2.0), (0.0, 0.0, -8.0))

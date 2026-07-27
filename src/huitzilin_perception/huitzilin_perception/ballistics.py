@@ -32,6 +32,30 @@ class SpawnPlan(NamedTuple):
     """World-ENU spawn state for one projectile throw."""
     position: np.ndarray   # (3,) ENU spawn point [m]
     velocity: np.ndarray   # (3,) ENU initial velocity [m/s]
+    # The point the throw was aimed at: the drone's position advanced by the
+    # lead, or its raw position when not leading. Exposed so a caller can score
+    # its own prediction. Comparing a measured miss against the scenario SPEC
+    # conflates "the lead predicted the wrong place" with "the geometry about
+    # the predicted place was wrong", and the 2026-07-27 hover control
+    # established the geometry is exact to a few cm — so the aim point is the
+    # quantity still worth measuring. Appended last: every existing caller
+    # reads .position / .velocity by attribute, never by unpacking.
+    aim_point: np.ndarray  # (3,) ENU predicted target position [m]
+
+
+class MissVector(NamedTuple):
+    """A closest-approach miss resolved in the ball's own path frame.
+
+    Supplements the scalar `min_dist`, which is the PERPENDICULAR distance from
+    the path to the drone and therefore cannot distinguish a lead that fired
+    early from a path that drifted sideways from a gravity-compensation error —
+    three different bugs with three different fixes. See docs/JOURNAL.md
+    2026-07-27.
+    """
+    along_m: float   # + = ball ended up BEYOND the drone along its own heading
+    cross_m: float   # + = ball passed to the LEFT of the drone (ball's heading)
+    vert_m: float    # + = ball passed ABOVE the drone (world z)
+    dist_m: float    # |ball - drone|; == hypot of the three above
 
 
 def ballistic_positions(p0, v0, ts, g: float = G_MPS2) -> np.ndarray:
@@ -144,4 +168,54 @@ def compute_spawn(
         t_flight = offset_forward_m / speed_mps
         vel[2] = 0.5 * g * t_flight - offset_vertical_m / t_flight
 
-    return SpawnPlan(position=spawn, velocity=vel)
+    return SpawnPlan(position=spawn, velocity=vel,
+                     aim_point=np.array([dx, dy, dz]))
+
+
+def miss_components(ball_enu, drone_enu, ball_vel_enu) -> MissVector:
+    """Decompose a closest-approach miss into the ball's path frame.
+
+    Returns the vector (ball - drone) resolved as:
+      along : along the ball's HORIZONTAL heading, + = ball went past the drone
+      cross : to the left of that heading,         + = ball passed on its left
+      vert  : world z,                             + = ball passed above
+
+    Why these axes. The three components map one-to-one onto three distinct
+    failure modes, which the scalar min_dist cannot separate:
+      - `along` is a timing/lead-magnitude error: the aim point was right but
+        reached at the wrong moment, or the target's speed was mispredicted.
+        Note it is near-zero AT the true closest approach of a straight path by
+        definition, so what it really reports is the sampling residual plus any
+        curvature — a large |along| means the samples bracket the approach
+        coarsely, not that the lead is fine.
+      - `cross` is a heading error: the target turned, or the lead's direction
+        was wrong. This is the component a head-on throw cannot explain away,
+        and the one the +30/-30 deg asymmetry pointed at.
+      - `vert` isolates gravity compensation, an entirely world-z quantity.
+    Vertical is deliberately WORLD vertical rather than perpendicular to a
+    lofted path: mixing the loft angle into the axes would smear a gravity error
+    across two components and destroy exactly the separation this exists for.
+
+    Raises ValueError for a path with no horizontal component — a purely
+    vertical throw has no heading, so "left of it" is undefined. Returning a
+    silent zero there would read as a perfect cross-track score.
+    """
+    ball = np.asarray(ball_enu, dtype=np.float64)
+    drone = np.asarray(drone_enu, dtype=np.float64)
+    vel = np.asarray(ball_vel_enu, dtype=np.float64)
+
+    horiz = float(math.hypot(vel[0], vel[1]))
+    if horiz < 1e-9:
+        raise ValueError(
+            "ball_vel_enu has no horizontal component: a vertical path has no "
+            "heading, so along/cross-track are undefined")
+
+    fwd = np.array([vel[0] / horiz, vel[1] / horiz, 0.0])
+    left = np.array([-fwd[1], fwd[0], 0.0])   # up x fwd, still horizontal
+    miss = ball - drone
+    return MissVector(
+        along_m=float(miss @ fwd),
+        cross_m=float(miss @ left),
+        vert_m=float(miss[2]),
+        dist_m=float(np.linalg.norm(miss)),
+    )

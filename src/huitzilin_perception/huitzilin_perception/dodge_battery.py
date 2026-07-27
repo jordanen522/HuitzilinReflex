@@ -51,7 +51,7 @@ from std_msgs.msg import String
 from std_srvs.srv import SetBool
 from tf2_msgs.msg import TFMessage
 
-from huitzilin_perception.ballistics import compute_spawn
+from huitzilin_perception.ballistics import compute_spawn, miss_components
 from huitzilin_perception.throw_window import (
     straight_leg_time_s,
     throw_window_ok,
@@ -240,6 +240,8 @@ class DodgeBatteryNode(Node):
         # rather than assume the 0.5 s.
         self._ball_seen_sim = None
         self._min_dist = float("inf")
+        # (ball_enu, drone_enu) at the closest-approach sample — see _pose_cb.
+        self._closest_pair = None
         self._events = []
         self._listening = False
 
@@ -317,6 +319,13 @@ class DodgeBatteryNode(Node):
                 d = float(np.linalg.norm(ball - drone))
                 if d < self._min_dist:
                     self._min_dist = d
+                    # Keep the POSE PAIR, not just the scalar. The scalar is a
+                    # perpendicular distance and cannot say which way the throw
+                    # was wrong; the pair lets _one_run decompose the miss into
+                    # along/cross/vertical after the window closes. Stored on
+                    # the same branch as the min so the two can never disagree
+                    # about which sample was closest.
+                    self._closest_pair = (ball.copy(), drone.copy())
 
     def _patrol_cb(self, msg: String) -> None:
         try:
@@ -622,6 +631,7 @@ class DodgeBatteryNode(Node):
             self._active_ball = name
             self._ball_seen_sim = None
             self._min_dist = float("inf")
+            self._closest_pair = None
             self._events = []
             self._listening = True
 
@@ -647,10 +657,12 @@ class DodgeBatteryNode(Node):
             self._listening = False
             self._active_ball = None
             min_dist = self._min_dist
+            closest = self._closest_pair
             events = list(self._events)
             seen_sim = self._ball_seen_sim
         dead_s = (None if seen_sim is None
                   else round(seen_sim - sample_sim, 3))
+        miss, lead_err = self._decompose_miss(closest, plan, vel)
 
         gz_remove(self._world, name)
         self._wait_sim(self._settle_s)   # let patrol resume + bg model settle
@@ -691,7 +703,54 @@ class DodgeBatteryNode(Node):
                 "window_s": round(win_leg, 3) if win_leg is not None else None,
                 "needed_window_s": round(win_needed, 3),
                 "spawn_dead_s": dead_s,
+                "miss_along_m": None if miss is None else round(miss.along_m, 3),
+                "miss_cross_m": None if miss is None else round(miss.cross_m, 3),
+                "miss_vert_m": None if miss is None else round(miss.vert_m, 3),
+                "lead_along_m": (None if lead_err is None
+                                 else round(lead_err.along_m, 3)),
+                "lead_cross_m": (None if lead_err is None
+                                 else round(lead_err.cross_m, 3)),
+                "lead_vert_m": (None if lead_err is None
+                                else round(lead_err.vert_m, 3)),
                 "success": success, "note": note}
+
+    @staticmethod
+    def _decompose_miss(closest, plan, drone_vel):
+        """Turn the closest-approach pose pair into two diagnosable triples.
+
+        Returns (miss, lead_err), either of which may be None.
+
+        `miss` is where the BALL ended up relative to the drone, in the ball's
+        path frame: along / cross / vertical. This is what min_dist cannot tell
+        you — a lead that fired early, a path that drifted sideways and a
+        gravity-compensation error all produce the same scalar.
+
+        `lead_err` is where the throw was AIMED relative to where the drone
+        actually was at closest approach, resolved in the DRONE's heading frame.
+        Reusing miss_components for it is deliberate — the maths is identical,
+        only the interpretation changes — so read its signs as:
+          along > 0 : aimed AHEAD of where the drone got to (over-led; too much
+                      lead time or an over-estimated target speed)
+          cross > 0 : aimed to the LEFT of the drone's own track (the drone
+                      turned, or the lead direction was wrong)
+          vert  > 0 : aimed ABOVE the drone
+        `lead_err` is None in hover mode by construction: a stationary drone has
+        no heading, so "ahead of its track" is undefined. That is not a loss —
+        against a stationary target the lead is exact and there is nothing to
+        decompose, which is the whole reason hover is the control.
+        """
+        if closest is None:
+            return None, None
+        ball, drone = closest
+        try:
+            miss = miss_components(ball, drone, plan.velocity)
+        except ValueError:
+            miss = None
+        try:
+            lead_err = miss_components(plan.aim_point, drone, drone_vel)
+        except ValueError:
+            lead_err = None   # stationary target: no heading frame to use
+        return miss, lead_err
 
     def _enter_hover(self) -> tuple[bool, str]:
         """Stop patrol and wait for the drone to actually be stationary.
@@ -788,6 +847,45 @@ class DodgeBatteryNode(Node):
         return ok
 
     # ── Reporting ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _miss_lines(sub: list) -> list:
+        """Signed per-axis summaries of the miss and the lead error.
+
+        Reports mean (the bias) alongside max |.| (the worst case) for each
+        axis, so a systematic offset is visible as a bias rather than being
+        averaged into a plausible-looking magnitude. Emits nothing when there is
+        nothing to say, rather than a row of dashes.
+        """
+        no_dodge = [r for r in sub if not r.get("dodged")]
+
+        def axes(prefix: str, keys: tuple) -> list:
+            vals = {k: [r[f"{prefix}_{k}_m"] for r in no_dodge
+                        if r.get(f"{prefix}_{k}_m") is not None]
+                    for k in keys}
+            if not any(vals.values()):
+                return []
+            parts = [f"{k} {np.mean(v):+.2f} (max |{np.max(np.abs(v)):.2f}|)"
+                     for k, v in vals.items() if v]
+            return ["    " + prefix + " (no-dodge, signed mean): "
+                    + ", ".join(parts)]
+
+        out = []
+        # Each legend is emitted only with its own block: hover mode has no
+        # lead error to report (no heading frame), and a dangling "lead:" key
+        # under no lead line reads as a missing measurement rather than an
+        # inapplicable one.
+        miss = axes("miss", ("along", "cross", "vert"))
+        if miss:
+            out += miss + [
+                "      miss: ball vs drone in the BALL's frame (+along = ball "
+                "went past, +cross = ball passed left, +vert = above)"]
+        lead = axes("lead", ("along", "cross", "vert"))
+        if lead:
+            out += lead + [
+                "      lead: aim point vs drone in the DRONE's frame (+along = "
+                "over-led, +cross = aimed left of its track)"]
+        return out
 
     def _report(self, rows: list) -> int:
         errors = [r for r in rows if r.get("error")]
@@ -895,6 +993,13 @@ class DodgeBatteryNode(Node):
                     f"undeclared {undeclared:+.3f} s "
                     f"= {abs(undeclared) * cruise:.2f} m of aim error at "
                     f"{cruise:.2f} m/s")
+            # Miss decomposition: the scalar aim error above says HOW FAR, these
+            # say WHICH WAY, and only the second is actionable. Signed means, not
+            # absolute: a bias means a systematic error worth chasing, while
+            # components that scatter around zero are noise no parameter fixes.
+            # Restricted to no-dodge runs for the same reason aim_err_m is — a
+            # dodge moves the drone, so the miss stops being an aim measurement.
+            lines += self._miss_lines(sub)
             if lats:
                 lines.append(
                     f"    latency: mean {np.mean(lats):.0f} ms, "
@@ -936,7 +1041,9 @@ class DodgeBatteryNode(Node):
                     "combo", "id", "rep", "expect_dodge", "dodged",
                     "latency_ms", "min_dist_m", "spec_miss_m", "aim_err_m",
                     "off_target", "steady", "success", "error", "note",
-                    "skipped", "window_s", "needed_window_s", "spawn_dead_s"])
+                    "skipped", "window_s", "needed_window_s", "spawn_dead_s",
+                    "miss_along_m", "miss_cross_m", "miss_vert_m",
+                    "lead_along_m", "lead_cross_m", "lead_vert_m"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})
