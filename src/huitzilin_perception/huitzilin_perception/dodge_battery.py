@@ -128,6 +128,24 @@ class DodgeBatteryNode(Node):
         # needed next. Re-measure if the throw path ever falls back to the gz
         # CLI (which restores gravity late).
         self.declare_parameter("spawn_latency_s", 0.216)
+        # Staleness of the odom sample ITSELF, which is a second dead time on
+        # top of the spawn one above and was invisible until the miss
+        # decomposition landed. The battery treats the newest /huitzilin/odom as
+        # "where the drone is now"; it is not.
+        #
+        # MEASURED directly 2026-07-27, n=1595 cruise samples: the drone's
+        # Gazebo ground-truth position leads its odom position by 0.561 m
+        # along-track at 4.36 m/s = 129 ms (median 128 ms, sd 0.334 m). The
+        # offset's magnitude equals its along-track component almost exactly,
+        # i.e. it is pure time lag with no lateral bias — which is what makes it
+        # a latency to declare rather than a calibration error to correct.
+        #
+        # This is the same root cause as the deferred mav_bridge_node odom-stamp
+        # item: MAVLink + bridge transport delay. Fixing the stamp there would
+        # let consumers compensate properly; declaring it here compensates the
+        # lead now, and keeps the two dead times separate in the report so
+        # neither hides the other.
+        self.declare_parameter("odom_lag_s", 0.129)
         # The lead extrapolates the drone at CONSTANT velocity across the
         # ball's flight (0.43 s at 14 m/s, 1.5 s at 4 m/s). That is false while
         # patrol is turning a waypoint, which is what still spoiled battery v7:
@@ -190,6 +208,7 @@ class DodgeBatteryNode(Node):
         self._lead_target = bool(self.get_parameter("lead_target").value)
         self._spawn_latency_s = float(
             self.get_parameter("spawn_latency_s").value)
+        self._odom_lag_s = float(self.get_parameter("odom_lag_s").value)
         self._steady_gate = float(
             self.get_parameter("steady_vel_gate_mps").value)
         self._steady_timeout = float(
@@ -616,7 +635,12 @@ class DodgeBatteryNode(Node):
             compensate_gravity=bool(scen.get("compensate_gravity", True)),
             aim_at_drone=bool(scen.get("aim_at_drone", False)),
             target_vel_enu=lead,
-            spawn_latency_s=self._spawn_latency_s,
+            # Two independent dead times, summed because the lead cannot tell
+            # them apart: the odom sample already describes the drone
+            # odom_lag_s ago, and the ball then launches spawn_latency_s after
+            # the sample is taken. Kept as separate parameters so the report can
+            # attribute residual aim error to the right one.
+            spawn_latency_s=self._spawn_latency_s + self._odom_lag_s,
         )
         if plan.position[2] < MIN_SPAWN_Z:
             return {**base, "error": True, "success": False,
@@ -911,7 +935,10 @@ class DodgeBatteryNode(Node):
              if self._hover_mode else
              "  target: patrolling (aim error mixes lead error with geometry)"),
             f"  lead_target: {self._lead_target}   "
-            f"spawn_latency_s: {self._spawn_latency_s} s"
+            f"spawn_latency_s: {self._spawn_latency_s} s   "
+            f"odom_lag_s: {self._odom_lag_s} s   "
+            f"(total lead dead time "
+            f"{self._spawn_latency_s + self._odom_lag_s:.3f} s)"
             + ("" if self._lead_target else
                "   << UNLED: throws aim at a stale point, so a patrolling "
                "drone walks clear on its own"),
