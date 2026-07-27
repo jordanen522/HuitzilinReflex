@@ -66,7 +66,15 @@ class TruthProbe(Node):
 
         self._fh = open(out_path, "w", newline="")
         self._csv = csv.writer(self._fh)
-        self._csv.writerow(["kind", "stamp_s", "name", "x", "y", "z"])
+        # recv_s is the ROS sim clock when the message arrived here. It is NOT
+        # a substitute for the header stamp — it carries transport delay — but
+        # it is what brackets the two clocks in play. Measured 2026-07-27:
+        # /gz/dynamic_poses is stamped with GAZEBO's own sim clock (seconds
+        # since world start, e.g. 320.0) while /clock-driven ROS sim time is
+        # wall-anchored (e.g. 1785182794.8), so the streams differ by a large
+        # constant. Without recv_s there is nothing to estimate that constant
+        # from, and the pose stream cannot be joined to anything.
+        self._csv.writerow(["kind", "stamp_s", "recv_s", "name", "x", "y", "z"])
         self._n = 0
 
         self.create_subscription(TFMessage, "/gz/dynamic_poses",
@@ -79,7 +87,8 @@ class TruthProbe(Node):
         self.get_logger().info(f"recording truth -> {out_path}")
 
     def _row(self, kind: str, stamp: float, name: str, x, y, z) -> None:
-        self._csv.writerow([kind, f"{stamp:.6f}", name,
+        recv = self.get_clock().now().nanoseconds * 1e-9
+        self._csv.writerow([kind, f"{stamp:.6f}", f"{recv:.6f}", name,
                             f"{x:.4f}", f"{y:.4f}", f"{z:.4f}"])
         self._n += 1
         # Flush every row: the interesting window is the ~0.5 s before a kill,

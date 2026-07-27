@@ -59,18 +59,70 @@ NEAR_POINT_M = 0.20
 NEAR_CLUSTER_M = 0.40
 
 
-def load_truth(path: str) -> dict:
-    """Group truth rows by (kind, name) -> (times, Nx3 positions), time-sorted."""
+def load_truth(path: str) -> tuple[dict, dict]:
+    """Group truth rows by (kind, name) -> (times, Nx3 positions), time-sorted.
+
+    Returns (positions, recv) where recv maps the same key to the ROS sim clock
+    at arrival, needed to bracket the two clocks (see fit_gz_offset).
+    """
     rows: dict[tuple[str, str], list] = defaultdict(list)
     with open(path, newline="") as fh:
         for r in csv.DictReader(fh):
             rows[(r["kind"], r["name"])].append(
-                (float(r["stamp_s"]), float(r["x"]), float(r["y"]), float(r["z"])))
-    out = {}
+                (float(r["stamp_s"]), float(r["recv_s"]),
+                 float(r["x"]), float(r["y"]), float(r["z"])))
+    out, recv = {}, {}
     for key, vals in rows.items():
         a = np.array(sorted(vals), dtype=float)
-        out[key] = (a[:, 0], a[:, 1:4])
-    return out
+        out[key] = (a[:, 0], a[:, 2:5])
+        recv[key] = a[:, 1]
+    return out, recv
+
+
+def fit_gz_offset(truth: dict, recv: dict, drone_model: str):
+    """Seconds to ADD to a /gz/dynamic_poses stamp to reach ROS sim time.
+
+    /gz/dynamic_poses is stamped with Gazebo's own clock (seconds since world
+    start); /clock-driven ROS sim time — which stamps the odom, the cloud and
+    therefore every dumped frame — is wall-anchored. The two differ by a large
+    constant, and joining them without measuring it produces a report about the
+    wrong instant of the flight.
+
+    Bracketed by arrival time, then refined by the only thing that can check it:
+    the drone appears in BOTH streams, so the correct offset is the one that
+    makes its world-frame track and its odom track differ by a pure constant.
+    The refinement minimises the spread of that difference, and the spread it
+    achieves is reported so a bad fit cannot pass silently.
+    """
+    key = ("pose", drone_model)
+    if key not in truth:
+        return None, None, "no pose rows for the drone model"
+    if ("odom", "drone") not in truth:
+        return None, None, "no odom rows"
+
+    wt, wp = truth[key]
+    ot, op = truth[("odom", "drone")]
+    # Arrival time minus stamp is transport delay plus the clock constant; the
+    # minimum over thousands of samples is the least-delayed one, so it brackets
+    # the constant from above by only a few ms.
+    coarse = float(np.min(recv[key] - wt))
+
+    def spread(k: float) -> float:
+        t = wt + k
+        lo, hi = max(t[0], ot[0]), min(t[-1], ot[-1])
+        sel = (ot >= lo) & (ot <= hi)
+        if sel.sum() < 50:
+            return np.inf
+        resid = np.stack([op[sel, i] - np.interp(ot[sel], t, wp[:, i])
+                          for i in range(3)], axis=1)
+        return float(np.linalg.norm(resid.std(axis=0)))
+
+    grid = coarse + np.arange(-0.500, 0.500, 0.001)
+    scores = np.array([spread(k) for k in grid])
+    best = int(np.argmin(scores))
+    if not np.isfinite(scores[best]):
+        return None, None, "no overlap between the pose and odom streams"
+    return float(grid[best]), float(scores[best]), ""
 
 
 def interp_xyz(t_query: float, times: np.ndarray, pos: np.ndarray):
@@ -172,7 +224,21 @@ def main() -> int:
                     help="only report frames with the ball inside this range")
     args = ap.parse_args()
 
-    truth = load_truth(args.truth)
+    truth, recv = load_truth(args.truth)
+    k, fit_resid, why = fit_gz_offset(truth, recv, args.drone_model)
+    if k is None:
+        print(f"cannot align clocks ({why}); "
+              f"names seen: {sorted({n for _, n in truth})}", file=sys.stderr)
+        return 1
+    print(f"gz->ros clock offset {k:.3f} s "
+          f"(drone track residual {fit_resid:.3f} m at the fit; "
+          f"a large residual here means the fit failed and every time below is "
+          f"the wrong instant of the flight)")
+    # Every pose row is on the Gazebo clock; shift them all onto ROS sim time,
+    # which is what the dumped frames and the odom are stamped with.
+    truth = {key: ((t + k, p) if key[0] == "pose" else (t, p))
+             for key, (t, p) in truth.items()}
+
     offset, spread = world_to_odom_offset(truth, args.drone_model)
     if offset is None:
         print(f"no truth for drone model '{args.drone_model}' — "
@@ -224,12 +290,17 @@ def main() -> int:
             tally[verdict] += 1
             print(f"{t:10.3f} {rng:6.2f} {gap:>7}  {verdict:<11}  {detail}")
 
-        # Frames the camera published that the detector never processed. The
-        # cadence is 15 Hz; anything wider is a cloud the executor dropped, and
-        # a dropped frame breaks a consecutive run exactly like a failed gate.
+        # Frames the camera published that the detector never processed: a
+        # dropped cloud breaks a consecutive run exactly like a failed gate, and
+        # from outside the two are indistinguishable. The period is taken from
+        # the run's own median gap rather than assumed to be 15 Hz — the dump
+        # itself costs latency, so the achieved rate is the honest baseline.
         if len(in_window) > 1:
             gaps = np.diff(stamps[in_window])
-            missed = int(np.sum(np.round(gaps / (1 / 15.0)) - 1))
+            period = float(np.median(gaps))
+            missed = int(np.clip(np.round(gaps / period) - 1, 0, None).sum())
+            print(f"\n         frame period (median) {period * 1000:.0f} ms "
+                  f"= {1 / period:.1f} Hz")
             print(f"\nsummary: {dict(sorted(tally.items()))}")
             print(f"         ~{missed} camera frames never reached the detector "
                   f"during this flight (max gap {gaps.max() * 1000:.0f} ms)")
