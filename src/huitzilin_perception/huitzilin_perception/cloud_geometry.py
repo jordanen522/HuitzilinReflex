@@ -47,21 +47,69 @@ def apply_transform(T: np.ndarray, pts: np.ndarray) -> np.ndarray:
 
 # ── Voxel grid (pure-numpy, no PCL / open3d dep) ─────────────────────────────
 
+# Voxel indices are packed into one int64 so np.unique can take its fast 1-D
+# sort path. Measured 2026-07-27 on the Dell, this function was THE detector
+# latency overrun: 66-74 ms per call on patrol clouds against a 77 ms/frame wall
+# budget (15 Hz at RTF 0.864), 48-62% of all measured stage time. Two numpy
+# anti-patterns, both in one function:
+#   * np.unique(keys, axis=0) builds a void-dtype view of each row and does a
+#     lexicographic row sort — far slower than sorting plain integers.
+#   * np.add.at is the unbuffered scatter-add; np.bincount(weights=...) does the
+#     same reduction in optimised C.
+# 21 bits per axis => +-2^20 voxels, i.e. +-21 km at a 0.02 m leaf. Points are
+# voxelised in the CAMERA frame where roi_max_range_m (5 m) bounds them, so this
+# window is never approached in production; out-of-window clouds fall back to
+# the row-wise path rather than silently wrapping two voxels into one.
+_VOXEL_BITS = 21
+_VOXEL_HALF = 1 << (_VOXEL_BITS - 1)
+
+
+def _voxel_centroids(pts: np.ndarray, inv: np.ndarray,
+                     n_voxels: int) -> np.ndarray:
+    """Mean of the points in each voxel, from a group-index array.
+
+    Accumulates in float64 (bincount's weight dtype) and narrows at the end,
+    which is strictly more accurate than the old float32 in-place scatter-add.
+    """
+    counts = np.bincount(inv, minlength=n_voxels)
+    sums = np.stack(
+        [np.bincount(inv, weights=pts[:, i], minlength=n_voxels)
+         for i in range(3)],
+        axis=1)
+    return (sums / counts[:, None]).astype(np.float32)
+
+
+def _voxel_downsample_rowwise(pts: np.ndarray,
+                              keys: np.ndarray) -> np.ndarray:
+    """Fallback for coordinates outside the packable key window."""
+    unique_keys, inv = np.unique(keys, axis=0, return_inverse=True)
+    return _voxel_centroids(pts, inv.ravel(), len(unique_keys))
+
+
 def voxel_downsample(pts: np.ndarray, leaf: float) -> np.ndarray:
     """
     Down-sample an (N, 3) float32 xyz array to one point per voxel.
     Returns an (M, 3) array with M ≤ N.
+
+    Rows come back in lexicographic voxel order (x, then y, then z), which the
+    packed key preserves because x occupies the most significant bits. That
+    ordering is part of the contract — see
+    test_voxel_downsample_matches_reference_on_random_cloud.
     """
     if pts.shape[0] == 0:
         return pts
-    keys = np.floor(pts / leaf).astype(np.int32)
-    # unique voxels → take centroid of points in each
-    unique_keys, inv = np.unique(keys, axis=0, return_inverse=True)
-    centroids = np.zeros((len(unique_keys), 3), dtype=np.float32)
-    counts = np.bincount(inv, minlength=len(unique_keys)).reshape(-1, 1)
-    np.add.at(centroids, inv, pts)
-    centroids /= counts
-    return centroids
+    keys = np.floor(pts / leaf).astype(np.int64)
+    if keys.min() < -_VOXEL_HALF or keys.max() >= _VOXEL_HALF:
+        return _voxel_downsample_rowwise(pts, keys)
+    # Bias to non-negative before packing: shifting a negative index would put
+    # sign bits into the neighbouring axis's field. The bias is monotonic, so
+    # sort order is unaffected.
+    shifted = keys + _VOXEL_HALF
+    packed = ((shifted[:, 0] << (2 * _VOXEL_BITS))
+              | (shifted[:, 1] << _VOXEL_BITS)
+              | shifted[:, 2])
+    unique_packed, inv = np.unique(packed, return_inverse=True)
+    return _voxel_centroids(pts, inv.ravel(), len(unique_packed))
 
 
 # ── Frame differencing ────────────────────────────────────────────────────────

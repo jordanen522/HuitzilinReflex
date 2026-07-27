@@ -124,3 +124,110 @@ def test_voxel_downsample_keeps_small_object():
                     dtype=np.float32)
     out = voxel_downsample(ball, leaf=0.02)
     assert out.shape[0] >= 2  # 80 mm ball must survive 0.02 m voxels
+
+
+# ── voxel_downsample: pinned before the 2026-07-27 speed rewrite ─────────────
+# Measured hot stage: 66-74 ms per call on patrol clouds against a 77 ms/frame
+# wall budget, so one stage was the whole latency overrun. These tests pin the
+# CONTRACT (one point per occupied voxel, member centroid, lexicographic row
+# order, float32 out) so the int64-key rewrite is provably behaviour-preserving
+# rather than merely faster.
+
+def _voxel_reference(pts, leaf):
+    """The pre-rewrite implementation, kept here as the oracle."""
+    if pts.shape[0] == 0:
+        return pts
+    keys = np.floor(pts / leaf).astype(np.int32)
+    unique_keys, inv = np.unique(keys, axis=0, return_inverse=True)
+    centroids = np.zeros((len(unique_keys), 3), dtype=np.float32)
+    counts = np.bincount(inv.ravel(), minlength=len(unique_keys)).reshape(-1, 1)
+    np.add.at(centroids, inv.ravel(), pts)
+    centroids /= counts
+    return centroids
+
+
+def test_voxel_downsample_collapses_one_voxel_to_its_centroid():
+    # Three points inside the single voxel [0.00,0.02) on every axis.
+    pts = np.array([[0.000, 0.000, 0.000],
+                    [0.010, 0.010, 0.010],
+                    [0.002, 0.004, 0.006]], dtype=np.float32)
+    out = voxel_downsample(pts, leaf=0.02)
+    assert out.shape == (1, 3)
+    np.testing.assert_allclose(out[0], pts.mean(axis=0), atol=1e-6)
+
+
+def test_voxel_downsample_separates_adjacent_voxels():
+    pts = np.array([[0.01, 0.0, 0.0],
+                    [0.03, 0.0, 0.0]], dtype=np.float32)
+    out = voxel_downsample(pts, leaf=0.02)
+    assert out.shape[0] == 2
+
+
+def test_voxel_downsample_handles_negative_coordinates():
+    # floor() must be used, not truncation: -0.01 belongs to voxel -1, not 0,
+    # and the odom frame the map lives in has points on both sides of origin.
+    pts = np.array([[-0.01, 0.0, 0.0],
+                    [0.01, 0.0, 0.0]], dtype=np.float32)
+    out = voxel_downsample(pts, leaf=0.02)
+    assert out.shape[0] == 2, out
+
+
+def test_voxel_downsample_matches_reference_on_random_cloud():
+    """The safety net for the rewrite: identical output, not just similar.
+
+    Random floats over a metre-scale box at the production 0.02 m leaf, which
+    produces both singleton and heavily-populated voxels.
+    """
+    rng = np.random.default_rng(20260727)
+    pts = (rng.random((20000, 3), dtype=np.float32) * 4.0 - 2.0)
+    got = voxel_downsample(pts, leaf=0.02)
+    want = _voxel_reference(pts, leaf=0.02)
+    assert got.shape == want.shape
+    # Row order must match too — not just the set of centroids. The detector
+    # picks the LARGEST cluster downstream, so a reordering would be silent
+    # here and only show up as a flaky detection.
+    np.testing.assert_allclose(got, want, rtol=0, atol=2e-6)
+
+
+def test_voxel_downsample_matches_reference_when_clustered_and_duplicated():
+    # Exact duplicates and tight clusters are the realistic case: a depth
+    # camera quantises to pixel rays, so many points share a voxel exactly.
+    rng = np.random.default_rng(7)
+    seeds = rng.random((300, 3), dtype=np.float32) * 2.0
+    pts = np.repeat(seeds, 7, axis=0)
+    pts[::3] += np.float32(0.001)
+    got = voxel_downsample(pts, leaf=0.02)
+    want = _voxel_reference(pts, leaf=0.02)
+    np.testing.assert_allclose(got, want, rtol=0, atol=2e-6)
+
+
+def test_voxel_downsample_returns_float32_and_is_never_larger():
+    rng = np.random.default_rng(11)
+    pts = (rng.random((5000, 3), dtype=np.float32) * 0.5)
+    out = voxel_downsample(pts, leaf=0.02)
+    assert out.dtype == np.float32
+    assert out.shape[0] <= pts.shape[0]
+
+
+def test_voxel_downsample_far_coordinates_still_correct():
+    """Beyond the packable key window the result must stay right, not wrap.
+
+    Key packing is only valid inside +-2^20 voxels (+-21 km at 0.02 m). The ROI
+    caps camera-frame points at 5 m so production never approaches this, but a
+    silent integer wrap would merge two distant voxels into one bogus centroid,
+    and that is exactly the class of bug that is invisible until it matters.
+    """
+    far = 1.0e6
+    pts = np.array([[far, 0.0, 0.0],
+                    [far + 0.005, 0.0, 0.0],
+                    [-far, 0.0, 0.0]], dtype=np.float64)
+    out = voxel_downsample(pts, leaf=0.02)
+    # Two distinct locations survive; the near-duplicate pair merges.
+    assert out.shape[0] == 2, out
+    xs = np.sort(out[:, 0])
+    assert xs[0] < 0 < xs[1], out
+
+
+def test_voxel_downsample_empty_input():
+    empty = np.zeros((0, 3), dtype=np.float32)
+    assert voxel_downsample(empty, leaf=0.02).shape[0] == 0
