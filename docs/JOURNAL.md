@@ -1125,3 +1125,96 @@ the 5 m range gate, so B01's `first_det_range_m` is not comparable to the others
 - off-target **2/17** and **2/19**; aim error 0.46-0.99 m
 - latency **94-107 ms mean**, max 256-267 ms, against a 150 ms mean budget
 - `tca` 0.192-0.205 s mean, and that is the number to move
+
+---
+
+## 2026-07-27 (night, cont.) — The dodge time budget closes, and consistency is the binding term
+
+`track_age_s` and the reseed counters turned the dodge-authority question from
+inference into arithmetic. **The budget now reconciles to within 0.02 s**, and the
+term that is actually binding is not the one anyone would have guessed.
+
+### The reseed hypothesis: refuted
+
+The previous entry proposed that the detector's ~1/s false-positive stream was
+reseeding the ball's track through the Mahalanobis reject path, keeping the
+velocity estimate at zero. **It is not.** Measured over a full battery:
+
+    track at commit: 3.0 updates (range 3-3), age 0.138 s (0.132-0.198)
+                     => 14.5 Hz of accepted ball detections
+
+The ball's own detections arrive at essentially the **full camera rate**, and the
+track age at commit is exactly the time to accumulate 3 updates (2 gaps at
+~14.5 Hz). The track that fires is healthy and was not restarted.
+
+The reseeds are real and numerous — **209 in one battery (reject 60, timeout 149)**
+— but they are lone false-positive centroids creating a track that expires 0.5 s
+later *between* throws. **I had reported this badly** ("11/11 dodges followed a
+restarted track"), which is true only in the sense that a lifetime counter was
+non-zero, and it invited exactly the wrong conclusion. The report now leads with
+track AGE and demotes the lifetime totals to a footnote telling the reader to
+ignore them. Age against the ball's visibility is the measurement that separates a
+restarted track from sparse detection; the totals cannot.
+
+### The budget
+
+| term | measured |
+|---|---|
+| warning available (3.64 m / 8 m/s) | 0.455 s |
+| - track confirmation (3 updates @ 14.5 Hz) | 0.138 s |
+| - pipeline latency | 0.082 s |
+| **= predicted tca** | **0.235 s** |
+| measured tca | **0.257 s** |
+
+### Lever 4: `cluster_min_points` 5 -> 3 — improved the target term, still no tca
+
+Detection range being the dominant term, and the ROI gate having been cleared,
+the ball's detectability at range was the lever: an 80 mm sphere projects few
+points at distance. Lowering the floor was justified by two things measured
+tonight — false positives cause **no** false dodges (`threat_radius` rejects every
+spurious plan, all >= 1.79 m wide) and, per above, do **not** poison the ball's
+track. So the Week-3 reason for raising 3->5 no longer implies the same cost.
+
+| | min_pts 5 | min_pts 3 |
+|---|---|---|
+| first detection | 3.64 m | **4.52 m (+24%)** |
+| `tca` mean | 0.257 s | **0.218 s** |
+| on-target dodge | 11/17 (65%) | 11/14 (79%) |
+| false dodges | 0/2 | 0/2 |
+
+**It moved first detection by 24% and bought no tca.** Reverted: shipping a change
+whose only *measured* effect is more false positives is not justified by a dodge
+rate that moved inside its own noise (n=14-17).
+
+### Why range levers keep failing, and what the term really is
+
+The clue is that track age at commit is **exactly 0.132 s on every dodge**
+(0.132-0.132, perfectly uniform) — always precisely 3 consecutive frames. Working
+backwards: the ball sits ~`tca * speed` = 1.74 m away at commit, and the track
+began `speed * age` = 1.06 m earlier, so it started at **~2.8 m**. First detection
+was at **4.52 m**.
+
+**~1.7 m of range is detected and then discarded**, because those early detections
+never become three *consecutive* frames: a lone centroid times out
+(`track_timeout_s` 0.5 s) before the run completes. That is why widening
+`roi_max_range_m` and lowering `cluster_min_points` both improved first detection
+and neither improved `tca` — both bought RANGE, and the binding term is
+**consistency**. The battery now derives and prints this gap directly.
+
+**So the next work is detection consistency at range, not range.** Candidates, in
+the order their cost is understood: the per-frame survivor counts on a single
+throw with `debug_funnel` (does the ball fail `cluster_min_points`, the extent
+gate, or the score gate on the frames it is missed on?); then whether the
+persistent background map is absorbing a distant slow-parallax ball into
+background; then `min_publish_score`. Do not touch `min_track_updates` or
+`dodge_speed_mps` — both measured, both inside the noise.
+
+### Where Week 4 stands
+
+Best figures on a settled stack with the aim fixed:
+
+- on-target dodge success **11/15 (73%)** and **11/14 (79%)**
+- off-target **0/19** on the best run; aim error 0.36-0.46 m
+- latency **75-82 ms mean**, max 136-182 ms, against a 150 ms budget
+- `tca` 0.218-0.257 s — the number still to move
+- B01 measurable again (`offset_forward_m: 4.0`), so all seven scenarios now throw

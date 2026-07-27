@@ -1253,6 +1253,35 @@ class DodgeBatteryNode(Node):
                              f"({min(ages):.3f}-{max(ages):.3f}) "
                              f"=> {rate:.1f} Hz of accepted ball detections")
                 lines.append(line)
+            # Detection CONSISTENCY: the range thrown away between the ball's
+            # first detection and the start of the track that actually matured.
+            #
+            # This is the term that matters, and it is why two range levers both
+            # failed. The ball is ~tca*speed away at commit, and the track began
+            # track_age_s earlier, so its start range is tca*speed +
+            # speed*track_age. Anything between that and first_det_range_m is
+            # detections that happened but never became three consecutive frames
+            # — a lone centroid times out (track_timeout_s 0.5 s) before the run
+            # completes. Measured 2026-07-27: first detection at 4.52 m but
+            # tracks starting at ~2.8 m, i.e. ~1.7 m discarded. Widening
+            # roi_max_range_m (5->8) and lowering cluster_min_points (5->3) both
+            # improved first detection and neither improved tca, because both
+            # bought RANGE and the binding term is consistency.
+            gaps = []
+            for r in sub:
+                det = r.get("first_det_range_m")
+                tca = r.get("tca_s")
+                age = r.get("track_age_s")
+                spd = r.get("ball_speed_mps")
+                if None in (det, tca, age, spd):
+                    continue
+                gaps.append(det - (tca * spd + spd * age))
+            if gaps:
+                lines.append(
+                    f"    detection consistency gap: mean {np.mean(gaps):+.2f} m "
+                    f"({np.min(gaps):+.2f} to {np.max(gaps):+.2f}) between first "
+                    f"detection and the track that matured — range seen but not "
+                    f"converted into 3 consecutive frames")
             rss = [r["track_reseeds"] for r in sub
                    if r.get("track_reseeds") is not None]
             if rss:
