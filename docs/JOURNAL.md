@@ -1020,3 +1020,108 @@ Hover control alongside it: **0/6**, `tca` mean 0.205 s (0.040-0.410), first
 detection 3.67 m, latency 144 ms mean / 315 ms max. Consistent with the earlier
 hover figure — with the aim exact, the manoeuvre simply does not clear 0.30 m in
 ~0.2 s at 1.5 m/s.
+
+---
+
+## 2026-07-27 (late) — Dodge authority root-caused to KF velocity convergence
+
+Three levers tried, all refuted, and the fourth measurement explained why all
+three had to fail. **`tca` at dodge commit is gated by how fast the Kalman filter
+learns the ball's velocity**, not by anything in the detector or the manoeuvre.
+
+### The measurement
+
+`/threat/intercept` publishes the policy's own decision variable on every
+confirmed update. Logged against the ball's true range, on inbound balls inside
+the range gate:
+
+| track | predicted miss over updates | ball's true range |
+|---|---|---|
+| 2 | 3.90 → 3.26 → 2.36 → 2.14 → **1.12** | 3.88 → 3.40 → 2.84 → 2.49 → 2.21 |
+| 1 | 1.75 → 1.46 → **1.23** | 2.18 → 1.66 → 1.30 |
+| 4 | 5.11 → **4.97** | 5.04 → 4.98 |
+| 5 | 1.98 → **1.54** | 2.76 → 1.94 |
+
+**The predicted miss starts equal to the ball's current range.** For a ball on a
+true collision course the intercept point should sit essentially on the drone and
+the miss should be near zero, so this is diagnostic, not noise.
+
+### Why, from the code
+
+`predict_closest_approach` works on *relative* state, and
+`v_rel = v_proj - v_drone`. The tracker initialises velocity to **zeros**
+(`kalman.py:107`, with variance `init_vel_std**2`), so while `v_proj` is still
+small, `v_rel ≈ -v_drone` — the ball appears to **recede**, the minimum of the
+relative distance lands at `t ≈ 0`, and therefore `tca ≈ 0` and
+`miss ≈ |p_rel| =` the current range. `should_dodge` requires
+`miss < threat_radius_m` (0.75 m), so the trigger simply cannot commit until the
+velocity estimate matures. The miss then falls *faster* than the range (3.90 →
+1.12 while range only goes 3.88 → 2.21), which is the estimate converging.
+
+This holds in hover too — with `v_drone = 0` a small `v_proj` still puts closest
+approach at "now" — which is why the hover control measured the same `tca` (0.205 s)
+as patrol and looked so puzzling.
+
+**One causal chain therefore explains all three nulls:** detecting earlier
+(`roi_max_range_m`) and confirming sooner (`min_track_updates`) both hand the
+filter more *time*, but the filter still spends its first updates climbing out of
+a zero-velocity prior, so the commit lands at the same place. And a bigger
+`dodge_speed_mps` cannot help a manoeuvre that starts too late.
+
+### Lever 3, also refuted: the manoeuvre is not sluggish
+
+Measured the drone's true displacement from an evade event, capturing poses
+online (the first attempt used a `maxlen` deque that wrapped and returned all-NaN):
+
+| | measured | commanded |
+|---|---|---|
+| displacement by `tca` | **0.491 m** | 0.307 m (1.5 x 0.205) = **160%** |
+| at 0.50 s | 1.067 m | 0.75 m |
+| at 1.00 s | 1.690 m | 1.5 m |
+| cleared 0.30 m within `tca` | **10/14** | |
+
+The drone moves *more* than commanded, so a slow-ramp/authority explanation is
+dead. **Caveat, stated because it matters:** the dodge fires while the drone is
+patrolling at ~5.26 m/s, so part of this displacement is pre-existing cruise
+momentum rather than dodge response, and only the component **perpendicular to the
+ball's path** raises `min_dist`. The clean version needs the counterfactual — where
+the drone would have been had it kept cruising. What the number does establish is
+that gross motion is not the shortfall.
+
+### Hypothesis, NOT yet measured
+
+The remaining puzzle is why the velocity estimate is still immature at the third
+update, when an `init_vel_std` of 15 m/s (variance 225) should let the *second*
+measurement pin velocity to roughly `(z2-z1)/dt`. The most likely explanation is
+that the ball's track is being **reseeded**: `process()` counts Mahalanobis
+rejects and, at `_max_rejects`, calls `reset()` and re-initialises from the
+outlier — putting velocity back to zero. With the detector emitting ~1
+false-positive centroid per second interleaved with the ball's, a track can be
+repeatedly reseeded and never accumulate a mature velocity.
+
+If that is true it **reframes the false-positive stream**: harmless for false
+dodges (`threat_radius` rejects every spurious plan, all measured >= 1.79 m wide)
+but the direct cause of the dodge-authority failure. That would also make detector
+precision the highest-value work in Week 4, not a nice-to-have.
+
+**The test:** log `n_updates` and the reject/reseed count alongside each published
+intercept, and check whether ball tracks reseed mid-flight. Do this before touching
+`init_vel_std`, `dodge_speed_mps`, or any detector threshold — a tuning change
+that happens to help would hide the mechanism.
+
+### B01 is measurable again
+
+`offset_forward_m: 4.0` for B01 only. At 4 m/s the 6.0 m default flies 1.50 s and
+the window gate then needs 1.80 s of straight leg; the 12 m loop's best is 2.18 s
+and rarely coincides with the 95%-cruise floor, so B01 skipped on **every** attempt
+from v12 to v24. It now throws (v25: 1 of 3 thrown and dodged, `min_dist` 0.207 m).
+Shortening the flight rather than lowering `throw_window_margin_s`, which is part
+of the gate that fixed the aiming. Caveat in the config: 4 m starts the ball inside
+the 5 m range gate, so B01's `first_det_range_m` is not comparable to the others.
+
+### Where the battery stands (v24/v25, aim fixed, settled stack)
+
+- on-target dodge success **10/13 (77%)** and **10/16 (62%)**
+- off-target **2/17** and **2/19**; aim error 0.46-0.99 m
+- latency **94-107 ms mean**, max 256-267 ms, against a 150 ms mean budget
+- `tca` 0.192-0.205 s mean, and that is the number to move
