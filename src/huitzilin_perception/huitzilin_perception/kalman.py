@@ -163,11 +163,7 @@ class ProjectileTracker:
             return False  # out-of-order / duplicate stamp
 
         x_pred, P_pred = self._predict(dt)
-
-        # Mahalanobis gate on the innovation
-        nu = z - self._H @ x_pred
-        S = self._H @ P_pred @ self._H.T + self._R
-        d2 = float(nu @ np.linalg.solve(S, nu))
+        nu, S, d2 = self._innovation(x_pred, P_pred, z)
         if d2 > self._gate:
             self._rejects += 1
             if self._rejects >= self._max_rejects:
@@ -179,13 +175,84 @@ class ProjectileTracker:
             self._x, self._P, self._t = x_pred, P_pred, t
             return False
 
+        self._apply(x_pred, P_pred, S, nu, t)
+        return True
+
+    # ── association primitives (used by MultiHypothesisTracker) ──────────
+
+    def association_cost(self, t: float, z, *, cov_cap: float) -> float:
+        """How well this track explains z, as a negative log-likelihood.
+        +inf means "not mine" — out of order, or outside the gate.
+
+        Two deliberate choices, both of which exist because the single-target
+        filter's failure mode is a track claiming a measurement that is not
+        its own:
+
+        * The GATE is evaluated against a covariance whose scale is capped at
+          cov_cap. An uninformed track (init_vel_std 15 m/s) honestly believes
+          its object could be metres away after a few frames, and a gate that
+          wide accepts anything in the room — which is exactly how a false
+          positive swallowed the ball. cov_cap makes the gate a physical
+          association window instead of a purely statistical one.
+        * The COST includes log|S|, so it ranks by likelihood rather than by
+          Mahalanobis distance. Raw distance rewards a bloated covariance: a
+          track that has coasted without evidence would out-bid the mature
+          track that actually owns the measurement.
+        """
+        if self._x is None:
+            return float("inf")
+        dt = t - self._t
+        if dt <= 0.0:
+            return float("inf")
+        x_pred, P_pred = self._predict(dt)
+        nu, S, d2 = self._innovation(x_pred, P_pred, z)
+
+        scale = float(np.max(np.diag(S)))
+        if scale > cov_cap:
+            # Shrink S isotropically rather than clipping the diagonal: that
+            # bounds the gate volume while preserving the innovation's shape,
+            # so an elongated uncertainty stays elongated.
+            d2_gate = d2 * scale / cov_cap
+        else:
+            d2_gate = d2
+        if d2_gate > self._gate:
+            return float("inf")
+
+        _, logdet = np.linalg.slogdet(S)
+        return 0.5 * (d2 + float(logdet))
+
+    def associate(self, t: float, z) -> bool:
+        """Fold in a measurement already chosen for this track by the
+        associator. No gate: association_cost() applied it."""
+        z = np.asarray(z, dtype=np.float64).reshape(3)
+        if self._x is None:
+            return self.process(t, z)
+        dt = t - self._t
+        if dt <= 0.0:
+            return False
+        x_pred, P_pred = self._predict(dt)
+        nu, S, _ = self._innovation(x_pred, P_pred, z)
+        self._apply(x_pred, P_pred, S, nu, t)
+        return True
+
+    def is_stale(self, t: float) -> bool:
+        return self._x is not None and (t - self._t) > self._timeout
+
+    # ── filter internals ─────────────────────────────────────────────────
+
+    def _innovation(self, x_pred, P_pred, z):
+        nu = z - self._H @ x_pred
+        S = self._H @ P_pred @ self._H.T + self._R
+        d2 = float(nu @ np.linalg.solve(S, nu))
+        return nu, S, d2
+
+    def _apply(self, x_pred, P_pred, S, nu, t: float) -> None:
         K = P_pred @ self._H.T @ np.linalg.inv(S)
         self._x = x_pred + K @ nu
         self._P = (np.eye(6) - K @ self._H) @ P_pred
         self._t = t
         self._n_updates += 1
         self._rejects = 0
-        return True
 
     def _predict(self, dt: float) -> tuple[np.ndarray, np.ndarray]:
         F = np.eye(6)
@@ -197,6 +264,115 @@ class ProjectileTracker:
             [np.eye(3) * (dt ** 3 / 2.0 * q2), np.eye(3) * (dt * dt * q2)],
         ])
         return F @ self._x + u, F @ self._P @ F.T + Q
+
+
+class MultiHypothesisTracker:
+    """A small set of candidate ProjectileTracker hypotheses.
+
+    Why this exists (measured 2026-07-27, docs/JOURNAL.md): a single filter fed
+    every centroid is forced to represent whatever arrived last. The detector
+    emits ~1.4 false positives per second, so a stale FP track is usually alive
+    when a ball arrives — and after ONE rejection its covariance has inflated
+    enough to swallow the ball as a valid update, fitting a ~38 m/s velocity
+    along the line from the false positive to the ball. Three more true
+    detections are then spent contradicting that fiction before the track
+    reseeds. Cost: 4 frames, 0.267 s, against a measured tca of 0.18-0.26 s at
+    the moment a dodge commits. That is the whole of the missing warning; see
+    test_the_incumbent_costs_four_frames_of_warning.
+
+    Here every centroid goes to the hypothesis that explains it best, and
+    anything unexplained starts its own. The ball's opening detections
+    accumulate on their own track instead of correcting someone else's.
+
+    The trigger must act on a CONFIRMED track (confirmed()); an unconfirmed one
+    still has a near-zero velocity estimate, which reads an inbound ball as
+    receding.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_tracks: int = 6,
+        max_assoc_sigma_m: float = 0.75,
+        track_timeout_s: float = 0.5,
+        **filter_kwargs,
+    ) -> None:
+        self._max_tracks = int(max_tracks)
+        # Widest position uncertainty any hypothesis may claim when bidding for
+        # a measurement — see ProjectileTracker.association_cost. Scaled to the
+        # ball's per-frame travel: 0.75 m covers 11 m/s at the 15 Hz detector
+        # rate with the chi2 gate's margin on top, and is well under the
+        # distance at which a false positive and a ball are distinct objects.
+        self._cov_cap = float(max_assoc_sigma_m) ** 2
+        self._timeout = float(track_timeout_s)
+        self._kw = dict(filter_kwargs, track_timeout_s=track_timeout_s)
+        self._tracks: list[ProjectileTracker] = []
+        self._n_spawned = 0
+        self._n_pruned = 0
+
+    # ── introspection ────────────────────────────────────────────────────
+
+    @property
+    def tracks(self) -> list[ProjectileTracker]:
+        return list(self._tracks)
+
+    @property
+    def n_tracks(self) -> int:
+        return len(self._tracks)
+
+    @property
+    def n_spawned(self) -> int:
+        """Lifetime hypotheses started — a direct read on the detector's
+        false-positive rate."""
+        return self._n_spawned
+
+    @property
+    def n_pruned(self) -> int:
+        """Lifetime hypotheses dropped for going quiet past track_timeout_s."""
+        return self._n_pruned
+
+    def confirmed(self, *, min_updates: int) -> list[ProjectileTracker]:
+        return [tr for tr in self._tracks if tr.n_updates >= int(min_updates)]
+
+    def reset(self) -> None:
+        self._tracks.clear()
+
+    # ── association ──────────────────────────────────────────────────────
+
+    def process(self, t: float, z) -> bool:
+        """Route one measurement. Always True: a centroid that no hypothesis
+        claims is not an outlier to be argued with, it is a new object."""
+        z = np.asarray(z, dtype=np.float64).reshape(3)
+        self._prune(t)
+
+        best, best_cost = None, float("inf")
+        for tr in self._tracks:
+            cost = tr.association_cost(t, z, cov_cap=self._cov_cap)
+            if cost < best_cost:
+                best, best_cost = tr, cost
+        if best is not None:
+            return best.associate(t, z)
+
+        self._spawn(t, z)
+        return True
+
+    def _prune(self, t: float) -> None:
+        keep = [tr for tr in self._tracks if not tr.is_stale(t)]
+        self._n_pruned += len(self._tracks) - len(keep)
+        self._tracks = keep
+
+    def _spawn(self, t: float, z) -> None:
+        tr = ProjectileTracker(**self._kw)
+        tr.process(t, z)
+        self._tracks.append(tr)
+        self._n_spawned += 1
+        while len(self._tracks) > self._max_tracks:
+            # Evict least-evidenced first, oldest breaking the tie. A burst of
+            # false positives must never push out the mature track that is
+            # about to fire a dodge.
+            weakest = min(self._tracks,
+                          key=lambda x: (x.n_updates, x.last_update_t))
+            self._tracks.remove(weakest)
 
 
 # ── Dodge planning ────────────────────────────────────────────────────────

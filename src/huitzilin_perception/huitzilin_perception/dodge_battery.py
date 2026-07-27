@@ -801,18 +801,17 @@ class DodgeBatteryNode(Node):
         tca_s = round(events[0]["tca_s"], 3) if dodged else None
         trigger_miss_m = (round(events[0]["miss_m"], 3)
                           if dodged and "miss_m" in events[0] else None)
-        # Track maturity at commit. A reseed zeroes the KF velocity, which makes
-        # an inbound ball read as receding, so a run that dodged late with
-        # reseeds > 0 failed for a different reason than one that dodged late
-        # with a clean track. .get() because an older evasion node does not
-        # publish these and a missing key must not crash the run.
+        # Maturity of the hypothesis that fired, and how many were live beside
+        # it. Since the multi-hypothesis tracker landed, a ball no longer has to
+        # wrest one shared filter away from a false positive, so track_age at
+        # commit is the direct read on how much warning the trigger got.
+        # .get() because an older evasion node does not publish these and a
+        # missing key must not crash the run.
         track_updates = events[0].get("track_updates") if dodged else None
         track_age_s = (None if not dodged else
                        (None if events[0].get("track_age_s") is None
                         else round(events[0]["track_age_s"], 3)))
-        track_reseeds = (None if not dodged else
-                         events[0].get("reseeds_reject", 0)
-                         + events[0].get("reseeds_timeout", 0))
+        n_hypotheses = events[0].get("n_hypotheses") if dodged else None
         if min_dist == float("inf"):
             return {**base, "error": True, "success": False, "dodged": dodged,
                     "note": f"ball '{name}' never seen on /gz/dynamic_poses "
@@ -873,7 +872,7 @@ class DodgeBatteryNode(Node):
                 "first_det_range_m": first_det,
                 "track_updates": track_updates,
                 "track_age_s": track_age_s,
-                "track_reseeds": track_reseeds,
+                "n_hypotheses": n_hypotheses,
                 "ball_speed_mps": ball_speed,
                 "t_flight_assumed_s": round(t_flight, 3),
                 "flight_to_ca_s": flight_ca,
@@ -1232,13 +1231,14 @@ class DodgeBatteryNode(Node):
                     f"(roi_max_range_m bounds this; if the mean sits well "
                     f"inside the gate, the gate is not the limit)")
             # Track maturity at commit — the discriminator for WHY tca is small.
-            # AGE, not the reseed totals: those are lifetime counts dominated by
-            # the false-positive stream reseeding between throws (measured 209 in
-            # one battery), so "reseeds > 0" is nearly always true and says almost
-            # nothing about the ball's own track. Age against the ball's
-            # visibility does: an age far shorter than the ball has been visible
-            # means the track restarted mid-flight, while a full-length age with
-            # few updates means the detector is reporting the ball sparsely.
+            # Read AGE against how long the ball has been visible: an age far
+            # shorter than that means the firing track started late, while a
+            # full-length age with few updates means the detector is reporting
+            # the ball sparsely. Under the single-target filter this was pinned
+            # at exactly 0.132 s / 3 updates on every throw, because the track
+            # that fired was always the one reseeded after a false positive had
+            # spent the ball's first detections; the multi-hypothesis tracker is
+            # meant to move it, and this is the number that says whether it did.
             tus = [r["track_updates"] for r in sub
                    if r.get("track_updates") is not None]
             ages = [r["track_age_s"] for r in sub
@@ -1256,17 +1256,20 @@ class DodgeBatteryNode(Node):
             # Detection CONSISTENCY: the range thrown away between the ball's
             # first detection and the start of the track that actually matured.
             #
-            # This is the term that matters, and it is why two range levers both
-            # failed. The ball is ~tca*speed away at commit, and the track began
+            # The ball is ~tca*speed away at commit, and the track began
             # track_age_s earlier, so its start range is tca*speed +
             # speed*track_age. Anything between that and first_det_range_m is
-            # detections that happened but never became three consecutive frames
-            # — a lone centroid times out (track_timeout_s 0.5 s) before the run
-            # completes. Measured 2026-07-27: first detection at 4.52 m but
-            # tracks starting at ~2.8 m, i.e. ~1.7 m discarded. Widening
-            # roi_max_range_m (5->8) and lowering cluster_min_points (5->3) both
-            # improved first detection and neither improved tca, because both
-            # bought RANGE and the binding term is consistency.
+            # detection that happened but did not become a maturing track.
+            #
+            # A large gap once looked like a DETECTOR consistency problem, and
+            # the label stuck; it was not. A per-frame trace on 2026-07-27
+            # showed the detector publishing the true ball on 5-6 consecutive
+            # frames from ~4.7 m inwards, so nothing was being dropped — the
+            # frames were being spent inside the single-target filter, arguing
+            # with a false positive. Read this now as a check that the gap has
+            # closed, not as evidence about the detector. It also explains why
+            # roi_max_range_m (5->8) and cluster_min_points (5->3) each bought
+            # first-detection range and zero tca: range was never the limit.
             gaps = []
             for r in sub:
                 det = r.get("first_det_range_m")
@@ -1280,15 +1283,15 @@ class DodgeBatteryNode(Node):
                 lines.append(
                     f"    detection consistency gap: mean {np.mean(gaps):+.2f} m "
                     f"({np.min(gaps):+.2f} to {np.max(gaps):+.2f}) between first "
-                    f"detection and the track that matured — range seen but not "
-                    f"converted into 3 consecutive frames")
-            rss = [r["track_reseeds"] for r in sub
-                   if r.get("track_reseeds") is not None]
-            if rss:
+                    f"detection and the track that matured — should sit near "
+                    f"zero now that the ball keeps its own hypothesis")
+            hyp = [r["n_hypotheses"] for r in sub
+                   if r.get("n_hypotheses") is not None]
+            if hyp:
                 lines.append(
-                    f"      lifetime reseeds at commit: {np.mean(rss):.0f} mean "
-                    f"(mostly false-positive tracks expiring between throws — "
-                    f"read the age above, not this)")
+                    f"      live hypotheses at commit: {np.mean(hyp):.1f} mean "
+                    f"(max {max(hyp)}) — anything at max_tracks means the "
+                    f"false-positive stream is saturating the associator")
             tcas = [r["tca_s"] for r in sub if r.get("tca_s") is not None]
             if tcas:
                 reach = np.array(tcas) * 1.5   # nominal dodge_speed_mps
@@ -1344,7 +1347,7 @@ class DodgeBatteryNode(Node):
                     "ball_speed_mps", "t_flight_assumed_s",
                     "flight_to_ca_s", "tca_s", "trigger_miss_m",
                     "first_det_range_m", "track_updates", "track_age_s",
-                    "track_reseeds"])
+                    "n_hypotheses"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})

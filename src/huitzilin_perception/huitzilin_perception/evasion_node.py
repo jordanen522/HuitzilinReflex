@@ -50,7 +50,7 @@ from huitzilin_perception.cloud_geometry import (
 )
 from huitzilin_perception.kalman import (
     GRAVITY_ENU,
-    ProjectileTracker,
+    MultiHypothesisTracker,
     plan_dodge,
     should_dodge,
 )
@@ -77,7 +77,7 @@ FIXED_AT_START = {
     "centroid_topic", "odom_topic", "evade_topic", "alarm_topic",
     "intercept_topic", "event_topic", "marker_topic", "patrol_service",
     "process_accel_std", "meas_std_m", "init_vel_std", "track_timeout_s",
-    "evade_cmd_rate_hz",
+    "max_tracks", "max_assoc_sigma_m", "evade_cmd_rate_hz",
 }
 
 
@@ -107,6 +107,8 @@ class EvasionNode(Node):
         self.declare_parameter("meas_std_m", 0.15)
         self.declare_parameter("init_vel_std", 15.0)
         self.declare_parameter("track_timeout_s", 0.5)
+        self.declare_parameter("max_tracks", 6)
+        self.declare_parameter("max_assoc_sigma_m", 0.75)
         self.declare_parameter("min_track_updates", 3)
         self.declare_parameter("threat_radius_m", 0.75)
         self.declare_parameter("trigger_horizon_s", 1.5)
@@ -126,7 +128,8 @@ class EvasionNode(Node):
                 "centroid_topic", "odom_topic", "evade_topic", "alarm_topic",
                 "intercept_topic", "event_topic", "marker_topic",
                 "patrol_service", "process_accel_std", "meas_std_m",
-                "init_vel_std", "track_timeout_s", "min_track_updates",
+                "init_vel_std", "track_timeout_s", "max_tracks",
+                "max_assoc_sigma_m", "min_track_updates",
                 "threat_radius_m", "trigger_horizon_s", "prediction_horizon_s",
                 "latency_budget_s", "dodge_speed_mps", "dodge_duration_s",
                 "dodge_floor_m",
@@ -137,7 +140,9 @@ class EvasionNode(Node):
         self.add_on_set_parameters_callback(self._on_param_set)
 
         # ── Tracker + state machine ──────────────────────────────────────
-        self._tracker = ProjectileTracker(
+        self._tracker = MultiHypothesisTracker(
+            max_tracks=int(self._p["max_tracks"]),
+            max_assoc_sigma_m=float(self._p["max_assoc_sigma_m"]),
             process_accel_std=self._p["process_accel_std"],
             meas_std_m=self._p["meas_std_m"],
             init_vel_std=self._p["init_vel_std"],
@@ -149,8 +154,6 @@ class EvasionNode(Node):
         self._last_odom = None
         self._warned_no_odom = False
         self._warned_bad_quat = False
-        # Last observed (reject, timeout) reseed totals — see _centroid_cb.
-        self._last_reseeds = (0, 0)
 
         # ── ROS interfaces ───────────────────────────────────────────────
         self.create_subscription(PointStamped, self._p["centroid_topic"],
@@ -228,64 +231,57 @@ class EvasionNode(Node):
         z_bl = np.array([msg.point.x, msg.point.y, msg.point.z])
         z_odom = apply_transform(T_odom_bl, z_bl[None, :])[0].astype(np.float64)
 
-        accepted = self._tracker.process(
-            self._stamp_to_sec(msg.header.stamp), z_odom)
+        self._tracker.process(self._stamp_to_sec(msg.header.stamp), z_odom)
 
-        # Checked immediately AFTER process(), not before, or a reseed is only
-        # noticed on the following centroid. A reseed zeroes the velocity state,
-        # and predict_closest_approach works on v_rel = v_proj - v_drone, so a
-        # zero v_proj makes an inbound ball read as RECEDING: the relative
-        # minimum lands at t~0, giving tca~0 and a predicted miss equal to the
-        # current range, which should_dodge scores as harmless. If ball tracks
-        # reseed mid-flight then that — not the detector's range and not the
-        # manoeuvre's speed, both of which were measured and cleared on
-        # 2026-07-27 — is what delays every dodge.
-        reseeds = (self._tracker.n_reseeds_reject,
-                   self._tracker.n_reseeds_timeout)
-        if reseeds != self._last_reseeds:
-            kind = ("rejects" if reseeds[0] != self._last_reseeds[0]
-                    else "timeout")
-            self.get_logger().warn(
-                f"track RESEEDED ({kind}) — velocity estimate back to zero; "
-                f"totals reject={reseeds[0]} timeout={reseeds[1]}")
-            self._last_reseeds = reseeds
-
-        if not accepted:
-            return
-        if self._tracker.n_updates < int(self._p["min_track_updates"]):
+        min_updates = int(self._p["min_track_updates"])
+        confirmed = self._tracker.confirmed(min_updates=min_updates)
+        if not confirmed:
             return
 
-        pos_proj, vel_proj = self._tracker.state()
         p_drone = np.array([p.x, p.y, p.z])
         tw = odom.twist.twist.linear
         v_drone = np.array([tw.x, tw.y, tw.z])  # world ENU (bridge converts NED)
 
-        # p.z is height above the odom origin, which the bridge places at the
-        # EKF origin = the takeoff point on the ground, so it IS altitude AGL
-        # on flat ground. On sloped terrain this over-reads and the clamp gets
-        # optimistic; that is a Week 6 field-test item, not a sim one.
-        plan = plan_dodge(
-            pos_proj, vel_proj, p_drone, v_drone,
-            horizon_s=float(self._p["prediction_horizon_s"]),
-            altitude_m=float(p.z),
-            floor_m=float(self._p["dodge_floor_m"]),
-            descent_len_m=(float(self._p["dodge_speed_mps"])
-                           * float(self._p["dodge_duration_s"])),
-        )
+        # Plan against EVERY confirmed hypothesis and act on the most
+        # threatening. With one filter the question did not arise — whatever
+        # the last centroid became was the threat — and that is precisely how a
+        # false positive got to speak for the ball (see MultiHypothesisTracker).
+        # Ranking: a track that clears the trigger policy always outranks one
+        # that does not, then soonest closest approach, then smallest miss.
+        best = None
+        for track in confirmed:
+            pos_proj, vel_proj = track.state()
+            # p.z is height above the odom origin, which the bridge places at
+            # the EKF origin = the takeoff point on the ground, so it IS
+            # altitude AGL on flat ground. On sloped terrain this over-reads
+            # and the clamp gets optimistic; a Week 6 field-test item.
+            plan = plan_dodge(
+                pos_proj, vel_proj, p_drone, v_drone,
+                horizon_s=float(self._p["prediction_horizon_s"]),
+                altitude_m=float(p.z),
+                floor_m=float(self._p["dodge_floor_m"]),
+                descent_len_m=(float(self._p["dodge_speed_mps"])
+                               * float(self._p["dodge_duration_s"])),
+            )
+            fires = should_dodge(
+                track.n_updates, plan.miss_m, plan.tca_s,
+                min_updates=min_updates,
+                threat_radius_m=float(self._p["threat_radius_m"]),
+                trigger_horizon_s=float(self._p["trigger_horizon_s"]),
+            )
+            rank = (not fires, plan.tca_s, plan.miss_m)
+            if best is None or rank < best[0]:
+                best = (rank, fires, plan, track, pos_proj, vel_proj)
+
+        _, fires, plan, track, pos_proj, vel_proj = best
         self._publish_intercept(plan, pos_proj, vel_proj, T_odom_bl,
                                 msg.header.stamp)
-
-        if should_dodge(
-            self._tracker.n_updates, plan.miss_m, plan.tca_s,
-            min_updates=int(self._p["min_track_updates"]),
-            threat_radius_m=float(self._p["threat_radius_m"]),
-            trigger_horizon_s=float(self._p["trigger_horizon_s"]),
-        ):
-            self._start_dodge(plan, q, msg.header.stamp)
+        if fires:
+            self._start_dodge(plan, track, q, msg.header.stamp)
 
     # ── Dodge lifecycle ──────────────────────────────────────────────────
 
-    def _start_dodge(self, plan, q, stamp) -> None:
+    def _start_dodge(self, plan, track, q, stamp) -> None:
         R = quat_to_rot(q.x, q.y, q.z, q.w)          # base_link -> odom
         dir_body = R.T @ plan.direction               # odom -> body FLU
         self._dodge_cmd_body = dir_body * float(self._p["dodge_speed_mps"])
@@ -296,7 +292,9 @@ class EvasionNode(Node):
         self.get_logger().warn(
             f"DODGE: miss={plan.miss_m:.2f} m tca={plan.tca_s:.2f} s "
             f"dir_body=({dir_body[0]:+.2f},{dir_body[1]:+.2f},{dir_body[2]:+.2f}) "
-            f"latency={latency * 1000:.0f} ms"
+            f"latency={latency * 1000:.0f} ms "
+            f"track={track.n_updates}u/{track.track_age_s:.3f}s "
+            f"of {self._tracker.n_tracks} live"
             + ("  ** OVER BUDGET **" if over else "")
         )
         event = String()
@@ -305,16 +303,18 @@ class EvasionNode(Node):
             "latency_s": latency,
             "tca_s": plan.tca_s,
             "miss_m": plan.miss_m,
-            # Track maturity at the moment of commit. tca is bounded by how long
-            # the filter took to believe the ball was inbound, so these say
-            # whether a late dodge was a late DETECTION or a restarted track.
-            "track_updates": self._tracker.n_updates,
-            # Age of the track that fired, not lifetime totals: if it is much
-            # shorter than the ball's visibility the track restarted mid-flight,
-            # whereas a full-length track with few updates means sparse detection.
-            "track_age_s": self._tracker.track_age_s,
-            "reseeds_reject": self._tracker.n_reseeds_reject,
-            "reseeds_timeout": self._tracker.n_reseeds_timeout,
+            # Maturity of the hypothesis that FIRED — not of the tracker, which
+            # now holds several. tca is bounded by how long this filter took to
+            # believe the ball was inbound, so these say whether a late dodge
+            # was a late detection or a late-starting track.
+            "track_updates": track.n_updates,
+            "track_age_s": track.track_age_s,
+            # Live hypotheses at commit, and the lifetime total started. The
+            # spawn count is a direct read on the detector's false-positive
+            # rate; before the multi-hypothesis tracker those false positives
+            # were reseeding the ball's own filter mid-flight.
+            "n_hypotheses": self._tracker.n_tracks,
+            "hypotheses_spawned": self._tracker.n_spawned,
             "dodge_body": [float(v) for v in self._dodge_cmd_body],
             "dodge_enu": [float(v) for v in plan.direction],
             "over_budget": over,

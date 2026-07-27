@@ -12,6 +12,22 @@ evasion:
     meas_std_m: 0.15           # centroid measurement noise (stereo + clustering)
     init_vel_std: 15.0         # m/s prior; covers throws up to 14 m/s
     track_timeout_s: 0.5       # sim s of silence before a track is dropped
+    # ── Multi-hypothesis association (fixed at node start) ───────────────
+    # The tracker keeps several candidate tracks instead of forcing one filter
+    # to represent whatever centroid arrived last. Root cause it fixes
+    # (measured 2026-07-27, docs/JOURNAL.md): the detector emits ~1.4 false
+    # positives/s, so a stale FP track was usually alive when a ball arrived
+    # and — after a single rejection — its inflated covariance SWALLOWED the
+    # ball, fitting a ~38 m/s velocity along the FP-to-ball line. Six frames to
+    # learn what takes two: 0.267 s, against a tca of 0.18-0.26 s at commit.
+    max_tracks: 6              # hypothesis budget; weakest (fewest updates) evicted
+    # Widest position uncertainty a hypothesis may claim when bidding for a
+    # centroid. This is what stops a bloated track swallowing the ball: an
+    # uninformed filter (init_vel_std 15 m/s) honestly believes its object
+    # could be metres away within a few frames, and a chi2 gate that wide
+    # accepts anything in the room. 0.75 m covers 11 m/s of ball travel at the
+    # 15 Hz detector rate, with the gate's margin on top.
+    max_assoc_sigma_m: 0.75
     # ── Trigger policy ───────────────────────────────────────────────────
     min_track_updates: 3       # confirmations before a dodge may fire
     threat_radius_m: 0.75      # predicted pass inside this radius -> dodge

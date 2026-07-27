@@ -8,6 +8,7 @@ from huitzilin_perception.ballistics import G_MPS2, ballistic_positions
 from huitzilin_perception.kalman import (
     CHI2_GATE_3DOF_99,
     GRAVITY_ENU,
+    MultiHypothesisTracker,
     ProjectileTracker,
 )
 
@@ -389,3 +390,125 @@ def test_the_incumbent_costs_four_frames_of_warning():
     assert clean == 1
     assert contaminated == 5
     assert (contaminated - clean) / RATE_HZ == pytest.approx(0.267, abs=0.01)
+
+
+# ── MultiHypothesisTracker: the fix for the above ────────────────────────────
+# One filter forced to represent whatever arrived last is the whole defect. Keep
+# a small set of candidate tracks instead, associate each centroid to the one
+# that explains it best, and start a new track for anything unexplained; the
+# ball's opening detections then accumulate on their OWN hypothesis instead of
+# being spent correcting a false positive's.
+
+
+def _mht_vel_err(track):
+    _, v = track.state()
+    return float(np.linalg.norm(v - TRUE_BALL_VEL))
+
+
+def test_mht_converges_as_fast_with_an_incumbent_as_without():
+    """The headline: the false positive no longer costs the ball any frames.
+
+    This is the same experiment as test_the_incumbent_costs_four_frames_of_
+    warning, which measures a 4-frame (0.267 s) penalty on the single-target
+    filter. Here the penalty must be zero.
+    """
+    def frames_to_converge(with_fp):
+        mht = MultiHypothesisTracker()
+        t0 = 0.0
+        if with_fp:
+            mht.process(0.0, np.array([1.0, 3.0, 2.0]))
+            t0 = 1 / RATE_HZ
+        for i, (t, z) in enumerate(_ball_stream(10, t0=t0)):
+            mht.process(t, z)
+            if any(_mht_vel_err(tr) < 0.5 for tr in mht.tracks):
+                return i
+        return None
+
+    assert frames_to_converge(True) == frames_to_converge(False) == 1
+
+
+def test_an_unexplained_centroid_starts_its_own_track():
+    """A detection no live hypothesis can explain is a new object, not an
+    outlier to be argued with."""
+    mht = MultiHypothesisTracker()
+    mht.process(0.0, np.array([1.0, 3.0, 2.0]))          # false positive
+    assert mht.n_tracks == 1
+    mht.process(1 / RATE_HZ, np.array([4.7, 0.0, 2.0]))  # ball, 4.7 m away
+    assert mht.n_tracks == 2
+    assert mht.n_spawned == 2
+
+
+def test_a_detection_the_ball_track_explains_is_not_stolen_by_a_bloated_one():
+    """Association ranks by likelihood, not raw Mahalanobis distance.
+
+    A track that has coasted without evidence has a huge covariance, so raw
+    Mahalanobis distance makes it look like a GOOD explanation for anything
+    nearby — it would quietly steal the mature ball track's own detections and
+    re-create the defect one level up. Constructed so the two rank oppositely:
+    the ball track sees a real 0.15 m noise residual against a converged
+    covariance (d2 ~ 1.7), the bloated one a 2.5 m residual against a 6 m sigma
+    (d2 ~ 0.2). Likelihood includes log|S| and prefers the confident track.
+    """
+    rng = np.random.default_rng(7)
+    mht = MultiHypothesisTracker(meas_std_m=0.15)
+    stream = _ball_stream(8)
+    for t, z in stream[:6]:
+        mht.process(t, z + rng.normal(0.0, 0.15, 3))
+    ball = mht.tracks[0]
+    assert ball.n_updates == 6
+
+    # A false positive 1.5 m off the path, left to coast for 0.3 s: bloated
+    # enough that its gate covers the ball's next frame.
+    t_fp = stream[5][0] - 0.3
+    mht.process(t_fp, np.array([2.0, 1.5, 2.0]))
+    assert mht.n_tracks == 2
+
+    t, z = stream[6]
+    mht.process(t, z + rng.normal(0.0, 0.15, 3))
+    assert ball.n_updates == 7          # the ball kept its own detection
+    assert mht.n_tracks == 2            # and no third hypothesis was invented
+
+
+def test_a_silent_track_is_pruned_after_the_timeout():
+    mht = MultiHypothesisTracker(track_timeout_s=0.5)
+    mht.process(0.0, np.array([1.0, 3.0, 2.0]))
+    assert mht.n_tracks == 1
+    mht.process(0.6, np.array([4.7, 0.0, 2.0]))   # 0.6 s of silence for the FP
+    assert mht.n_tracks == 1
+    assert mht.n_pruned == 1
+
+
+def test_confirmed_excludes_immature_tracks():
+    mht = MultiHypothesisTracker()
+    for t, z in _ball_stream(3):
+        mht.process(t, z)
+    assert mht.confirmed(min_updates=3) == mht.tracks
+    assert mht.confirmed(min_updates=4) == []
+
+
+def test_track_count_is_bounded_and_evicts_the_weakest():
+    """A false-positive storm must not push the mature ball track out."""
+    mht = MultiHypothesisTracker(max_tracks=3)
+    for t, z in _ball_stream(5):
+        mht.process(t, z)
+    ball = mht.tracks[0]
+
+    t_fp = _ball_stream(5)[-1][0]
+    for i in range(6):  # six scattered one-shot detections
+        mht.process(t_fp + 1e-3 * (i + 1),
+                    np.array([-3.0 - 2.0 * i, 4.0 + 2.0 * i, 2.0]))
+
+    assert mht.n_tracks == 3
+    assert ball in mht.tracks
+    assert ball.n_updates == 5
+
+
+def test_reset_drops_every_hypothesis():
+    mht = MultiHypothesisTracker()
+    for t, z in _ball_stream(4):
+        mht.process(t, z)
+    mht.process(0.5, np.array([0.0, 5.0, 2.0]))   # inside track_timeout_s
+    assert mht.n_tracks == 2
+    mht.reset()
+    assert mht.n_tracks == 0
+    assert mht.confirmed(min_updates=1) == []
