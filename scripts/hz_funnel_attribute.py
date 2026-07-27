@@ -79,20 +79,26 @@ def load_truth(path: str) -> tuple[dict, dict]:
     return out, recv
 
 
-def fit_gz_offset(truth: dict, recv: dict, drone_model: str):
-    """Seconds to ADD to a /gz/dynamic_poses stamp to reach ROS sim time.
+def fit_odom_clock_offset(truth: dict, recv: dict, drone_model: str):
+    """Seconds to ADD to a /huitzilin/odom stamp to reach the Gazebo sim clock.
 
-    /gz/dynamic_poses is stamped with Gazebo's own clock (seconds since world
-    start); /clock-driven ROS sim time — which stamps the odom, the cloud and
-    therefore every dumped frame — is wall-anchored. The two differ by a large
-    constant, and joining them without measuring it produces a report about the
-    wrong instant of the flight.
+    Two clocks are in play, measured live 2026-07-27:
 
-    Bracketed by arrival time, then refined by the only thing that can check it:
-    the drone appears in BOTH streams, so the correct offset is the one that
-    makes its world-frame track and its odom track differ by a pure constant.
-    The refinement minimises the spread of that difference, and the spread it
-    achieves is reported so a bad fit cannot pass silently.
+        /oak/points        631.951 s          Gazebo sim clock
+        /gz/dynamic_poses  631.9xx s          Gazebo sim clock
+        /huitzilin/odom    1785183152.876 s   WALL clock
+
+    mav_bridge, patrol and telemetry_logger run with use_sim_time=False —
+    week2_sitl.launch.py never sets it — while every Gazebo-sourced node runs on
+    sim time. So the dumped frames and the ball's true pose share a clock and
+    join directly; only odom needs shifting, and it is needed only to establish
+    the constant world->odom translation.
+
+    Bracketed by arrival time (recv_s is on the sim clock), then refined by the
+    only available check: the drone appears in both streams, so the right offset
+    is the one that makes its world track and its odom track differ by a pure
+    constant. The residual achieved is reported, so a bad fit cannot pass
+    silently.
     """
     key = ("pose", drone_model)
     if key not in truth:
@@ -102,23 +108,21 @@ def fit_gz_offset(truth: dict, recv: dict, drone_model: str):
 
     wt, wp = truth[key]
     ot, op = truth[("odom", "drone")]
-    # Arrival time minus stamp is transport delay plus the clock constant; the
-    # minimum over thousands of samples is the least-delayed one, so it brackets
-    # the constant from above by only a few ms.
-    coarse = float(np.min(recv[key] - wt))
+    # recv - stamp is (clock constant - transport delay); the max over thousands
+    # of samples is the least-delayed one, bracketing the constant to a few ms.
+    coarse = float(np.max(recv[("odom", "drone")] - ot))
 
-    def spread(k: float) -> float:
-        t = wt + k
-        lo, hi = max(t[0], ot[0]), min(t[-1], ot[-1])
-        sel = (ot >= lo) & (ot <= hi)
+    def spread(c: float) -> float:
+        t = ot + c
+        sel = (t >= wt[0]) & (t <= wt[-1])
         if sel.sum() < 50:
             return np.inf
-        resid = np.stack([op[sel, i] - np.interp(ot[sel], t, wp[:, i])
+        resid = np.stack([op[sel, i] - np.interp(t[sel], wt, wp[:, i])
                           for i in range(3)], axis=1)
         return float(np.linalg.norm(resid.std(axis=0)))
 
     grid = coarse + np.arange(-0.500, 0.500, 0.001)
-    scores = np.array([spread(k) for k in grid])
+    scores = np.array([spread(c) for c in grid])
     best = int(np.argmin(scores))
     if not np.isfinite(scores[best]):
         return None, None, "no overlap between the pose and odom streams"
@@ -225,18 +229,18 @@ def main() -> int:
     args = ap.parse_args()
 
     truth, recv = load_truth(args.truth)
-    k, fit_resid, why = fit_gz_offset(truth, recv, args.drone_model)
+    k, fit_resid, why = fit_odom_clock_offset(truth, recv, args.drone_model)
     if k is None:
         print(f"cannot align clocks ({why}); "
               f"names seen: {sorted({n for _, n in truth})}", file=sys.stderr)
         return 1
-    print(f"gz->ros clock offset {k:.3f} s "
+    print(f"odom->gz clock offset {k:.3f} s "
           f"(drone track residual {fit_resid:.3f} m at the fit; "
-          f"a large residual here means the fit failed and every time below is "
-          f"the wrong instant of the flight)")
-    # Every pose row is on the Gazebo clock; shift them all onto ROS sim time,
-    # which is what the dumped frames and the odom are stamped with.
-    truth = {key: ((t + k, p) if key[0] == "pose" else (t, p))
+          f"a large residual here means the fit failed and every range below is "
+          f"measured at the wrong instant of the flight)")
+    # Only odom is on the wall clock; pose rows and the dumped frames are both
+    # already on the Gazebo clock and need no shift.
+    truth = {key: ((t + k, p) if key[0] == "odom" else (t, p))
              for key, (t, p) in truth.items()}
 
     offset, spread = world_to_odom_offset(truth, args.drone_model)
