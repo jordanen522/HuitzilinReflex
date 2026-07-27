@@ -293,3 +293,99 @@ def test_plan_dodge_applies_clearance_when_altitude_given():
     assert clamped.direction[2] >= -0.2 / 1.5 - 1e-9    # 0.2 m of headroom
     assert np.linalg.norm(clamped.direction) == pytest.approx(1.0)
     assert clamped.tca_s == pytest.approx(free.tca_s)   # geometry unchanged
+
+
+# ── The dodge-authority mechanism (2026-07-27) ───────────────────────────────
+# Measured live: the detector publishes the TRUE ball on 5-6 consecutive frames
+# from ~4.7 m inwards, yet the track that fires a dodge is invariably exactly 3
+# updates and 0.132 s old. These tests pin why, in the tracker rather than the
+# detector.
+#
+# ProjectileTracker is SINGLE-TARGET, and the detector emits ~1.4 false-positive
+# centroids per second, so a stale FP track is usually alive when a ball
+# arrives. What follows is not simply "the ball is rejected": after one
+# rejection the incumbent's covariance has inflated enough (init_vel_std 15 m/s)
+# to SWALLOW the ball as a legitimate update, and the filter then fits a
+# velocity along the line from the false positive to the ball. Only when that
+# fiction is itself contradicted three times does the track reseed from the
+# ball — by which point several true detections have been spent.
+
+def _ball_stream(n, *, t0=0.0, start=(4.7, 0.0, 2.0), speed=8.0):
+    """n frames of a head-on ball closing at `speed`, at the detector rate."""
+    ts = t0 + np.arange(n) / RATE_HZ
+    return [(float(t), np.array([start[0] - speed * (t - t0), start[1], start[2]]))
+            for t in ts]
+
+
+TRUE_BALL_VEL = np.array([-8.0, 0.0, 0.0])
+
+
+def _vel_err(tracker):
+    _, v = tracker.state()
+    return float(np.linalg.norm(v - TRUE_BALL_VEL))
+
+
+def test_ball_alone_pins_velocity_by_the_second_frame():
+    """Control: with no incumbent, two frames are enough to know the velocity."""
+    tr = ProjectileTracker()
+    stream = _ball_stream(6)
+    tr.process(*stream[0])
+    assert _vel_err(tr) == pytest.approx(8.0, abs=1e-6)  # seeded at zero
+    tr.process(*stream[1])
+    assert _vel_err(tr) < 0.5
+    assert tr.n_updates == 2
+
+
+def test_an_incumbent_false_positive_corrupts_the_balls_velocity_estimate():
+    """A stale FP track makes the ball's opening detections actively harmful.
+
+    The filter does not merely ignore them: it fits a velocity along the line
+    from the false positive to the ball, which is wildly wrong, and then spends
+    further true detections rejecting the fiction it just built.
+    """
+    tr = ProjectileTracker()
+    tr.process(0.0, np.array([1.0, 3.0, 2.0]))  # false positive, 3 m off path
+
+    accepted, errs = [], []
+    for t, z in _ball_stream(6, t0=1 / RATE_HZ):
+        accepted.append(tr.process(t, z))
+        errs.append(_vel_err(tr))
+
+    # Frame 1 is swallowed by the inflated covariance, not rejected...
+    assert accepted[:2] == [False, True]
+    # ...and the velocity it produces is far worse than the zero it started at.
+    assert errs[1] > 30.0
+    # Frames 2-3 then contradict that fiction, and frame 4 reseeds from the ball.
+    assert accepted[2:5] == [False, False, True]
+    assert tr.n_reseeds_reject == 1
+    # After SIX true detections the ball's own track holds just two updates —
+    # the control has six by now, and is one short of the confirmation gate.
+    assert tr.n_updates == 2
+
+    # Only the sixth true detection restores what the control had at the second.
+    assert errs[5] < 0.5
+
+
+def test_the_incumbent_costs_four_frames_of_warning():
+    """Quantifies the dodge-authority loss: 4 frames = 0.267 s at 15 Hz.
+
+    This is the whole of the missing dodge warning — `tca` at commit measures
+    0.18-0.26 s, and closing this gap is worth more than any detector threshold
+    that has been tried.
+    """
+    def frames_to_converge(with_fp):
+        tr = ProjectileTracker()
+        t0 = 0.0
+        if with_fp:
+            tr.process(0.0, np.array([1.0, 3.0, 2.0]))
+            t0 = 1 / RATE_HZ
+        for i, (t, z) in enumerate(_ball_stream(10, t0=t0)):
+            tr.process(t, z)
+            if _vel_err(tr) < 0.5:
+                return i
+        return None
+
+    clean, contaminated = frames_to_converge(False), frames_to_converge(True)
+    assert clean == 1
+    assert contaminated == 5
+    assert (contaminated - clean) / RATE_HZ == pytest.approx(0.267, abs=0.01)
