@@ -1218,3 +1218,122 @@ Best figures on a settled stack with the aim fixed:
 - latency **75-82 ms mean**, max 136-182 ms, against a 150 ms budget
 - `tca` 0.218-0.257 s — the number still to move
 - B01 measurable again (`offset_forward_m: 4.0`), so all seven scenarios now throw
+
+---
+
+## 2026-07-27 (night, cont.) — The detection-consistency gap does not exist
+
+The frame-by-frame trace that was supposed to name which detector gate drops the
+ball instead **refuted the premise it was built on**. The detector does not drop
+the ball. It publishes the true ball on an unbroken run of frames from ~4.7 m
+inwards, and the frames the tracker never uses were never missing.
+
+### The measurement
+
+Two new instruments, joined offline on the sim clock:
+
+- `debug_dump_dir` (detector.yaml, default off) writes one `.npz` per cloud
+  frame: the post-voxel egomotion-compensated cloud, its foreground mask, every
+  cluster the splitter produced, and the publish decision.
+- `scripts/hz_truth_probe.py` records the ball's and the drone's true poses plus
+  every published `/threat/centroid`.
+- `scripts/hz_funnel_attribute.py` joins them and classifies each frame.
+
+Three B02 throws (8 m/s head-on, the design point), inbound frames only:
+
+| throw | frames with the true ball published | range span |
+|---|---|---|
+| r0 | **5 consecutive** | 4.49 -> 1.07 m |
+| r1 | **6 consecutive** | 4.69 -> 0.73 m |
+| r2 | **6 consecutive** | 4.92 -> 1.07 m |
+
+Every one matched the ball's true range to **0.02-0.03 m**, at the full
+15.2 Hz, with no gaps. Cluster sizes grew 29 -> 88 points as the ball closed and
+extents stayed 0.08-0.16 m — a textbook ball signature on every frame.
+
+**So there is no ~1.7 m of range "detected and then discarded".** The detector
+delivers 5-6 consecutive true detections starting at ~4.7-4.9 m. Yet the track
+that fires the dodge is still, invariably, exactly 3 updates and 0.132 s old.
+Something between `/threat/centroid` and the dodge decision throws away the
+first two to three true detections.
+
+### Where that puts the dodge-authority problem
+
+The binding term is in the **tracker**, not the detector. The budget entry from
+earlier tonight charged 0.138 s to "track confirmation at 14.5 Hz" and treated
+it as irreducible; it is not — the detections needed to confirm a track were
+already in hand ~2 frames earlier.
+
+The likeliest mechanism, and the next thing to test: the evasion node's tracker
+is being churned by the detector's false-positive stream. Measured on this run:
+**673 reseeds** over the battery (153 by Mahalanobis reject, 520 by timeout),
+i.e. ~1.4 per second, continuing right through the throw windows. If the ball's
+opening detections land on a live FP track, they are rejected until `_max_rejects`
+forces a `reset()`, and the ball's track restarts from the outlier — costing
+precisely the two frames observed.
+
+Note this does **not** resurrect the reseed hypothesis as previously stated and
+refuted. That version claimed the ball's detections were arriving sparsely; they
+are not, and this trace confirms it directly. The claim now is narrower and
+different: the detections arrive intact and the tracker discards them.
+
+**The named test:** log, per centroid, which track it was associated with and
+whether it was accepted or rejected, then read that across one throw. Do not
+touch `min_track_updates`, `init_vel_std`, or any detector threshold first — a
+tuning change that happens to help would hide the mechanism, exactly as it would
+have earlier tonight.
+
+### A real defect found on the way: two clocks in one stack
+
+Measured directly, not inferred:
+
+    /oak/points        631.951 s          Gazebo sim clock
+    /gz/dynamic_poses  631.9xx s          Gazebo sim clock
+    /huitzilin/odom    1785183152.876 s   WALL clock
+
+`week2_sitl.launch.py` never sets `use_sim_time`, so **`mav_bridge`, `patrol` and
+`telemetry_logger` run on the wall clock** while every Gazebo-sourced node runs
+on sim time (`ros2 param get /mav_bridge use_sim_time` -> False).
+
+Consequence in the detector: it inserts `odom -> base_link` into its TF buffer
+stamped on the wall clock, then looks it up at cloud stamps on the sim clock.
+The exact-stamp lookup can never succeed, so **every frame silently takes the
+`Time()` "latest available" fallback** and egomotion compensation is never
+time-matched.
+
+Measured impact, and it is smaller than feared: on frames that published, the
+cluster sat **0.02-0.19 m** from the ball's true position. So this is a genuine
+defect worth fixing, but it is not what is costing the dodge. Left unchanged
+tonight deliberately — it alters flight-node timing semantics and there was no
+budget to re-validate patrol behaviour after it.
+
+The two clocks also do **not** differ by a constant: sim runs at RTF ~0.87, so
+they differ by a rate. Fitting one offset across a 50 s battery left an 11.6 m
+residual. Anything joining these streams must handle that.
+
+### Instrument lessons, dearly bought
+
+- **The truth probe blinded the detector it was observing.** Recording every
+  link in `/gz/dynamic_poses` (rotor_0..3, imu_link, camera_link, base_link) and
+  flushing per row wrote ~1400 rows/s; with it running, the same B02 battery
+  measured first detection at **1.83 m instead of 4.08 m** and dropped from 2/3
+  dodges to 1/3. Filtered to the drone and `ball_*` and flushed on a 2 s timer,
+  it costs nothing measurable. Any probe on this box needs this checked.
+- **The dump itself costs ~40 ms/frame** (latency 128-172 ms with it on, against
+  75-94 ms without). Fine for attribution, useless for timing. Never read a
+  latency or `tca` number off a dumping run.
+- **Reconstructing the ball in the odom frame is the weak link, not the cloud.**
+  Frames the reconstruction called "unclustered" each held exactly one cluster of
+  exactly the ball's size and extent, 0.5-1.0 m from where the reconstruction put
+  it — attitude lag at range, since 6 deg at 4.5 m is 0.5 m. The reliable test
+  needs no reconstruction: `|centroid_bl|` is a range in base_link, directly
+  comparable to the ball's true range. When the two disagree, believe the range.
+
+### Where Week 4 stands
+
+Unchanged by this entry — no threshold was altered, and the stack is back on the
+shipped `detector.yaml`:
+
+- on-target dodge success 11/15 (73%) and 11/14 (79%) on the best settled runs
+- latency 75-94 ms mean against a 150 ms budget
+- `tca` 0.18-0.26 s — still the number to move, now with a named cause to test
