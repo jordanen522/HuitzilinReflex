@@ -261,6 +261,8 @@ class DodgeBatteryNode(Node):
         self._min_dist = float("inf")
         # (ball_enu, drone_enu) at the closest-approach sample — see _pose_cb.
         self._closest_pair = None
+        self._closest_sim = None
+        self._ball_track = []   # opening (sim_t, ball_enu) samples of the flight
         self._events = []
         self._listening = False
 
@@ -329,6 +331,15 @@ class DodgeBatteryNode(Node):
                 elif tr.child_frame_id == ball_name:
                     t = tr.transform.translation
                     ball = np.array([t.x, t.y, t.z])
+            if ball is not None:
+                # Ball track: (sim_t, position) for the first samples of flight
+                # plus the time of closest approach. The lead assumes the ball
+                # takes offset_forward_m / speed_mps to arrive; nothing has ever
+                # checked that against the ball's ACTUAL transit, and a wrong
+                # horizon under-leads exactly like a missing dead time does.
+                # Bounded: only the opening samples are needed for the speed fit.
+                if len(self._ball_track) < 12:
+                    self._ball_track.append((self._sim_now(), ball.copy()))
             if ball is not None and self._ball_seen_sim is None:
                 # First sighting only — this is a launch timestamp, not a
                 # tracking one, and /gz/dynamic_poses keeps reporting the ball
@@ -345,6 +356,7 @@ class DodgeBatteryNode(Node):
                     # the same branch as the min so the two can never disagree
                     # about which sample was closest.
                     self._closest_pair = (ball.copy(), drone.copy())
+                    self._closest_sim = self._sim_now()
 
     def _patrol_cb(self, msg: String) -> None:
         try:
@@ -656,6 +668,8 @@ class DodgeBatteryNode(Node):
             self._ball_seen_sim = None
             self._min_dist = float("inf")
             self._closest_pair = None
+            self._closest_sim = None
+            self._ball_track = []
             self._events = []
             self._listening = True
 
@@ -682,11 +696,15 @@ class DodgeBatteryNode(Node):
             self._active_ball = None
             min_dist = self._min_dist
             closest = self._closest_pair
+            closest_sim = self._closest_sim
+            ball_track = list(self._ball_track)
             events = list(self._events)
             seen_sim = self._ball_seen_sim
         dead_s = (None if seen_sim is None
                   else round(seen_sim - sample_sim, 3))
         miss, lead_err = self._decompose_miss(closest, plan, vel)
+        ball_speed, flight_ca = self._measure_flight(
+            ball_track, seen_sim, closest_sim)
 
         gz_remove(self._world, name)
         self._wait_sim(self._settle_s)   # let patrol resume + bg model settle
@@ -736,7 +754,40 @@ class DodgeBatteryNode(Node):
                                  else round(lead_err.cross_m, 3)),
                 "lead_vert_m": (None if lead_err is None
                                 else round(lead_err.vert_m, 3)),
+                "ball_speed_mps": ball_speed,
+                "t_flight_assumed_s": round(t_flight, 3),
+                "flight_to_ca_s": flight_ca,
                 "success": success, "note": note}
+
+    @staticmethod
+    def _measure_flight(ball_track, seen_sim, closest_sim):
+        """Measure what the ball actually did, to audit the lead's assumptions.
+
+        Returns (horizontal_speed_mps, launch_to_closest_approach_s), either
+        None if unmeasurable.
+
+        The lead extrapolates the target over `offset_forward_m / speed_mps`,
+        an assumption no measurement has ever checked. If the real transit is
+        longer, the lead horizon is short and the throw under-leads — the same
+        signature as an undeclared dead time, which is why the two have to be
+        told apart by measurement rather than argument.
+
+        Horizontal speed only: the throw is lofted, so total speed includes a
+        vertical component that is irrelevant to when the ball crosses the
+        target's track. Fitted over the opening samples, where the horizontal
+        component is still essentially the launch value (drag-free model, and
+        gravity is vertical).
+        """
+        speed = None
+        if len(ball_track) >= 3:
+            t0, p0 = ball_track[0]
+            t1, p1 = ball_track[-1]
+            dt = t1 - t0
+            if dt > 1e-3:
+                speed = float(np.linalg.norm((p1 - p0)[:2]) / dt)
+        flight = (None if (seen_sim is None or closest_sim is None)
+                  else round(closest_sim - seen_sim, 3))
+        return (None if speed is None else round(speed, 3)), flight
 
     @staticmethod
     def _decompose_miss(closest, plan, drone_vel):
@@ -1027,6 +1078,25 @@ class DodgeBatteryNode(Node):
             # Restricted to no-dodge runs for the same reason aim_err_m is — a
             # dodge moves the drone, so the miss stops being an aim measurement.
             lines += self._miss_lines(sub)
+            # Audit the lead's two assumptions against the ball's real flight.
+            # Both are inputs the lead trusts blindly, and either being wrong
+            # under-leads exactly like an undeclared dead time.
+            spd = [r["ball_speed_mps"] for r in sub
+                   if r.get("ball_speed_mps") is not None]
+            fca = [(r["flight_to_ca_s"], r["t_flight_assumed_s"]) for r in sub
+                   if r.get("flight_to_ca_s") is not None
+                   and r.get("t_flight_assumed_s") is not None]
+            if spd:
+                lines.append(
+                    f"    ball speed (measured horiz): mean {np.mean(spd):.2f} "
+                    f"m/s, range {np.min(spd):.2f}-{np.max(spd):.2f}")
+            if fca:
+                got = np.array([a for a, _ in fca])
+                want = np.array([b for _, b in fca])
+                lines.append(
+                    f"    flight launch->closest approach: mean {got.mean():.3f} s "
+                    f"vs assumed {want.mean():.3f} s "
+                    f"(excess {(got - want).mean():+.3f} s)")
             if lats:
                 lines.append(
                     f"    latency: mean {np.mean(lats):.0f} ms, "
@@ -1070,7 +1140,9 @@ class DodgeBatteryNode(Node):
                     "off_target", "steady", "success", "error", "note",
                     "skipped", "window_s", "needed_window_s", "spawn_dead_s",
                     "miss_along_m", "miss_cross_m", "miss_vert_m",
-                    "lead_along_m", "lead_cross_m", "lead_vert_m"])
+                    "lead_along_m", "lead_cross_m", "lead_vert_m",
+                    "ball_speed_mps", "t_flight_assumed_s",
+                    "flight_to_ca_s"])
                 w.writeheader()
                 for r in rows:
                     w.writerow({k: r.get(k) for k in w.fieldnames})
