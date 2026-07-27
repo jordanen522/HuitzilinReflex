@@ -209,8 +209,14 @@ def classify(d: dict, ball_odom: np.ndarray,
     cdist = np.linalg.norm(cents - ball_odom, axis=1)
     hit = int(np.argmin(cdist))
     if cdist[hit] > NEAR_CLUSTER_M:
-        return "unclustered", (f"{detail_fg}, nearest cluster "
-                               f"{cdist[hit]:.2f} m away")
+        # Size and extent of that nearest cluster decide between two very
+        # different failures: a small far cluster means the ball formed nothing
+        # at all, while a large one means the ball's points were swallowed into
+        # a bigger blob whose centroid sits off the ball.
+        return "unclustered", (
+            f"{detail_fg}, nearest cluster {cdist[hit]:.2f} m away "
+            f"({int(sizes[hit])} pts, extent {float(d['cl_extent'][hit]):.2f} m; "
+            f"{len(sizes)} clusters, largest {int(sizes.max())} pts)")
 
     size = int(sizes[hit])
     ext = float(d["cl_extent"][hit])
