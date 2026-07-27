@@ -75,7 +75,8 @@ class TruthProbe(Node):
         # wall-anchored (e.g. 1785182794.8), so the streams differ by a large
         # constant. Without recv_s there is nothing to estimate that constant
         # from, and the pose stream cannot be joined to anything.
-        self._csv.writerow(["kind", "stamp_s", "recv_s", "name", "x", "y", "z"])
+        self._csv.writerow(["kind", "stamp_s", "recv_s", "name",
+                            "x", "y", "z", "qx", "qy", "qz", "qw"])
         self._n = 0
 
         self.create_subscription(TFMessage, "/gz/dynamic_poses",
@@ -87,10 +88,13 @@ class TruthProbe(Node):
         self.create_timer(2.0, self._heartbeat)
         self.get_logger().info(f"recording truth -> {out_path}")
 
-    def _row(self, kind: str, stamp: float, name: str, x, y, z) -> None:
+    def _row(self, kind: str, stamp: float, name: str, x, y, z,
+             q=(0.0, 0.0, 0.0, 1.0)) -> None:
         recv = self.get_clock().now().nanoseconds * 1e-9
         self._csv.writerow([kind, f"{stamp:.6f}", f"{recv:.6f}", name,
-                            f"{x:.4f}", f"{y:.4f}", f"{z:.4f}"])
+                            f"{x:.4f}", f"{y:.4f}", f"{z:.4f}",
+                            f"{q[0]:.6f}", f"{q[1]:.6f}",
+                            f"{q[2]:.6f}", f"{q[3]:.6f}"])
         self._n += 1
 
     def _pose_cb(self, msg: TFMessage) -> None:
@@ -104,12 +108,17 @@ class TruthProbe(Node):
             name = tr.child_frame_id
             if name != self._drone_model and not name.startswith("ball"):
                 continue
-            t = tr.transform.translation
-            self._row("pose", _stamp_s(tr.header), name, t.x, t.y, t.z)
+            t, r = tr.transform.translation, tr.transform.rotation
+            self._row("pose", _stamp_s(tr.header), name, t.x, t.y, t.z,
+                      (r.x, r.y, r.z, r.w))
 
     def _odom_cb(self, msg: Odometry) -> None:
-        p = msg.pose.pose.position
-        self._row("odom", _stamp_s(msg.header), "drone", p.x, p.y, p.z)
+        # Attitude matters as much as position: without it the ball cannot be
+        # expressed in the camera frame, and "the cloud had no point on the
+        # ball" cannot be told apart from "the ball was outside the frustum".
+        p, r = msg.pose.pose.position, msg.pose.pose.orientation
+        self._row("odom", _stamp_s(msg.header), "drone", p.x, p.y, p.z,
+                  (r.x, r.y, r.z, r.w))
 
     def _cent_cb(self, msg: PointStamped) -> None:
         self._row("cent", _stamp_s(msg.header), "centroid",

@@ -70,13 +70,42 @@ def load_truth(path: str) -> tuple[dict, dict]:
         for r in csv.DictReader(fh):
             rows[(r["kind"], r["name"])].append(
                 (float(r["stamp_s"]), float(r["recv_s"]),
-                 float(r["x"]), float(r["y"]), float(r["z"])))
-    out, recv = {}, {}
+                 float(r["x"]), float(r["y"]), float(r["z"]),
+                 float(r.get("qx", 0.0)), float(r.get("qy", 0.0)),
+                 float(r.get("qz", 0.0)), float(r.get("qw", 1.0))))
+    out, recv, quat = {}, {}, {}
     for key, vals in rows.items():
         a = np.array(sorted(vals), dtype=float)
         out[key] = (a[:, 0], a[:, 2:5])
         recv[key] = a[:, 1]
-    return out, recv
+        quat[key] = a[:, 5:9]
+    return out, recv, quat
+
+
+# Camera mount, from week3_perception.launch.py (camera_link_x/y/z).
+CAM_OFFSET_FLU = np.array([0.10, 0.0, 0.02])
+
+
+def ball_in_camera(ball_odom, drone_pos, quat_xyzw):
+    """(depth_m, off_axis_deg) of the ball in the camera's optical frame.
+
+    Separates the two things "absent" lumps together: a ball outside the ROI
+    gates was never eligible, while a ball inside them and still missing from
+    the cloud was not rendered or was occluded. Optical convention per
+    REP-103: Z forward, X right, Y down, taken off the FLU body axes.
+    """
+    x, y, z, w = quat_xyzw
+    # Body->world rotation matrix from the quaternion; transposed below to go
+    # world->body.
+    r = np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ])
+    body = r.T @ (np.asarray(ball_odom) - np.asarray(drone_pos)) - CAM_OFFSET_FLU
+    depth = float(body[0])
+    lateral = float(np.hypot(-body[1], -body[2]))
+    return depth, float(np.degrees(np.arctan2(lateral, depth)))
 
 
 def retime_odom_to_sim(truth: dict, recv: dict) -> dict:
@@ -214,7 +243,7 @@ def main() -> int:
                     help="only report frames with the ball inside this range")
     args = ap.parse_args()
 
-    truth, recv = load_truth(args.truth)
+    truth, recv, quat = load_truth(args.truth)
     truth = retime_odom_to_sim(truth, recv)
     offset, spread = world_to_odom_offset(truth, args.drone_model)
     if offset is None:
@@ -243,6 +272,7 @@ def main() -> int:
 
     drone_t, drone_p = truth[("pose", args.drone_model)]
     odom_t, odom_p = truth[("odom", "drone")]
+    odom_q = quat[("odom", "drone")]
     for ball in balls:
         bt, bp = truth[("pose", ball)]
         print(f"\n=== {ball} — flight {bt[0]:.3f}..{bt[-1]:.3f} s "
@@ -271,7 +301,12 @@ def main() -> int:
             d_o = interp_xyz(t, odom_t, odom_p)
             off_t = offset if d_o is None else (d_o - d_w)
             d = dict(np.load(files[i], allow_pickle=False))
-            verdict, detail = classify(d, b_w + off_t)
+            ball_odom = b_w + off_t
+            verdict, detail = classify(d, ball_odom)
+            if verdict == "absent" and d_o is not None:
+                qi = int(np.argmin(np.abs(odom_t - t)))
+                depth, ang = ball_in_camera(ball_odom, d_o, odom_q[qi])
+                detail += f" [cam depth {depth:.2f} m, off-axis {ang:.0f} deg]"
             gap = "" if prev_t is None else f"{(t - prev_t) * 1000:.0f}ms"
             prev_t = t
             tally[verdict] += 1
