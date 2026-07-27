@@ -174,7 +174,8 @@ def world_to_odom_offset(truth: dict, drone_model: str):
     return offs.mean(axis=0), offs.std(axis=0)
 
 
-def classify(d: dict, ball_odom: np.ndarray) -> tuple[str, str]:
+def classify(d: dict, ball_odom: np.ndarray,
+             near_m: float = NEAR_POINT_M) -> tuple[str, str]:
     """Return (verdict, detail) for one dumped frame."""
     if "pts" not in d:
         # Died before the background stage; the counts say where.
@@ -187,7 +188,7 @@ def classify(d: dict, ball_odom: np.ndarray) -> tuple[str, str]:
     pts = d["pts"]
     fg = d["fg"]
     dist = np.linalg.norm(pts - ball_odom, axis=1)
-    near = dist < NEAR_POINT_M
+    near = dist < near_m
     n_near = int(near.sum())
     if n_near == 0:
         return "absent", f"closest cloud point {dist.min():.2f} m from ball"
@@ -239,6 +240,9 @@ def main() -> int:
     ap.add_argument("--truth", required=True, help="hz_truth_probe.py CSV")
     ap.add_argument("--drone-model", default="iris_depth")
     ap.add_argument("--ball", default="", help="ball model name (default: each)")
+    ap.add_argument("--near-radius", type=float, default=NEAR_POINT_M,
+                    help="radius counting a cloud point as belonging to the "
+                         "ball; widen it to absorb attitude error at range")
     ap.add_argument("--max-range", type=float, default=6.0,
                     help="only report frames with the ball inside this range")
     args = ap.parse_args()
@@ -302,7 +306,7 @@ def main() -> int:
             off_t = offset if d_o is None else (d_o - d_w)
             d = dict(np.load(files[i], allow_pickle=False))
             ball_odom = b_w + off_t
-            verdict, detail = classify(d, ball_odom)
+            verdict, detail = classify(d, ball_odom, args.near_radius)
             if verdict == "absent" and d_o is not None:
                 qi = int(np.argmin(np.abs(odom_t - t)))
                 depth, ang = ball_in_camera(ball_odom, d_o, odom_q[qi])
