@@ -751,3 +751,133 @@ from the track-confirmation count or the camera rate, not from the numpy.
 
 Do not re-tune detection thresholds against the patrol dodge rate; it is measuring two things
 at once. Use `hover_mode` for anything about the manoeuvre and patrol for anything about the lead.
+
+---
+
+## 2026-07-27 (later) — The aim error was a stale velocity sample
+
+The miss decomposition promised at the end of the last entry got built, and it
+found the Week-4 aim error in three measurements. **Off-target throws went from
+12/18 to 2/18** and on-target dodge success from 2/5 to 8/14. The cause was not
+physics, geometry, or a dead time: it was one stale variable.
+
+### What the decomposition added
+
+`min_dist` is the *perpendicular* distance from the ball's path to the drone, so a
+mistimed lead, a sideways drift and a gravity error are indistinguishable in it.
+`ballistics.miss_components` now resolves the closest-approach miss into the
+ball's path frame, and the battery records two triples per run:
+
+- **miss** — ball vs drone, in the ball's heading frame. `+along` = the ball went
+  past, `+cross` = it passed to the drone's left, `+vert` = above. Vertical is
+  *world* vertical, so gravity error stays in one component instead of smearing
+  across two.
+- **lead** — the aim point vs where the drone actually was, in the *drone's*
+  heading frame. `+along` = over-led. Absent under `hover_mode`, where a
+  stationary target has no heading and the lead is exact anyway.
+
+`miss along` sits at ~0 by construction at a true closest approach, which is the
+built-in sanity check that the frame maths is right; it measured -0.015 m.
+
+### Three measurements, two of them wrong turns
+
+First reading, v20: **`lead_along` median -1.90 m — the throws were UNDER-led**,
+not over-led. That immediately killed the assumption that a mis-set spawn dead
+time was the story.
+
+1. **Odom position lag — real, 129 ms, declared.** Ground truth leads
+   `/huitzilin/odom` by 0.561 m along-track at 4.36 m/s (n=1595, median 128 ms).
+   The offset's *magnitude* equals its along-track component, i.e. pure transport
+   lag with no lateral bias — a latency to declare, not a calibration to correct.
+   Same root cause as the deferred `mav_bridge_node` odom-stamp item. Now
+   `odom_lag_s`, summed with `spawn_latency_s` into the lead.
+2. **A velocity measurement that was wrong, and how.** I derived truth speed from
+   pose *arrival* time with a `dt > 0.02 s` filter, which kept only the
+   late-arriving samples — a biased subset that inflates `dt` and deflates the
+   derivative. It reported a 24.7% speed error that does not exist. Redone with
+   header stamps over a 0.257 s baseline: **odom velocity is accurate to 0.4%**
+   (n=1624), and odom altitude to 7 mm. Never take a derivative off that stream
+   with arrival times.
+3. **A prediction that failed.** I predicted declaring the 129 ms would move
+   `lead_along` by 0.68 m and shrink `miss_vert`. Medians moved 0.18 m and
+   `miss_vert` not at all, and I read that as the fix having failed. It had not:
+   comparing `lead_along` across batteries is invalid because **aim error is only
+   recorded for no-dodge runs**, so firing more dodges leaves the badly-aimed
+   throws behind and inflates the surviving subset. A selection effect in my own
+   metric. The flight-time excess below depends on neither speed nor subset.
+
+### The root cause
+
+Auditing the two inputs the lead trusts blindly settled it. Ball speed measured
+3.90-14.16 m/s against 4/8/14 m/s specs — the flight is correct. But the ball
+reached closest approach **0.217 s earlier than the assumed `offset_forward /
+speed`**, and 0.217 s at the 5.26 m/s cruise is 1.14 m — the same number
+`lead_along` was reporting, measured a second, independent way.
+
+An accurate but *stale* velocity was all that was left, and it was in the code:
+
+```
+steady, vel = self._wait_steady_velocity()     # velocity sampled HERE
+win_ok, ... = self._wait_throw_window(t_flight) # blocks up to 40 s
+odom = self._latest_odom                        # position re-read HERE
+```
+
+The old comment claimed "re-read odom AFTER the waits so position matches that
+velocity". The window wait sits between the two samples, so it never did. And the
+bias has a sign, which is why it was systematic rather than noise: **that gate
+waits until the speed reaches 95% of cruise**, so the pre-gate velocity is
+reliably slower than the speed at launch. Every throw under-led.
+
+Position and velocity now come from the same message after both waits;
+`_wait_steady_velocity`'s return is dropped explicitly, since it is a check that
+the velocity has stopped changing, not an aim input.
+
+| | v22 (before) | v23 (after) |
+|---|---|---|
+| flight excess vs assumed | **-0.217 s** | **+0.021 s** |
+| `lead along` | -1.40 m | **+0.13 m** |
+| off-target throws | 12/18 | **2/18** |
+| aim error, no-dodge | 0.82 m | 0.62 m |
+| on-target dodge success | 2/5 | **8/14** |
+| `miss vert` | +0.53 m | **+0.20 m** |
+| latency mean | 214 ms | 131 ms |
+
+`miss_vert` falling with the lead partly vindicates the coupling argument the
+failed prediction could not test: a lofted ball is above its aim altitude
+everywhere except at `t_flight`, so an under-lead makes closest approach happen
+early, while the ball is still high. A +0.20 m residual remains.
+
+### Dodge authority is a TIME problem, not a force problem
+
+With the aim fixed, the remaining failures are all one shape: six runs read
+*"dodged but min_dist 0.11-0.20 <= hit_radius"*. The reason is now measurable
+across **every dodge ever recorded — `tca` at the moment of commit is 0.07-0.28 s**,
+while latency over the same events ranges 51-271 ms. Latency is therefore *not*
+the binding term: even the 51 ms dodge had only 0.19 s of warning. At
+`dodge_speed_mps` 1.5 that window buys **0.10-0.42 m** against a 0.30 m hit
+radius, which is exactly the range of the failures.
+
+So the manoeuvre is not weak, it is starved. The budget for an 8 m/s ball:
+
+| term | cost | set by |
+|---|---|---|
+| ball visible | 0.625 s | `roi_max_range_m: 5.0` at 8 m/s |
+| confirm track | -0.20 s | `min_track_updates: 3` at 15 Hz |
+| pipeline | -0.12 s | detector compute + transport |
+| **left to move** | **~0.30 s** | |
+
+Raising `dodge_speed_mps` treats the symptom. The lever is the 0.625 s, and
+`roi_max_range_m` was capped at 5.0 in Week 3 **because far background dominated
+the frame difference** — the exact root cause the persistent voxel background map
+(af50089) fixed. That cap is a candidate for re-testing, but it must be justified
+against the **bag-library recall**, not the dodge rate: the standing warning
+against tuning detection thresholds on the dodge rate applies with full force
+here, and the bags are at `/data/huitzilin_bags` (34 entries) via
+`scripts/run_regression.sh`.
+
+### Housekeeping
+
+`docs/WEEK4_PLAN.md` deleted. All nine of its tasks had shipped — verified every
+artifact and both entry points exist — and its gating item (the `debug_funnel`
+revert) landed earlier the same day; only its checkboxes were never ticked. The
+two config headers that pointed at it now point at the runbook.
