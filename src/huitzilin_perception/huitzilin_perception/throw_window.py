@@ -60,11 +60,22 @@ HOVER_SPEED_MPS = 0.05
 DEFAULT_MARGIN_S = 0.30
 
 # Fraction of cruise the drone must actually be doing before a throw is worth
-# spending. Measured on the Dell 2026-07-26 over 45 s of patrol (1350 odom
-# samples): median 2.09 m/s, p90 3.35, max 3.49 — and only 30% of the time
-# above 80% of max. The other 70% is corner transitions, which is why v10
-# threw 16/20 off-target while believing every window was safe.
-DEFAULT_MIN_CRUISE_FRAC = 0.80
+# spending. Measured on the Dell over 45 s of patrol (1350 odom samples):
+# median 2.09 m/s, p90 3.35, max 3.49 — and only 30% of the time above 80% of
+# max. The other 70% is corner transitions, which is why v10 threw 16/20
+# off-target while believing every window was safe.
+#
+# DERIVED, not guessed. Battery v12 (12 m loop, this gate at 0.80) collapsed
+# the per-scenario spread to +-0.04 m and exposed a systematic bias
+# proportional to flight time — ~0.9 m/s * t_flight:
+#     B03 t=0.43 s -> 0.39, 0.36, 0.44 m
+#     B06 t=0.75 s -> 0.66, 0.66, 0.63 m
+# That residual IS the 20% of cruise this floor was letting through: the drone
+# is still accelerating, so the lead extrapolates a velocity that low and the
+# ball arrives behind. Bounding the error under the 0.5 m off-target tolerance
+# at the worst flight time (1.5 s) against the 12 m loop's 5.26 m/s cruise
+# needs (1 - frac) * 5.26 * 1.5 < 0.5, i.e. frac > 0.94.
+DEFAULT_MIN_CRUISE_FRAC = 0.95
 
 
 def straight_leg_time_s(dist_to_wp_m: float,

@@ -97,12 +97,23 @@ def test_at_cruise_mid_leg_is_throwable():
     assert ok, reason
 
 
-def test_cruise_floor_is_the_measured_eighty_percent():
-    # 0.8 * 3.4 = 2.72 m/s. Just under must refuse, just over must pass.
-    assert DEFAULT_MIN_CRUISE_FRAC == 0.80
-    ok, _ = _ok(dist_to_wp_m=5.0, speed_mps=2.70, t_flight_s=0.43)
+def test_cruise_floor_bounds_the_residual_lead_error():
+    """
+    The floor is derived from v12's measured bias, not picked.
+
+    v12 ran this gate at 0.80 and left a systematic aim error of ~0.9 m/s *
+    t_flight — the residual acceleration the floor was admitting. Keeping that
+    under the 0.5 m off-target tolerance at the worst flight time (1.5 s)
+    against the 12 m loop's 5.26 m/s cruise requires frac > 0.94.
+    """
+    assert DEFAULT_MIN_CRUISE_FRAC == 0.95
+    worst_residual_m = (1.0 - DEFAULT_MIN_CRUISE_FRAC) * 5.26 * 1.5
+    assert worst_residual_m < 0.5, worst_residual_m
+
+    # 0.95 * 3.4 = 3.23 m/s. Just under must refuse, just over must pass.
+    ok, _ = _ok(dist_to_wp_m=5.0, speed_mps=3.20, t_flight_s=0.43)
     assert not ok
-    ok, _ = _ok(dist_to_wp_m=5.0, speed_mps=2.75, t_flight_s=0.43)
+    ok, _ = _ok(dist_to_wp_m=5.0, speed_mps=3.30, t_flight_s=0.43)
     assert ok
 
 

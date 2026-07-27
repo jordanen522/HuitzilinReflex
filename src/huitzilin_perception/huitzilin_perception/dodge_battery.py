@@ -142,7 +142,8 @@ class DodgeBatteryNode(Node):
         # so ArduPilot's WPNAV_SPEED governs, not patrol's parameter. Measured
         # 3.49 m/s max against a patrol.yaml cruise_speed_ms of 1.5.
         self.declare_parameter("cruise_estimate_window_s", 20.0)  # wall
-        self.declare_parameter("min_cruise_frac", 0.80)
+        # 0.95, derived from v12's residual bias — see throw_window.py.
+        self.declare_parameter("min_cruise_frac", 0.95)
         # A throw whose measured closest approach is this far from the
         # scenario's miss_distance_m did not test what the scenario claims.
         # Reported separately so aiming error is never read as trigger error.
