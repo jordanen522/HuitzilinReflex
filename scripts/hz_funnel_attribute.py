@@ -317,6 +317,21 @@ def main() -> int:
                 qi = int(np.argmin(np.abs(odom_t - t)))
                 depth, ang = ball_in_camera(ball_odom, d_o, odom_q[qi])
                 detail += f" [cam depth {depth:.2f} m, off-axis {ang:.0f} deg]"
+            # The reconstruction-free check. |centroid_bl| is a range in
+            # base_link, directly comparable to the ball's true range with no
+            # attitude, no odom frame and no world->odom offset in the way —
+            # the same match discipline dodge_battery uses. Everything above
+            # depends on placing the ball in the odom frame; this does not, so
+            # when the two disagree, THIS is the one to believe.
+            if bool(d.get("published", False)):
+                cr = float(np.linalg.norm(d["centroid_bl"]))
+                hit = "BALL" if abs(cr - rng) < 0.75 else "clutter"
+                pub = f"pub {cr:5.2f} m {hit}"
+                tally["published_" + hit] += 1
+            else:
+                pub = "pub   --      "
+                tally["not_published"] += 1
+            detail = f"{pub} | {detail}"
             gap = "" if prev_t is None else f"{(t - prev_t) * 1000:.0f}ms"
             prev_t = t
             tally[verdict] += 1
