@@ -1412,3 +1412,66 @@ Predicted effect if that holds: `tca` 0.18-0.26 s -> ~0.45-0.53 s, i.e.
 0.67-0.79 m of dodge travel at 1.5 m/s against a 0.30 m hit radius. That is the
 number to check, and it is the first change all night with a mechanism behind it
 rather than a threshold.
+
+### 2026-07-27 — The multi-hypothesis tracker works, and it did not buy the dodge
+
+Landed `MultiHypothesisTracker` (0c719ab) and measured it against the full
+20-run battery. The prediction in the entry above — `tca` 0.18-0.26 s ->
+0.45-0.53 s — **did not happen**. Recording that plainly, because the fix did
+do what it was designed to do and the failure is informative.
+
+What it fixed, measured:
+
+| | before | after |
+|---|---|---|
+| lifetime reseeds in one stack run | 5377 (1123 reject / 4256 timeout) | concept gone |
+| detection consistency gap | +1.7 m | **+0.31 m** |
+| live hypotheses at commit | n/a (one filter) | 1.1 mean, max 2 |
+| track age at commit | 0.132 s, invariant | 0.143 s (0.132-0.198) |
+
+The gap closing to +0.31 m is the direct confirmation: the ball's track now
+starts on its own first detection instead of ~1.7 m later, and `max 2` live
+hypotheses says the associator is not being saturated by the false-positive
+stream. The offline 4-frame penalty is real and it is gone.
+
+What did not move: `tca` **0.218 s mean** (0.090-0.450), dodge success **13/18
+(72%)**, false dodges **0/2**, latency 107 ms mean / 224 ms max. Compare the
+best previous settled figures: `tca` 0.18-0.26 s, 11/15 and 11/14. Inside noise.
+
+### Why closing a 1.7 m gap bought no warning
+
+Because the gap was never spent as *warning* — it was spent before the ball was
+ever detected. Track age at commit is still ~3 frames, which now means what it
+says: the trigger fires 3 frames after the ball's FIRST detection, and first
+detection sits at 3.2 m mean against a 5.0 m gate. The tracker was wasting
+frames; removing that waste just moved the bottleneck back to where detection
+begins. Two terms now bound `tca` and nothing else does:
+
+    tca = (first_det_range - min_track_updates / 15 Hz * speed) / speed - pipeline
+
+The failures are all one shape. B03 (14 m/s) is 0/3 with min_dist 0.155, 0.157,
+0.163 — and the measured aim error on no-dodge runs is 0.15 m. Those dodges
+contributed essentially nothing; the ball passed at its natural miss distance.
+At 14 m/s, three confirmation frames cost 2.8 m of the 5 m gate outright.
+
+### Two "refuted" levers are hereby un-refuted
+
+This is the part worth carrying forward. `roi_max_range_m` 5->8 and
+`cluster_min_points` 5->3 were both measured last night, both bought detection
+RANGE, both moved `tca` by nothing, and both were written down as refuted. That
+verdict was correct *about the tracker they were measured on*: extra range
+handed the filter more opening frames, and the filter spent them arguing with a
+false positive. With the ball now keeping its own hypothesis, range converts to
+warning at ~1:1. Their refutations do not survive the fix that removed the
+reason they failed.
+
+`min_track_updates` 3->2 is the one lever that is genuinely tested under the new
+tracker, and it is a real null: `tca` 0.218 -> 0.262 s (+0.044 s, about
+two-thirds of a frame, exactly as arithmetic predicts) but success 13/18 ->
+11/16 and latency mean 107 -> 127 ms. Reverted to 3. Buying two-thirds of a
+frame by weakening confirmation is not a trade worth making; the frames have to
+come from detecting the ball further out.
+
+Next: `cluster_min_points` 5->3, which measured a 24% detection-range gain last
+night, re-run under the new tracker. Its stated risk was false positives, and
+false positives are precisely what the associator now absorbs.
