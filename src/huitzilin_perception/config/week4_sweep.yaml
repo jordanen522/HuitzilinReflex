@@ -1,11 +1,30 @@
 # week4_sweep.yaml — parameter sweep over the dodge trigger/maneuver.
 #
-# Grid kept deliberately small: the Dell renders depth at ~0.33 RTF, so each
-# battery pass costs ~3x its sim duration in wall time.
-
+# Grid kept small, but NOT for the reason the old header gave: the Dell measured
+# RTF 0.871 on 2026-07-27, not the ~0.33 recorded back when depth rendering
+# shared the box with a duplicate stack. A pass costs roughly its sim duration
+# plus the throw-window waits.
+#
+# Axes chosen from the 2026-07-27 finding that dodge failures are a TIME problem,
+# not a force problem. First detection of the ball happens at mean 3.36 m (range
+# 0.90-4.75, all inside the 5.0 m gate — widening the gate to 8.0 was tested and
+# bought exactly nothing), which at 8 m/s is only ~0.42 s of total warning. tca at
+# dodge commit measures 0.12-0.47 s, and at 1.5 m/s that buys 0.18-0.70 m against
+# a 0.30 m hit radius: precisely the failure range.
+#
+# min_track_updates is the highest-leverage knob available, because at 15 Hz it
+# spends 0.20 s of that 0.42 s budget — nearly half — purely on confirming the
+# track. Dropping it to 2 hands ~0.067 s straight back to the manoeuvre. Its risk
+# is false dodges on the detector's ~1/s patrol false-positive stream, and that is
+# exactly what the false-dodge column and the B07 wide-miss runs measure, so the
+# sweep reports its own downside.
+#
+# dodge_speed_mps stays as the second axis because tca * speed is the product that
+# has to clear the hit radius. Speed alone treats the symptom, but it is the
+# cheaper half of the product and worth measuring alongside.
 parameters:
-  dodge_speed_mps: [1.0, 1.5, 2.5]
-  trigger_horizon_s: [1.0, 1.5]
+  min_track_updates: [2, 3]
+  dodge_speed_mps: [1.5, 2.5]
 
 runs: [B02, B03, B06]   # subset of week4_battery.yaml ids
-repeats: 1
+repeats: 2              # n=1 cannot separate a real effect from a single flake
