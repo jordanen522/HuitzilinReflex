@@ -190,6 +190,11 @@ class DodgeBatteryNode(Node):
         self._latest_odom = None
         self._latest_patrol = None    # None until /huitzilin/patrol_state arrives
         self._speed_hist = collections.deque()   # (wall_t, |v|) for cruise est
+        # _odom_cb mutates _speed_hist on the executor thread while
+        # _cruise_est reads it on the run() worker thread; without this the
+        # read raises "deque mutated during iteration" and kills a run
+        # (observed once in battery v13, B01 r2).
+        self._speed_lock = threading.Lock()
         self._pose_stream_seen = False
         self._active_ball = None
         self._min_dist = float("inf")
@@ -225,10 +230,11 @@ class DodgeBatteryNode(Node):
         tw = msg.twist.twist.linear
         speed = math.sqrt(tw.x * tw.x + tw.y * tw.y + tw.z * tw.z)
         now = time.monotonic()
-        self._speed_hist.append((now, speed))
         cutoff = now - self._cruise_win_s
-        while self._speed_hist and self._speed_hist[0][0] < cutoff:
-            self._speed_hist.popleft()
+        with self._speed_lock:
+            self._speed_hist.append((now, speed))
+            while self._speed_hist and self._speed_hist[0][0] < cutoff:
+                self._speed_hist.popleft()
 
     def _cruise_est(self) -> float:
         """Rolling max odom speed — the drone's actual cruise.
@@ -239,9 +245,10 @@ class DodgeBatteryNode(Node):
         straight_leg_time_s report inf; that is safe because run() will not
         start a run until odom exists.
         """
-        if not self._speed_hist:
-            return 0.0
-        return max(s for _, s in self._speed_hist)
+        with self._speed_lock:
+            if not self._speed_hist:
+                return 0.0
+            return max(s for _, s in self._speed_hist)
 
     def _pose_cb(self, msg: TFMessage) -> None:
         self._pose_stream_seen = True

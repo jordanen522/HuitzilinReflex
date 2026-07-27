@@ -473,3 +473,86 @@ translating. Hover is unregressed: 10 centroids, predicted miss 0.035 m vs truth
   the flood is now 10x smaller. It deserves its own measurement window, not a ride-along.
 - 3/17 rows were harness spawn flakes (`create service did not confirm the spawn`),
   pre-existing.
+
+### Fixing the throw harness: aiming under patrol (2026-07-27, `0f2a36c`…`8de8d3d`)
+
+Week 4 inherited "aiming under patrol is the dominant limit, not the trigger". Fixed, in
+three measured steps — each one wrong in an instructive way.
+
+**Root cause.** `compute_spawn` leads the drone at constant velocity over the ball's
+flight (`t = offset_forward_m / speed_mps`). `patrol_node` is a *corner* follower flown
+in position mode, so ArduPilot decelerates into every waypoint and accelerates out along
+a new heading. That is a discontinuity in the commanded path, not a smooth curve, so no
+constant-velocity *or* constant-acceleration lead can predict across it. Fitting a better
+motion model is the wrong fix; the right one is to only throw when the drone is on a
+straight leg, at cruise, with enough leg left to cover the flight.
+
+New `throw_window.py` is pure geometry: `leg = (dist_to_wp - accept_radius) / cruise`.
+`patrol_node` now publishes `/huitzilin/patrol_state` (JSON String, same convention as
+`/huitzilin/state`) with the current leg; control logic is untouched. A run with no
+aimable window is **SKIPPED, not thrown**, and skipped rows are excluded from the dodge
+and false-dodge denominators — an aiming limit must never be read as a trigger failure.
+
+**v10 — the gate made things worse.** Gating on leg time alone, computed with the
+*instantaneous* speed, gave 16/20 off-target (aim mean 1.60 m, max 4.96 m) and never
+refused a single throw. The quotient is inverted near a corner: the speed collapses, so
+the window inflates at exactly the moment the aim is least predictable.
+
+| window_s | aim_err_m |
+|---|---|
+| 0.76 | **0.18** |
+| 2.48 | **0.21** |
+| 5.86 | 3.22 |
+| 8.20 | 0.94 |
+
+Fixed by evaluating the leg at a **cruise estimate** (rolling max odom speed) and
+additionally requiring the drone to *be* at cruise. `cruise_mps` is a required kwarg so
+the v10 usage is not expressible. Constants came from measurement, not guesswork: 45 s of
+patrol, 1350 odom samples — median 2.09 m/s, p90 3.35, max 3.49, and only **30% of the
+time above 80% of max**. Note `patrol.yaml`'s `cruise_speed_ms: 1.5` is not the flown
+speed; position mode means `WPNAV_SPEED` governs.
+
+**v11 — the gate worked, and measured that the loop was too small.** 8/20 skipped, B01
+skipped all 3 times. Aim improved (mean 1.39 m, max 3.04 m) but 11/12 thrown runs were
+still off-target, because a 5 m leg offers at most `(5.0-0.6)/3.4 = 1.29 s` and the 1.05 s
+scenarios could only fire at the leg *start*, still accelerating.
+
+**v12 — a 12 m loop collapsed the variance.** New `week4_patrol.yaml`, threaded via a
+`patrol_params` launch argument through week4 → week3 → week2_sitl, so `patrol.yaml`
+keeps the 5 m Week 2 demo square (`scripts/plot_telemetry.py` hardcodes it). Per-scenario
+spread fell to ±0.04 m, which exposed the remainder as a *systematic* bias proportional
+to flight time — ~0.9 m/s × `t_flight`:
+
+| scenario | t_flight | aim error (3 reps) |
+|---|---|---|
+| B03 (14 m/s) | 0.43 s | 0.39, 0.36, 0.44 |
+| B06 (8 m/s) | 0.75 s | 0.66, 0.66, 0.63 |
+| B07 (8 m/s) | 0.75 s | 0.54, 0.54 |
+
+That residual *is* the 20% of cruise the floor admitted. Bounding it under the 0.5 m
+off-target tolerance at the worst flight time against the 12 m loop's measured 5.26 m/s
+cruise needs `(1-frac) * 5.26 * 1.5 < 0.5`, i.e. `frac > 0.94` → **0.95**.
+
+**v13 — the result.**
+
+| | v9 | v13 |
+|---|---|---|
+| on-target dodge success | 3/7 (43%) | **4/5 (80%)** |
+| false dodges | 0/1 | 0/2 |
+| off-target throws | 11/17 | 10/17 |
+| latency mean / max | 179 / 297 ms | 203 / 287 ms |
+
+Caveats, all still open:
+- **The 12 m loop costs a ~66 s foreground flood on entry** (fg to 41159, 73 skipped
+  frames) while the persistent map learns the enlarged area, then fg returns to 0–388.
+  This is the documented "map helps revisited scene, not first-pass" limitation, not a
+  regression — but the battery must settle ≥75 s after patrol starts or its first run
+  lands in the flood. v12's B01 r0 (5.39 m) did.
+- **Oblique runs are still systematically off** (B04 1.04–5.00 m, B05 1.29–1.67 m) and do
+  not scale with the cruise floor — that is a separate `aim_at_drone` geometry issue.
+- **B01 remains unmeasurable** even on 12 m: needs 1.80 s, best leg seen 2.19 s, but the
+  95% cruise floor rarely coincides with that much leg left. Shorten `offset_forward_m`
+  for the slow scenario rather than lowering the margin.
+- **Latency is still over budget** (203 mean vs 150 ms) and slightly worse than v9.
+- v13 hit one `deque mutated during iteration` harness exception — `_cruise_est` racing
+  `_odom_cb`. Fixed with a dedicated lock.
