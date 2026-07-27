@@ -237,6 +237,7 @@ def main() -> int:
         return 1
 
     drone_t, drone_p = truth[("pose", args.drone_model)]
+    odom_t, odom_p = truth[("odom", "drone")]
     for ball in balls:
         bt, bp = truth[("pose", ball)]
         print(f"\n=== {ball} — flight {bt[0]:.3f}..{bt[-1]:.3f} s "
@@ -255,8 +256,17 @@ def main() -> int:
             rng = float(np.linalg.norm(b_w - d_w))
             if rng > args.max_range:
                 continue
+            # Per-frame offset, not the global mean. The dumped cloud sits in
+            # the odom frame, and odom lags the world by ~129 ms (measured); at
+            # 5 m/s that lag turns into a 0.34 m spatial offset whose direction
+            # rotates around the patrol loop — larger than the radius used to
+            # decide whether a point belongs to the ball. Taking drone_odom minus
+            # drone_world AT THIS FRAME cancels the lag exactly, because it is
+            # the same displacement the detector's own TF applied to the cloud.
+            d_o = interp_xyz(t, odom_t, odom_p)
+            off_t = offset if d_o is None else (d_o - d_w)
             d = dict(np.load(files[i], allow_pickle=False))
-            verdict, detail = classify(d, b_w + offset)
+            verdict, detail = classify(d, b_w + off_t)
             gap = "" if prev_t is None else f"{(t - prev_t) * 1000:.0f}ms"
             prev_t = t
             tally[verdict] += 1
