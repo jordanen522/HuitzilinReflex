@@ -48,6 +48,7 @@ from rcl_interfaces.srv import GetParameters, SetParameters
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import String
+from std_srvs.srv import SetBool
 from tf2_msgs.msg import TFMessage
 
 from huitzilin_perception.ballistics import compute_spawn
@@ -144,6 +145,22 @@ class DodgeBatteryNode(Node):
         self.declare_parameter("cruise_estimate_window_s", 20.0)  # wall
         # 0.95, derived from v12's residual bias — see throw_window.py.
         self.declare_parameter("min_cruise_frac", 0.95)
+        # ── Hover control mode (2026-07-27) ──────────────────────────────────
+        # Aim error under patrol has two possible sources — the constant-velocity
+        # lead being wrong, and the spawn geometry itself being wrong — and the
+        # patrol battery cannot separate them. Against a stationary target the
+        # lead is exact by construction, so any residual error is geometry.
+        #
+        # This needs its own mode because a hover battery is otherwise
+        # impossible to run: evasion_node resumes patrol when a dodge completes
+        # ("dodge complete -> TRACKING (patrol resumed)"), so simply calling
+        # /huitzilin/start_patrol false before the battery only holds for the
+        # first successful dodge. Measured 2026-07-27: run 1 hovered, all 17
+        # after it were back at cruise. Patrol is therefore re-stopped before
+        # every throw, not once at the start.
+        self.declare_parameter("hover_mode", False)
+        self.declare_parameter("hover_speed_gate_mps", 0.15)
+        self.declare_parameter("hover_settle_timeout_s", 25.0)  # wall
         # A throw whose measured closest approach is this far from the
         # scenario's miss_distance_m did not test what the scenario claims.
         # Reported separately so aiming error is never read as trigger error.
@@ -180,6 +197,10 @@ class DodgeBatteryNode(Node):
         self._min_cruise_frac = float(
             self.get_parameter("min_cruise_frac").value)
         self._evasion_name = self.get_parameter("evasion_node_name").value
+        self._hover_mode = bool(self.get_parameter("hover_mode").value)
+        self._hover_gate = float(self.get_parameter("hover_speed_gate_mps").value)
+        self._hover_timeout_s = float(
+            self.get_parameter("hover_settle_timeout_s").value)
 
         # Warm wrench publishers, built once: every throw needs its impulse and
         # its gravity restore on the same physics step, which the gz CLI cannot
@@ -212,6 +233,8 @@ class DodgeBatteryNode(Node):
 
         # Created once and reused for every sweep combo + the baseline
         # snapshot/restore — avoids leaking a service client per combo.
+        self._patrol_cli = self.create_client(SetBool,
+                                              "/huitzilin/start_patrol")
         self._set_params_cli = self.create_client(
             SetParameters, f"{self._evasion_name}/set_parameters")
         self._get_params_cli = self.create_client(
@@ -507,6 +530,15 @@ class DodgeBatteryNode(Node):
         # this throw needs in order to test what the scenario claims.
         t_flight = offset_forward / speed if speed > 0.0 else 0.0
 
+        if self._hover_mode:
+            # Before the steady-velocity wait, not after: the point is to make
+            # the velocity zero, and _wait_steady_velocity would otherwise pass
+            # trivially on a drone flying a smooth straight leg.
+            hover_ok, hover_reason = self._enter_hover()
+            if not hover_ok:
+                return {**base, "error": True, "success": False,
+                        "note": f"hover_mode: {hover_reason}"}
+
         steady, vel = self._wait_steady_velocity()
         if not steady:
             self.get_logger().warn(
@@ -626,6 +658,39 @@ class DodgeBatteryNode(Node):
                 "needed_window_s": round(win_needed, 3),
                 "success": success, "note": note}
 
+    def _enter_hover(self) -> tuple[bool, str]:
+        """Stop patrol and wait for the drone to actually be stationary.
+
+        Two separate things, and the second is the one that matters: stopping
+        patrol only stops new setpoints being sent. ArduPilot keeps flying to
+        the last position target it was given, which on a 12 m loop can be most
+        of a leg away, so the drone is still at cruise for seconds afterwards.
+        Returning as soon as the service replies would silently produce a
+        moving "hover" control — which is exactly what the first attempt at
+        this measurement did.
+
+        Returns (ok, reason); a timeout is reported, never assumed away.
+        """
+        if not self._patrol_cli.wait_for_service(timeout_sec=10.0):
+            return False, "/huitzilin/start_patrol unavailable"
+        fut = self._patrol_cli.call_async(SetBool.Request(data=False))
+        if not self._wait_wall_for(fut.done, 10.0):
+            return False, "start_patrol(false) call timed out"
+
+        def stopped() -> bool:
+            with self._speed_lock:
+                if not self._speed_hist:
+                    return False
+                return self._speed_hist[-1][1] < self._hover_gate
+
+        if not self._wait_wall_for(stopped, self._hover_timeout_s):
+            with self._speed_lock:
+                last = self._speed_hist[-1][1] if self._speed_hist else float("nan")
+            return False, (f"still moving at {last:.2f} m/s after "
+                           f"{self._hover_timeout_s:.0f} s (gate "
+                           f"{self._hover_gate} m/s)")
+        return True, "hovering"
+
     def _snapshot_params(self, names: list) -> dict | None:
         """Read current values of `names` from /evasion via get_parameters,
         for restoring the node's baseline config after a sweep."""
@@ -705,6 +770,13 @@ class DodgeBatteryNode(Node):
             f"  Battery: {self._battery_f.name}   "
             f"Sweep: {Path(self._sweep_f).name if self._sweep_f else '—'}   "
             f"hit_radius: {self._hit_radius} m   window: {self._window_s} s",
+            # State the target's motion first: every aim number below means
+            # something different depending on it, and a hover control read as
+            # a patrol result would be badly misleading.
+            ("  target: HOVER CONTROL (patrol stopped before every throw — "
+             "the lead is exact, so residual aim error is spawn GEOMETRY)"
+             if self._hover_mode else
+             "  target: patrolling (aim error mixes lead error with geometry)"),
             f"  lead_target: {self._lead_target}   "
             f"spawn_latency_s: {self._spawn_latency_s} s"
             + ("" if self._lead_target else
