@@ -425,10 +425,19 @@ class DetectorNode(Node):
     def _lookup_matrix(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         """
         4x4 target<-source transform at `stamp`. Falls back to the latest
-        available transform (≤1 odom period stale — cm-level at patrol speed)
-        when the exact stamp isn't bracketed yet, e.g. the newest cloud always
-        arrives before the odom sample that would bracket it.
+        available transform (≤1 odom period stale) when the exact stamp isn't
+        bracketed yet, e.g. the newest cloud always arrives before the odom
+        sample that would bracket it.
         Returns None if the chain isn't available at all.
+
+        That staleness is NOT "cm-level at patrol speed" as this docstring used
+        to claim: odom runs at 30 Hz and patrol translates at 2.5-3.2 m/s (the
+        old 0.18-0.48 m/s figure was a two-competing-stacks artifact), so one
+        period is ~0.10 m — exactly diff_threshold_m. It is still not what
+        blinds the detector during patrol: the foreground floods to ~48k points
+        even at 0.63 m/s, where one period is 0.02 m. See docs/JOURNAL.md
+        "the detector goes blind while patrolling" — the cause is the 5-frame
+        rolling background buffer, not this lookup.
         """
         try:
             ts = self._tf_buffer.lookup_transform(target, source,

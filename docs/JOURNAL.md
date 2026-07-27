@@ -312,3 +312,86 @@ read trigger rates off them at low projectile speed.
 Dell helpers now live in `~/hz_tools/` (`hz_restart.sh`, `hz_env.sh`, `hz_env_sitl.sh`)
 because `/tmp` is wiped by reboot; `hz_restart.sh` locates its own env via `$SCRIPT_DIR`.
 Logs `/tmp/battery_v{7,8}.log`, probe `/tmp/hz_throw_probe.py`.
+
+### The trigger blocker, root-caused: the detector goes blind while patrolling (2026-07-26, later still)
+
+Finding 5 said the trigger "does not fire on genuine threats" and listed three suspects.
+The first one is right, but not for the reason listed, and the measured chain is now
+unambiguous. **The trigger policy and the Kalman filter are both fine. The detector
+publishes no centroid at all while the drone translates, so the trigger never receives
+a measurement.**
+
+Instrument: `/tmp/hz_trigger_probe.py` — throws one ball via the production path
+(`compute_spawn` + `WrenchThrower`) and logs every boundary of
+`/oak/points -> detector -> /threat/centroid -> KF -> /threat/intercept ->
+/threat/evade_event` against `/gz/dynamic_poses` ground truth. Non-dodge decisions are
+published nowhere, so it reconstructs the predicted miss from `/threat/intercept`:
+in hover the drone does not move, so `|intercept|` in base_link *is* the miss the
+policy compared to `threat_radius_m`.
+
+**Hover: the chain fires every time, at every geometry that failed in v8.**
+
+| throw | ground-truth min_dist | centroids | predicted miss | dodge | latency |
+|---|---|---|---|---|---|
+| 8 m/s direct | 0.127 m | 8 | 0.045 m | yes | 375 ms |
+| 4 m/s direct | 0.165 m | 3 | — | yes | 332 ms |
+| 14 m/s direct | 0.159 m | 5 | 0.043 m | yes | 273 ms |
+| 8 m/s, 0.5 m miss | 0.441 m | 9 | 0.439 m | yes | 271 ms |
+| 8 m/s, 1.5 m miss | 1.500 m | 5 | **1.486 m** | no (correct) | — |
+| 8 m/s, 2.5 m miss | 2.580 m | 3 | **2.473 m** | no (correct) | — |
+| 8 m/s, 3.5 m miss | 3.501 m | **0** | — | no | — |
+
+The KF predicts the miss to 0.014–0.107 m and the policy declines correctly outside
+0.75 m. Nothing here needs tuning. The 3.5 m row brackets a **~3 m lateral FOV ceiling**
+at a 6 m throw distance — beyond that the ball is simply never imaged.
+
+**Patrol: same throws, zero centroids, even when the ball is on target.**
+
+| throw | drone speed | min_dist | centroids | dodge | flood-skipped frames | max fg |
+|---|---|---|---|---|---|---|
+| 1 | 0.63 m/s | 4.53 m | 1 | no | 23 | 47746 |
+| 2 | 1.41 m/s | 0.94 m | 0 | no | 17 | 47817 |
+| 3 | 1.72 m/s | **0.74 m** | 1 | no | 21 | 48232 |
+| 4 | 3.27 m/s | **0.45 m** | 1 | no | 20 | 43810 |
+
+Throws 3 and 4 arrived *inside* `threat_radius_m` and still produced one centroid,
+below the `min_track_updates: 3` gate. This is the v8 failure reproduced on demand, and
+it is not aim contamination: a separate on-target patrol throw measured **0.484 m** with
+**0 centroids** and a funnel showing the ball present but discarded —
+`fg=303 clusters=2 ball_sized=1 (size,extent)=[(291, 1.42), (12, 0.18)]`. The 12-point
+0.18 m cluster *is* the ball; the 1.42 m one is scene.
+
+**Mechanism.** `fg` ramps and resets across a throw —
+`48 -> 3475 -> 9727 -> 15212 -> 20691 -> 29234 -> 45023`, then `168 -> 3435 -> ...` —
+i.e. the 5-frame rolling background buffer (oldest frame 4 cloud frames = **0.267 s** old)
+cannot cover the scene the camera newly sees as patrol translates and yaws. Egomotion
+compensation transforms correctly; it cannot invent background for regions never viewed.
+The foreground therefore grows to tens of thousands of points, and at
+`cluster_tolerance_m: 0.20` the ball is connected to that flood, absorbed into a giant
+cluster, and dropped by `cluster_max_points: 500`.
+
+**Two hypotheses tested and disproved, recorded so they are not re-run:**
+- *Stale odom TF.* Odom is 30 Hz and one period at 3 m/s is 0.10 m = `diff_threshold_m`
+  exactly, which looked damning. But the flood is 47746 points at **0.63 m/s**, where one
+  period is 0.02 m. Magnitude kills it. (The `_lookup_matrix` docstring still claims
+  "cm-level at patrol speed" — that was written against the disproved 0.18–0.48 m/s
+  figure and is now wrong at 2.5–3.2 m/s, so it is worth fixing as a comment even though
+  it is not the bug.)
+- *`fg_max_points: 5000` converting a noisy frame into a blind frame.* Raised it to
+  200000 on the Dell and re-ran: `flood_skips=0`, `published=0`, **still 0 centroids**,
+  funnel `fg=35408 clusters=0`. Even `fg=2946` — under the old guard — gives
+  `clusters=0`. The guard was masking the loss, not causing it. Setting restored.
+
+**So the fix is the background model, not a threshold.** Options, in the order I would
+try them: (1) replace the 5-frame rolling buffer with a persistent voxel-hashed
+background map in odom, so already-seen regions stay known across a turn; (2) stop
+discarding oversized clusters outright — a small compact object touching a large surface
+must stay separable (extent-based splitting rather than `cluster_max_points`);
+(3) failing both, a different detection principle that is egomotion-tolerant by
+construction (per-pixel radial-velocity gating). None of these is a tuning change, and
+(1)+(2) together is the recommendation.
+
+Also measured, and unchanged by any of the above: **latency is 271–375 ms against a
+150 ms budget**, and the dodge itself blinds the detector — `fg=52442` the moment the
+maneuver starts. Hover throws remain the only trustworthy instrument for trigger work
+(`auto_resume_patrol: false` on `/evasion`).
