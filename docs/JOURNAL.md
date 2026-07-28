@@ -1521,3 +1521,63 @@ is why `iris_depth` runs `update_rate=15`. That is a transport problem with
 known shapes (lower resolution at the same rate, a compressed transport, or
 detecting on the depth image instead of the point cloud) and it is the next
 thing worth an evening — not another threshold.
+
+### 2026-07-27 — Halving the confirmation term: measured, and reverted
+
+The entry above named 15 Hz as the one untouched term. Tested it directly.
+
+First, the cheap capacity question, with `profile_stages` on the live stack:
+the detector runs **30 ms/frame mean, 11.6-48.8 ms range**. A 30 Hz cloud allows
+33 ms sim = ~38 ms wall at RTF 0.87, so 640x480 @ 30 Hz is blocked by detector
+COMPUTE before the bridge is even reached — and blocked on precisely the busy
+frames (voxel 12-16 ms, bg_query 4.5-9.6, finite 5-7.6, convention 3-4), which
+are the frames with foreground in them. Nearly all of that cost is per-point, so
+it scales with pixel count: quarter the pixels, quarter the work, same bytes/s
+through the bridge.
+
+So: `iris_depth` to **320x240 @ 30 Hz**, full restart, full battery.
+
+| | 640x480 @ 15 Hz (shipped) | 320x240 @ 30 Hz |
+|---|---|---|
+| accepted ball detections | 14.8 Hz | **27.1 Hz** |
+| track age at commit | 0.143 s | **0.097 s** |
+| latency mean / max | 107 / 224 ms | **65 / 175 ms** |
+| first detection | 3.22 m | 4.40 m |
+| `tca` | 0.218 s | 0.266 s |
+| on-target success | **13/18 (72%)** | 11/16 (69%) |
+| aim error (no-dodge) | 0.15 m | 0.56 m |
+
+The mechanism did exactly what was predicted: confirmation halved, latency fell
+40%. And `tca` moved **+0.048 s** — the same size as every other lever — while
+success did not move at all. RTF fell 0.87 -> 0.758 and Gazebo delivered ~27 Hz
+of the 30 requested; the consistency gap reopened to +1.41 m and live hypotheses
+rose to 1.7/3, because a denser frame stream is also a denser false-positive
+stream.
+
+Reverted. It costs sensor fidelity against the real OAK-D Lite (which does
+640x480 depth at 30 fps in its own hardware, so the sim resolution is the thing
+that would be lying) and buys no success. The latency number is worth keeping in
+mind for Weeks 5-6 though: at quarter resolution the whole pipeline runs at
+65 ms mean, less than half the 150 ms budget, which is the margin a Pi-class
+board will need.
+
+### The pattern, after five levers
+
+`min_track_updates`, `cluster_min_points`, `roi_max_range_m`, and now frame rate
+have each been moved under the fixed tracker. Every one produced a `tca` change
+of +-0.05 s and no improvement in dodge success, which has sat at 61-72% across
+six full batteries tonight regardless of what `tca` did.
+
+That is the finding. `tca` in the 0.20-0.27 s band is no longer what decides
+whether a dodge succeeds — if it were, +0.05 s (a third more escape travel)
+would show up somewhere in 18 runs, and it never does. The failures are bimodal:
+successes land at 0.35-0.53 m and failures at ~0.155 m, which is the measured
+aim error, i.e. the ball's natural miss distance with the dodge contributing
+nothing. B03 (14 m/s) is 0/3 in every battery — at that speed the ball crosses
+the entire 5 m gate in 0.36 s and no amount of the current budget helps.
+
+The next question is therefore not "how do we get more warning" but "why does a
+dodge that commits 0.27 s out, with a manoeuvre that over-delivers at 160% of
+1.5 m/s, still leave the drone at 0.155 m". That is a question about the
+manoeuvre and the geometry, not the trigger, and it should start by plotting
+commanded vs achieved displacement for a single failing 8 m/s run.
