@@ -24,10 +24,23 @@ def generate_launch_description():
     # demo geometry (scripts/plot_telemetry.py hardcodes the 5 m square).
     default_patrol_params = os.path.join(pkg, "params", "patrol.yaml")
 
+    # These three nodes previously ran on the wall clock while every
+    # Gazebo-sourced node ran on sim time, so header stamps could not be joined
+    # across the boundary (the two clocks differ by a *rate*, RTF, not an
+    # offset). Gazebo publishes /clock, and ArduPilot SITL is lockstepped to
+    # Gazebo, so sim time is the correct timebase for the whole flight stack.
+    # Overridable for the rare case of running the bridge against a real
+    # vehicle, where no /clock exists and a sim-time node would freeze.
+    use_sim_time = LaunchConfiguration("use_sim_time")
+
     return LaunchDescription([
         DeclareLaunchArgument("patrol_params",
                               default_value=default_patrol_params,
                               description="patrol node params yaml"),
+        DeclareLaunchArgument("use_sim_time",
+                              default_value="true",
+                              description="follow Gazebo /clock; set false only "
+                                          "when flying real hardware"),
         # --- optional: start SITL+Gazebo in this launch instead of a separate terminal ---
         # from launch.actions import IncludeLaunchDescription
         # from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -40,19 +53,21 @@ def generate_launch_description():
             executable="mav_bridge",
             name="mav_bridge",
             output="screen",
-            parameters=[bridge_params],
+            parameters=[bridge_params, {"use_sim_time": use_sim_time}],
         ),
         Node(
             package="huitzilin_sim",
             executable="patrol",
             name="patrol",
             output="screen",
-            parameters=[LaunchConfiguration("patrol_params")],
+            parameters=[LaunchConfiguration("patrol_params"),
+                        {"use_sim_time": use_sim_time}],
         ),
         Node(
             package="huitzilin_sim",
             executable="telemetry_logger",
             name="telemetry_logger",
             output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
         ),
     ])

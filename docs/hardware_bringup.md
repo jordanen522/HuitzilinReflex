@@ -66,6 +66,28 @@ If fine-pitch soldering isn't comfortable, this is the one step worth outsourcin
 - [ ] Piezo siren: through a transistor switch circuit (NPN + flyback-safe wiring) off a Pi GPIO pin, not directly off the pin — the siren draws more current than a GPIO pin can safely source.
 - [ ] Validate both trigger within the target latency budget once wired, using a simple GPIO toggle script before wiring them into the real evasion node.
 
+## 8. Real OAK-D Lite bring-up (Week 6)
+
+Sim used a Gazebo depth camera at 640×480 / 15 Hz. This step replaces it with the
+real sensor and re-measures the noise the Kalman filter was tuned against.
+
+- [ ] Install `depthai-ros` on the Pi and bring up the OAK-D Lite over the USB-3 cable. Confirm depth/point-cloud topics publish.
+- [ ] Confirm the on-chip VPU is doing the stereo work — Pi CPU should stay low. Any per-pixel depth reconstruction on the Pi means the pipeline is misconfigured.
+- [ ] Measure the *delivered* frame rate and resolution at the ROS layer, not the camera's rated spec. Sim already found `ros_gz_bridge` could not sustain 30 Hz at 640×480, and the real USB path has its own ceiling. The detector and the tracker's `min_track_updates` gate are timed against whatever this turns out to be.
+- [ ] Characterize the failure modes sim did not model: low-texture dropouts, depth holes at range, frame-rate dips under load. Record where depth stops being trustworthy — that range is the real analogue of `roi_max_range_m`.
+- [ ] Feed the measured noise back into the Kalman measurement covariance. Do not carry the sim-tuned values over unexamined.
+
+> Week 4 closed with the dodge envelope bounded by *detection* range and frame
+> rate, not by tuning (see `docs/JOURNAL.md`). Whatever this step measures sets
+> where the real envelope lands, so treat these numbers as a headline result.
+
+## 9. Remote ID & regulatory (Week 6)
+
+- [ ] Register the aircraft with the FAA and mark it with the registration number.
+- [ ] Implement/enable Remote ID broadcast and verify it actually transmits (a Remote ID receiver app on a phone is the quickest check).
+- [ ] Re-read `docs/SAFETY_CASE.md` geofence/RTL/kill-switch sections against the *as-built* aircraft, not the sim model.
+- [ ] Confirm the intended test site is clear of controlled airspace, and that all projectile testing is planned inside netting per `HuitzilinReflex_v2.md` §6.
+
 ## Sequencing note
 
 Steps 1–3 must happen in order (swap → flash/configure → bind); the battery
@@ -74,3 +96,8 @@ power) and step 7 (payload) don't depend on the FC being flown yet and can be
 done any time after step 1. Step 6 is the gate before any Week 7 HITL or
 Week 8 real flight work — don't skip straight to flight once wiring "looks
 right."
+
+Steps 8 and 9 are Week 6 and independent of each other; step 8 needs only the Pi
+powered and the OAK-D mounted (steps 4–5), not a flyable aircraft, so it can
+start while the FC work is still in progress. Step 9 must be complete before any
+outdoor flight, regardless of how the bench work is going.
