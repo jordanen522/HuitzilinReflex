@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""
+hz_dodge_response.py — measure how fast the dodge manoeuvre actually develops.
+
+Why this exists (docs/JOURNAL.md, 2026-07-27): five levers moved `tca` by +-0.05 s
+each and dodge success did not move at all, sitting at 61-72% across six
+batteries. Failures are bimodal — successes land at 0.35-0.53 m, failures at
+~0.155 m, which is the measured aim error, i.e. the ball's natural miss with the
+dodge contributing NOTHING. That is not a trigger problem. The remaining
+suspect is the manoeuvre's rise time: a velocity step commanded 0.2-0.3 s before
+closest approach buys nothing if the airframe needs longer than that to move.
+
+So this measures the one curve nobody has plotted: escape displacement versus
+time since the dodge command, from Gazebo ground truth.
+
+Escape is measured against the drone's OWN pre-dodge motion, not against a fixed
+point: the drone is cruising at ~5.25 m/s on patrol when the dodge fires, and
+raw displacement is dominated by that cruise. The baseline velocity is fitted
+over the 0.2 s before the trigger and extrapolated; escape is the residual,
+projected onto the commanded ENU escape direction. Ideal is dodge_speed_mps * t,
+what a perfect step response would deliver.
+
+Run alongside the live stack, then throw (or run the battery):
+
+    source /opt/ros/jazzy/setup.bash && source ~/huitzilin_ws/install/setup.bash
+    python3 ~/huitzilin_ws/scripts/hz_dodge_response.py --out /tmp/dodge_resp.csv
+
+Ctrl-C to stop; a summary line prints per dodge as it completes.
+
+Two measurement traps this respects (both cost a night already):
+  * /gz/dynamic_poses carries EVERY link in the world, and recording all of them
+    measurably blinded the detector being observed. Only the drone model is kept.
+  * That topic is stamped with Gazebo's own clock (seconds since world start)
+    while the evade event carries ROS sim time (wall-anchored). They cannot be
+    joined on stamps, so poses are keyed by ROS-sim ARRIVAL time, which is the
+    same clock the event uses. Transport delay is a few ms against windows of
+    100-400 ms, and this is a displacement measurement, not a velocity one.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+
+import numpy as np
+import rclpy
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+from rclpy.qos import (QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile,
+                       QoSReliabilityPolicy)
+from std_msgs.msg import String
+from tf2_msgs.msg import TFMessage
+
+SENSOR_QOS = QoSProfile(
+    reliability=QoSReliabilityPolicy.BEST_EFFORT,
+    durability=QoSDurabilityPolicy.VOLATILE,
+    history=QoSHistoryPolicy.KEEP_LAST,
+    depth=10,
+)
+RELIABLE_QOS = QoSProfile(
+    reliability=QoSReliabilityPolicy.RELIABLE,
+    history=QoSHistoryPolicy.KEEP_LAST,
+    depth=10,
+)
+
+# Sample points after the command, in seconds. 1.0 s is dodge_duration_s, so the
+# last one is the whole manoeuvre; the early ones are the only ones that can
+# matter at a tca of 0.2-0.3 s.
+SAMPLES_S = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.60, 1.00)
+BASELINE_FIT_S = 0.20     # window before the trigger used to fit cruise velocity
+HISTORY_S = 3.0           # pose ring-buffer span
+DODGE_SPEED_MPS = 1.5     # evasion.yaml dodge_speed_mps; the command is a step
+
+
+class DodgeResponse(Node):
+    def __init__(self, out_path: str, drone_model: str) -> None:
+        super().__init__("hz_dodge_response")
+        self._drone_model = drone_model
+        self.set_parameters([Parameter("use_sim_time", value=True)])
+
+        self._poses: list[tuple[float, np.ndarray]] = []   # (recv_s, xyz world)
+        self._pending: list[dict] = []
+        self._n_dodges = 0
+
+        self._fh = open(out_path, "w", newline="")
+        self._csv = csv.writer(self._fh)
+        self._csv.writerow(["dodge_idx", "t_since_cmd_s", "escape_m",
+                            "ideal_m", "tca_s", "miss_m"])
+
+        self.create_subscription(TFMessage, "/gz/dynamic_poses",
+                                 self._pose_cb, SENSOR_QOS)
+        self.create_subscription(String, "/threat/evade_event",
+                                 self._event_cb, RELIABLE_QOS)
+        self.create_timer(0.25, self._drain)
+        self.get_logger().info(f"recording dodge response -> {out_path}")
+
+    def _now(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _pose_cb(self, msg: TFMessage) -> None:
+        for tr in msg.transforms:
+            if tr.child_frame_id != self._drone_model:
+                continue
+            t = tr.transform.translation
+            self._poses.append((self._now(),
+                                np.array([t.x, t.y, t.z], dtype=np.float64)))
+        cutoff = self._now() - HISTORY_S
+        while self._poses and self._poses[0][0] < cutoff:
+            self._poses.pop(0)
+
+    def _event_cb(self, msg: String) -> None:
+        try:
+            ev = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        if "dodge_enu" not in ev:
+            return
+        self._n_dodges += 1
+        ev["_idx"] = self._n_dodges
+        # Snapshot the pre-trigger poses now: the ring buffer will have rolled
+        # past them by the time the manoeuvre finishes.
+        t0 = float(ev["t_trigger_s"])
+        ev["_pre"] = [(t, p) for t, p in self._poses if t <= t0]
+        self._pending.append(ev)
+
+    def _drain(self) -> None:
+        """Report any dodge whose full sample window has elapsed."""
+        now = self._now()
+        ready = [e for e in self._pending
+                 if now - float(e["t_trigger_s"]) > SAMPLES_S[-1] + 0.2]
+        for ev in ready:
+            self._pending.remove(ev)
+            self._report(ev)
+
+    def _report(self, ev: dict) -> None:
+        t0 = float(ev["t_trigger_s"])
+        d_hat = np.asarray(ev["dodge_enu"], dtype=np.float64)
+        n = np.linalg.norm(d_hat)
+        if n < 1e-9:
+            return
+        d_hat = d_hat / n
+
+        pre = [(t, p) for t, p in ev["_pre"] if t >= t0 - BASELINE_FIT_S]
+        if len(pre) < 3:
+            self.get_logger().warn(
+                f"dodge {ev['_idx']}: only {len(pre)} pre-trigger poses — "
+                "cannot fit cruise baseline, skipping")
+            return
+        ts = np.array([t for t, _ in pre])
+        ps = np.stack([p for _, p in pre])
+        # Least-squares constant velocity through the pre-trigger window, then
+        # the position it predicts at t0. Fitting rather than differencing two
+        # samples keeps pose jitter out of the baseline.
+        A = np.stack([np.ones_like(ts), ts - t0], axis=1)
+        coef, *_ = np.linalg.lstsq(A, ps, rcond=None)
+        p0, v0 = coef[0], coef[1]
+
+        post = [(t, p) for t, p in self._poses if t >= t0]
+        if not post:
+            return
+        rows = []
+        for dt in SAMPLES_S:
+            target = t0 + dt
+            gap, t, p = min((abs(t - target), t, p) for t, p in post)
+            if gap > 0.05:      # no ground-truth sample near this offset
+                continue
+            residual = p - (p0 + v0 * (t - t0))
+            rows.append((dt, float(residual @ d_hat)))
+
+        for dt, esc in rows:
+            self._csv.writerow([ev["_idx"], f"{dt:.2f}", f"{esc:.4f}",
+                                f"{DODGE_SPEED_MPS * dt:.4f}",
+                                f"{ev.get('tca_s', float('nan')):.3f}",
+                                f"{ev.get('miss_m', float('nan')):.3f}"])
+        self._fh.flush()
+
+        tca = float(ev.get("tca_s", float("nan")))
+        at_tca = [esc for dt, esc in rows if abs(dt - round(tca, 2)) < 0.03]
+        summary = "  ".join(f"{dt:.2f}s={esc:+.3f}" for dt, esc in rows)
+        self.get_logger().warn(
+            f"dodge {ev['_idx']} tca={tca:.3f} miss={ev.get('miss_m', 0):.2f} | "
+            f"escape {summary}"
+            + (f" | at tca: {at_tca[0]:+.3f} m" if at_tca else ""))
+
+    def close(self) -> None:
+        self._fh.close()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default="/tmp/dodge_resp.csv")
+    ap.add_argument("--drone-model", default="iris_depth")
+    args = ap.parse_args()
+
+    rclpy.init()
+    node = DodgeResponse(args.out, args.drone_model)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.close()
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
