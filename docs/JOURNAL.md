@@ -1848,3 +1848,95 @@ So the honest Week 4 statement is a capability envelope, not a success rate:
 Extending the envelope upward is a Week 5+ sensing question (detection range or
 frame rate), not a tuning question — every trigger-side lever is already a
 measured null.
+
+## 2026-07-27 (night, close) — Week 4 closes on an envelope, and the flight nodes get sim time
+
+Three more unprobed batteries, then the deferred `use_sim_time` fix, then a
+fourth battery to prove the fix changed nothing. Week 4 closes here.
+
+### The envelope holds over five batteries
+
+Pooling every scored throw from the fixed dodge command, split by ball speed
+rather than blended:
+
+    <= 8 m/s  (B01, B02, B04, B05, B06)   78/78   100%
+    14 m/s    (B03)                        0/17     0%
+    false dodges on B07                    0/12
+
+The two-battery 26/26 in the previous entry was thin — 31 throws. It is now 95
+throws across five batteries and has not produced a single ≤ 8 m/s failure, nor
+a single B03 success. Both halves are stable, which is what makes this an
+envelope rather than a rate that happens to average out.
+
+Per battery, on-target (the blended number the report prints):
+
+    run 1   12/15  80%      run 2   13/16  81%
+    run 3   14/17  82%      run 4   13/16  81%   (post sim-time fix)
+
+The blended figure sits at 80-82% every time, and every point of the missing
+~19% is B03 plus off-target throws the battery itself flags as aiming error.
+
+### Latency: the mean is inside budget, the tail is not
+
+Across the four unprobed batteries, **15 of 59 individual dodges (25%) exceeded
+the 150 ms budget**, with a tail to 282 ms. Per-battery means stay well inside
+it (95, 115, 111, 114 ms).
+
+This is worth stating plainly rather than quoting only the mean. The reason it
+does not cost outcomes is that latency is not the binding term — tca at commit
+is 0.18-0.29 s while the excursions are tens of milliseconds, so a slow dodge
+still commits with time to spare. The budget is conservative relative to what
+actually decides a hit. If the envelope is ever pushed past 8 m/s, this tail
+stops being free and becomes the next thing to fix.
+
+### The `use_sim_time` defect, fixed
+
+`week2_sitl.launch.py` started `mav_bridge`, `patrol` and `telemetry_logger`
+without `use_sim_time`, so they ran on the wall clock while every Gazebo-sourced
+node ran on sim time. The two differ by a *rate* (RTF), not an offset, so header
+stamps could not be joined across the boundary.
+
+The mechanism was one line: `week3_perception.launch.py` forwarded only
+`patrol_params` into its `week2_sitl` include, never `use_sim_time`, so the
+flight nodes always fell back to their own default. Fixed on both sides —
+`week2_sitl` now declares `use_sim_time` defaulting to `true`, and
+`week3_perception` forwards it explicitly so an explicit `:=false` still reaches
+them (Week 7 HITL against real hardware needs that; a sim-time node with no
+`/clock` freezes).
+
+Verified after a full restart — all five now report sim time:
+
+    mav_bridge True   patrol True   telemetry_logger True   evasion True   detector True
+
+Re-validated end to end before trusting it: arm → takeoff 2.0 m → start_patrol →
+waypoints cycling 0→1→2→3 over multiple complete laps, hitting the 0.6 m accept
+radius each lap. Then battery run 4 above, which is post-fix and reproduces the
+envelope exactly (13/13 at ≤ 8 m/s, 0/3 at 14). **The fix is real and it costs
+nothing.**
+
+Its measured impact on the dodge remains what it was estimated at — 0.02-0.19 m
+— so this was correctness work, not a performance lever. Done now because it
+would have been a silent trap for every Week 5+ measurement that joins a flight
+stamp to a perception stamp.
+
+### Week 4 DoD, final
+
+| criterion | target | measured |
+|---|---|---|
+| dodge fires, latency measured vs budget | ≤ 150 ms | mean 95-115 ms; 25% of dodges exceed, max 282 ms |
+| `min_dist_m` on successful dodges > `hit_radius_m` | > 0.30 m | 78/78 within envelope |
+| no false dodge on B07 | 0 | 0/12 |
+| numbers + params recorded here | — | this entry + the four above |
+
+### What Week 5 inherits
+
+The dodge is *solved within its envelope* and every trigger-side tuning lever is
+a measured null (seven of them, listed in earlier entries — do not re-run). The
+envelope is bounded by **sensing**: detection starts at ~2.9-3.4 m and the
+detector delivers ~14.5 Hz, so confirming three track updates costs ~0.21 s, and
+at 14 m/s the ball's entire time of flight is ~0.22 s.
+
+That makes the Week 6 real-OAK-D bring-up the decisive measurement, not a
+formality: whatever detection range and frame rate the real sensor delivers is
+where the real envelope lands. `docs/hardware_bringup.md` §8 now calls this out
+explicitly.

@@ -7,9 +7,13 @@ Guidance for Claude working in this repo. Non-obvious facts only — derivable t
 
 3.5″ ducted micro-quadrotor that patrols, signals, and reflexively dodges projectiles.
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink · Python 3.12 · Ubuntu 24.04.
-**Current phase: Week 4 (Kalman filter + dodge trigger).** Weeks 1–3 complete: autonomous
-patrol loop (Wk2) and detection pipeline scored against a labeled bag library (Wk3,
-closed 2026-07-15 — see `docs/JOURNAL.md`).
+**Current phase: Week 5 (hardware bring-up — FC swap; see `docs/hardware_bringup.md`).**
+Weeks 1–4 complete: autonomous patrol loop (Wk2), detection pipeline scored against a
+labeled bag library (Wk3, closed 2026-07-15), and the Kalman filter + dodge trigger
+(Wk4, closed 2026-07-27). Week 4's result is a **capability envelope, not a success
+rate**: 78/78 dodges at ≤ 8 m/s, 0/17 at 14 m/s, 0/12 false dodges — the upper bound is
+set by detection range and frame rate, so Week 6's real-OAK-D bring-up is what moves it.
+See `docs/JOURNAL.md`.
 
 ## Build & run (inside WSL or native Ubuntu)
 

@@ -82,12 +82,33 @@ Grids `dodge_speed_mps × trigger_horizon_s` (3×2) over B02/B03/B06 via
 The battery restores the baseline evasion params after the sweep; if a
 sweep aborts partway, restart T3 before running the confirmation battery.
 
-## 5. What "done" looks like (Week 4 DoD)
+## 5. What "done" looks like (Week 4 DoD) — MET, closed 2026-07-27
 
 - Battery report shows dodges firing on hit-intent runs with measured
   latency vs the 150 ms budget, and no false dodge on B07.
 - `min_dist_m` on successful dodges exceeds `hit_radius_m` (0.30 m).
 - Record the numbers + chosen params in `docs/JOURNAL.md` (Week 4 entry).
+
+**Result, pooled over five batteries (95 scored throws):**
+
+| criterion | target | measured |
+|---|---|---|
+| dodge fires, latency vs budget | ≤ 150 ms | mean 95–115 ms per battery; 25% of individual dodges exceed, max 282 ms |
+| `min_dist_m` > `hit_radius_m` | > 0.30 m | 78/78 within the envelope |
+| no false dodge on B07 | 0 | 0/12 |
+| numbers + params in `JOURNAL.md` | — | five entries, through the 2026-07-27 close |
+
+**Read the outcome as an envelope, not a rate.** Split by ball speed:
+
+    <= 8 m/s  (B01, B02, B04, B05, B06)   78/78   100%
+    14 m/s    (B03)                        0/17     0%
+
+The blended "80-82% on-target" the report prints hides both halves. B03 is a
+time limit, not a defect: at 14 m/s the ball crosses the ~3 m detection range in
+0.22 s, while confirming three track updates at ~14.5 Hz costs 0.21 s. Every
+trigger-side tuning lever is already a measured null — extending the envelope is
+a sensing question (detection range / frame rate), which Week 6 measures against
+the real OAK-D (`docs/hardware_bringup.md` §8).
   (`docs/WEEK4_PLAN.md` was deleted 2026-07-27 per the closed-plan convention:
   all nine of its tasks shipped and its `debug_funnel` revert landed.)
 
