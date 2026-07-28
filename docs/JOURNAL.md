@@ -1653,3 +1653,56 @@ should develop several times faster than a lateral one. `dodge_floor_m` blocks
 downward escape for good reason and `clamp_dodge_to_clearance` never flips a
 dodge upward, deliberately — but "climb into the descending ball" was reasoned
 about, never measured, and the response curve above is a reason to measure it.
+
+### 2026-07-27 — The 2 m/s² is a hard limit, and it is not any of the obvious knobs
+
+Two attempts at the acceleration, one invalid and one clean.
+
+**Attempt 1 — ArduPilot limits — INVALID, do not cite it.** Added `PSC_ACC_XY`,
+`WPNAV_ACCEL` and `ANGLE_MAX` to `sitl_frame.parm`, restarted, measured no
+change. Two things were wrong with that. `--defaults` does not override values
+already stored in `eeprom.bin`, which persists across restarts, so nothing was
+applied; and after wiping the EEPROM and re-fetching all 1363 params, **none of
+those three names exists in this build**. The real name is `ATC_ANGLE_MAX`, and
+ArduPilot silently ignores unknown params in a defaults file. Reverted.
+
+That fetch did answer the question it was aimed at, though. `ATC_ANGLE_MAX` is
+30°, which permits g*tan(30°) = **5.66 m/s²** of lateral acceleration. We measure
+2. The tilt ceiling is not what limits the dodge — the velocity controller simply
+never demands more.
+
+**Attempt 2 — command a bigger step — clean, and null.** `dodge_speed_mps`
+1.5 -> 4.0, a 2.7x larger velocity error into a proportional controller, which
+should demand proportionally more initial acceleration:
+
+| escape at | 1.5 m/s | 4.0 m/s |
+|---|---|---|
+| 0.20 s | 0.051 m | 0.055 m |
+| 0.40 s | 0.153 m | 0.143 m |
+| 1.00 s | 0.71 m | 0.74 m |
+| on-target success | 13/17 (76%) | 10/16 (62%) |
+
+Identical. The acceleration is hard-limited near 2 m/s² regardless of how large
+the commanded velocity is, so it is a jerk or acceleration limiter inside the
+controller, not a proportional response and not the lean angle. This also
+settles the older `dodge_speed_mps` note: that lever really is dead, though for
+the opposite reason to the one recorded ("over-delivers at 160%" — it does not
+over-deliver at all).
+
+### A separate defect, seen in both response runs
+
+**Roughly a quarter of dodges produce no movement whatsoever.** Run 1: dodges 3,
+7, 9 of 10. Run 2: dodge 2 of 10. Their escape traces are flat to the millimetre
+for the entire second — not "slow", not "wrong direction", but nothing:
+
+    dodge 3  0.05s=-0.000  0.20s=+0.000  0.40s=-0.004  1.00s=-0.031
+    dodge 7  0.05s=-0.003  0.20s=-0.007  0.40s=-0.007  1.00s=+0.035
+
+The event fired (it is in the log with a tca and a direction), so the trigger and
+the publish happened; the airframe never responded. Suspects, in order: the
+`/cmd/evade` -> `/huitzilin/cmd_vel` priority handoff in mav_bridge, the patrol
+preemption race (`_set_patrol(False)` is `call_async` and is not awaited before
+the first evade command goes out), and a mode/state transition swallowing the
+setpoints. This is worth chasing before anything else in the manoeuvre: it is
+~25% of all dodges, it is binary rather than marginal, and unlike the 2 m/s² it
+looks like a bug rather than a limit.
