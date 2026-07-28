@@ -1475,3 +1475,49 @@ come from detecting the ball further out.
 Next: `cluster_min_points` 5->3, which measured a 24% detection-range gain last
 night, re-run under the new tracker. Its stated risk was false positives, and
 false positives are precisely what the associator now absorbs.
+
+### 2026-07-27 — Both un-refuted levers re-tested under the new tracker; both null
+
+Ran the full 20-run battery three more times, one lever at a time, all on the
+multi-hypothesis tracker with everything else at shipped values. Baseline for
+comparison is the run above: `tca` 0.218 s, 13/18, latency 107/224 ms.
+
+| lever | tca mean | on-target success | latency mean/max | live hyps |
+|---|---|---|---|---|
+| baseline (shipped) | 0.218 s | **13/18 (72%)** | 107 / 224 ms | 1.1 / 2 |
+| `min_track_updates` 3->2 | 0.262 s | 11/16 (69%) | 127 / 331 ms | 1.2 / 2 |
+| `cluster_min_points` 5->3 | 0.259 s | 11/17 (65%) | 122 / 346 ms | 1.1 / 2 |
+| `roi_max_range_m` 5->8 | 0.199 s | 9/17 (53%) | 112 / 246 ms | **2.0 / 4** |
+
+False dodges 0/2 in all four. Shipped config is the best of the four on every
+column that matters, and is what the stack was left on.
+
+The un-refutation argued above was wrong, and the reasoning is worth keeping
+because it was wrong in an instructive way. Extra range does now reach a clean
+hypothesis — the consistency gap confirms it, running -0.02 m at `roi 8` — but
+it arrives with company. Live hypotheses at commit double to 2.0 mean / 4 max,
+and `tca` gets *worse*, not better. What the wider gate buys is far-field
+clutter that the associator has to entertain, and the ball's own confirmation
+still costs the same three frames. Range was never the binding term; it was not
+made binding by fixing the tracker either.
+
+### What actually bounds tca, arithmetically
+
+Every configuration lands at the same place because the same three terms set it:
+
+    tca = first_det_range/speed  -  min_track_updates/15 Hz  -  pipeline
+
+With the shipped values that is 4.5 m / 8 m/s - 0.20 s - 0.08 s = 0.28 s against
+0.218 s measured. Track age at commit is 0.132-0.198 s across every battery run
+tonight — pinned at the confirmation term, never above it. Four thresholds have
+now been moved and the sum has not: each lever trades one term for another.
+
+The term nobody has touched is **15 Hz**. Three confirmation frames cost 0.200 s
+at 15 Hz and 0.100 s at 30 Hz — 0.1 s of `tca` for free, more than double what
+any threshold delivered tonight, and without weakening confirmation the way
+`min_track_updates` 2 does. The blocker is recorded in CLAUDE.md: `ros_gz_bridge`
+PointCloudPacked->PointCloud2 cannot sustain 30 Hz at 640x480 on the Dell, which
+is why `iris_depth` runs `update_rate=15`. That is a transport problem with
+known shapes (lower resolution at the same rate, a compressed transport, or
+detecting on the depth image instead of the point cloud) and it is the next
+thing worth an evening — not another threshold.
