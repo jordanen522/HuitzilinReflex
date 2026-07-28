@@ -1806,3 +1806,14 @@ likely load or run-to-run variance than the change — but it is unexplained and
 should be re-measured on a clean unprobed battery before Week 4 closes.
 
 B03 is now the only failing scenario, 0/3. Worth a look on its own geometry.
+
+### Confirmation run, unprobed (same night)
+
+The latency question is closed: it was the probe's own load, not the fix.
+
+    on-target dodge  13/15 (87%)     false dodges 0/2
+    latency          96 ms mean / 207 ms max   (was 144/353 with the probe attached)
+    tca              0.229 s (0.090-0.450)
+
+Two consecutive batteries on the fix now read 81% and 87%, against a prior best
+of 72% and an immediately-preceding 53%. **All four Week 4 criteria are met.**
