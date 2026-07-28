@@ -1817,3 +1817,34 @@ The latency question is closed: it was the probe's own load, not the fix.
 
 Two consecutive batteries on the fix now read 81% and 87%, against a prior best
 of 72% and an immediately-preceding 53%. **All four Week 4 criteria are met.**
+
+### B03 is not a defect — it is the edge of the reaction envelope
+
+Splitting the two fixed batteries by scenario instead of blending them:
+
+    <= 8 m/s  (B01, B02, B04, B05, B06)   26/26   100%
+    14 m/s    (B03)                        0/5      0%
+
+The blended 81% / 87% hid both halves. Every failure in both runs is B03, and
+B03 fails every time.
+
+It is a time problem, and the arithmetic is closed:
+
+    B03  tca at commit, mean 0.083 s   (runs at 0.150, 0.080, 0.020)
+    all others                 0.267 s
+
+At 14 m/s the ball crosses the ~3.1 m first-detection range in 0.22 s, while
+confirming three track updates at 14 Hz costs 0.21 s and the pipeline another
+0.08 s. The confirmation term alone consumes the entire time of flight; B03
+fires at all only when detection happens to start further out. Clearing the
+0.30 m hit radius in 0.083 s would need 3.6 m/s of *instantaneous* escape —
+unreachable at any dodge speed, because the airframe still has to accelerate.
+B03's min_dist (0.112-0.170 m) is just the aim error showing through, the
+signature of a dodge contributing nothing.
+
+So the honest Week 4 statement is a capability envelope, not a success rate:
+**the vehicle reliably dodges head-on, oblique and near-miss throws up to
+8 m/s, and cannot dodge 14 m/s throws** at a 6 m spawn with a 15 Hz detector.
+Extending the envelope upward is a Week 5+ sensing question (detection range or
+frame rate), not a tuning question — every trigger-side lever is already a
+measured null.
