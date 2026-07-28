@@ -226,6 +226,12 @@ def generate_launch_description() -> LaunchDescription:
         ),
         launch_arguments={
             "patrol_params": LaunchConfiguration("patrol_params"),
+            # Must be forwarded explicitly. Without it the Week 2 flight nodes
+            # fell back to their own default and ran on the wall clock while
+            # everything else here ran on sim time, so stamps could not be
+            # joined across the two. week2_sitl now defaults to true on its
+            # own, but this keeps use_sim_time:=false actually reaching them.
+            "use_sim_time": LaunchConfiguration("use_sim_time"),
         }.items(),
         condition=IfCondition(with_patrol),
     )
