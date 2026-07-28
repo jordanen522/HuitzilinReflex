@@ -1706,3 +1706,103 @@ the first evade command goes out), and a mode/state transition swallowing the
 setpoints. This is worth chasing before anything else in the manoeuvre: it is
 ~25% of all dodges, it is binary rather than marginal, and unlike the 2 m/s² it
 looks like a bug rather than a limit.
+
+## 2026-07-27 (night) — the dodge that never moved: it moved, it just never left the line
+
+The zero-movement dodges are not a command-path bug, and the fix took the
+on-target rate from 53% to 81% in back-to-back batteries.
+
+### The command path is exonerated
+
+`scripts/hz_cmd_path_probe.py` (new) watches all four boundaries at once —
+`/threat/evade_event`, `/cmd/evade`, `/huitzilin/patrol_state.running`, and
+`/huitzilin/odom` — and attributes each dodge to whichever one broke. It is
+read-only. Everything is keyed by RECEIPT time in the probe's own sim clock:
+patrol and mav_bridge stamp on the wall clock, so header stamps cannot be
+joined across this diagram.
+
+Over 16 dodges the verdict was **ok, 16/16**:
+
+* the stream never died — 32 commands at 20.1-20.6 Hz on every dodge;
+* patrol never failed to yield — it stopped **9-77 ms** after every trigger.
+
+**The `_set_patrol(False)` `call_async` race is refuted.** It was the prime
+suspect and it is not the problem; patrol yields well inside the tca. Do not
+re-chase it.
+
+### What was actually happening
+
+The `|dv|` column in that first pass was the wrong metric — velocity-change
+*magnitude*, which is dominated by the drone shedding its 4.2 m/s patrol cruise
+once patrol yields. Projecting the velocity change onto the commanded escape
+direction instead gave the answer immediately:
+
+    Pearson r(escape@1.0s , escape-direction . cruise-direction) = -0.911
+    Pearson r(battery min_dist , same alignment)                 = -0.671
+    Pearson r(battery min_dist , |u_z| vertical fraction)        = -0.077
+
+A thrown ball is aimed where the drone is *predicted* to be, and the prediction
+is its current velocity extrapolated — that is exactly what the battery's lead
+does. Escape is therefore deviation from that extrapolation. Commanding an
+absolute `dodge_speed * direction` **replaced** a 4.2 m/s cruise with a 1.5 m/s
+command, so the drone shed 2.5-3.9 m/s inside a second and the deviation was
+dominated by `-v_cruise`. Its component along the escape direction is
+
+    dodge_speed_mps - v_drone . direction
+
+which collapses to zero as the escape lines up with the cruise, and reverses
+once the cruise outruns the command. B04r0 is the clean case: alignment +0.124,
+escape **-0.93 m/s**, min_dist 0.161 m. The dodge drove the drone *toward* the
+aim point. The airframe moved the whole time; it just never left the line the
+ball was thrown at.
+
+### The fix
+
+`kalman.dodge_velocity_command()` adds the escape to the current velocity
+instead of replacing it, making the deviation `dodge_speed * direction * t` for
+any cruise. `dodge_max_speed_mps` (6.0) caps the sum and is spent on the cruise
+term, never on the escape — a capped dodge should stop chasing its waypoint,
+not stop dodging. Seven tests pin the property, including one that pins the old
+arithmetic so a revert cannot pass silently. 136 perception tests pass.
+
+### Measured, back-to-back, same machine and scenarios
+
+| | before | after |
+|---|---|---|
+| on-target dodge | 9/17 (53%) | **13/16 (81%)** |
+| false dodges (B07) | 0/2 | 0/2 |
+| cruise lost in 1 s | 2.5-3.9 m/s | **0.95-1.83 m/s** |
+| escape@1.0s | one at -0.93, two ~0 | **positive on all 16**, min +0.143 |
+| r(escape, alignment) | -0.911 | **-0.528** |
+| tca | 0.213 s | 0.232 s |
+
+81% is above every previous battery (the range was 59-76%). Failures collapsed
+to a single scenario — all three B03 runs — where before they were scattered
+across B01-B04. The worst alignment in the new run, idx 1 at **+0.575**, still
+escaped +0.239 m and scored a clean 0.627 m; the old command would have given
+1.5 - 4.37*0.575 = -1.0 m/s there, a hit.
+
+The residual r = -0.528 is expected: the drone still loses ~1.4 m/s because
+ArduPilot cannot reach cruise+escape instantly.
+
+### Two things this corrects
+
+**Vertical escape is not the answer, and was never the question.** The dodge is
+*already* mostly vertical — |u_z| 0.66-0.96 in 10 of 16 — and |u_z| correlates
+**r = -0.077** with min_dist. No effect either way. `clamp_dodge_to_clearance`
+never flipping a dodge upward is fine; the geometric escape points up on its own
+most of the time. This closes the open "measure vertical escape" item without a
+separate experiment.
+
+**The airframe has more than 2 m/s².** It sheds 4.2 m/s of cruise inside a
+second under the old command — ~3 m/s². The 2 m/s² figure was the rise rate of
+the *deviation*, not the vehicle's acceleration authority.
+
+### Still open
+
+`latency` rose to 144 ms mean / 353 ms max (from 95/245) on the fixed run, both
+runs probed. Budget is 150 ms. The fix adds one vector add, so this is more
+likely load or run-to-run variance than the change — but it is unexplained and
+should be re-measured on a clean unprobed battery before Week 4 closes.
+
+B03 is now the only failing scenario, 0/3. Worth a look on its own geometry.
