@@ -55,20 +55,14 @@ source install/setup.bash
 
 ## Running the Simulation
 
-Flight-stack bring-up (3 terminals — Gazebo, SITL, launch) and the
-arm/takeoff/start_patrol service calls are in `CLAUDE.md` "Build & run". Two rules that
-bite (full detail in `CLAUDE.md` sharp edges):
-
-- **Always pass `--add-param-file=…/sitl_frame.parm`** to `sim_vehicle.py` — without it
-  a fresh EEPROM has `FRAME_CLASS=0` and the drone arms but never lifts.
-- **`--out` ports must match the YAMLs**: `bridge.yaml` listens on `:14552`,
-  `patrol.yaml` on `:14553`; MAVProxy's own `:14550` serves `first_flight.py` / QGC.
+Bring-up commands, the service calls, and the traps that bite (`sitl_frame.parm`,
+`--out` port fan-out) live in `CLAUDE.md`. Read its sharp edges before the first run.
 
 Optional smoke test: `python3 scripts/first_flight.py` (heartbeat → armed → takeoff →
 "Holding position", on `:14550`).
 
-Perception stack (depth world, detector, bag capture — Dell box only):
-`docs/week3_capture_runbook.md`.
+Perception stack (depth world, detector, bag capture — Dell only):
+`docs/bag_capture_runbook.md`.
 
 ## Acceptance Criteria
 - `ros2 launch huitzilin_sim week2_sitl.launch.py` + the three service calls fly a

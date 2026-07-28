@@ -2,7 +2,7 @@
 background_map.py — persistent voxel-hashed background model (W4).
 
 Replaces the 5-frame rolling background deque that made the detector go blind
-whenever the drone translated. Measured 2026-07-26 (see docs/JOURNAL.md, "the
+whenever the drone translated. Measured ("the
 detector goes blind while patrolling"): the deque's oldest frame is only 4 cloud
 frames = 0.267 s old, which cannot cover scene the camera newly *sees* as patrol
 translates and yaws, so the foreground ramped 48 -> 3475 -> ... -> 45023 points,

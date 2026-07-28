@@ -78,8 +78,8 @@ real sensor and re-measures the noise the Kalman filter was tuned against.
 - [ ] Feed the measured noise back into the Kalman measurement covariance. Do not carry the sim-tuned values over unexamined.
 
 > Week 4 closed with the dodge envelope bounded by *detection* range and frame
-> rate, not by tuning (see `docs/JOURNAL.md`). Whatever this step measures sets
-> where the real envelope lands, so treat these numbers as a headline result.
+> rate, not by tuning (`CLAUDE.md`). Whatever this step measures sets where the
+> real envelope lands, so treat these numbers as a headline result.
 
 ## 9. Remote ID & regulatory (Week 6)
 

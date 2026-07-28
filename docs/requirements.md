@@ -7,7 +7,7 @@
 | REQ-01 | The drone shall autonomously patrol a defined area without human input |
 | REQ-02 | The drone shall detect an incoming projectile using the OAK-D Lite stereo camera |
 | REQ-03 | The drone shall predict the projectile's intercept trajectory |
-| REQ-04 | The drone shall execute an evasive maneuver within 200ms of threat detection |
+| REQ-04 | The drone shall execute an evasive maneuver within 150 ms of threat detection |
 | REQ-05 | The drone shall activate the alarm (buzzer + LED strobe) upon threat detection |
 | REQ-06 | The drone shall return to patrol after a successful evasion |
 
@@ -15,9 +15,9 @@
 
 | ID | Requirement |
 |----|-------------|
-| REQ-07 | End-to-end latency (detect → evade command) shall be ≤ 200ms |
-| REQ-08 | Evasion success rate shall be ≥ 80% in controlled testing |
-| REQ-09 | Payload weight overhead shall not exceed 200g |
+| REQ-07 | End-to-end latency (detect → evade command) shall be ≤ 150 ms |
+| REQ-08 | Evasion shall succeed on every hit-intent throw inside the reaction envelope, reported split by ball speed — never as a blended rate (`CLAUDE.md`) |
+| REQ-09 | Payload weight overhead shall not exceed 200 g |
 
 ## Constraints
 

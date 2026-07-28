@@ -7,7 +7,6 @@ Usage:
   Terminal 2 (ours): ros2 launch huitzilin_sim week2_sitl.launch.py
 
 Keeping the sim in its own terminal makes failures easier to read.
-Uncomment the IncludeLaunchDescription block below to start everything at once.
 """
 import os
 from launch import LaunchDescription
@@ -24,11 +23,9 @@ def generate_launch_description():
     # demo geometry (scripts/plot_telemetry.py hardcodes the 5 m square).
     default_patrol_params = os.path.join(pkg, "params", "patrol.yaml")
 
-    # These three nodes previously ran on the wall clock while every
-    # Gazebo-sourced node ran on sim time, so header stamps could not be joined
-    # across the boundary (the two clocks differ by a *rate*, RTF, not an
-    # offset). Gazebo publishes /clock, and ArduPilot SITL is lockstepped to
-    # Gazebo, so sim time is the correct timebase for the whole flight stack.
+    # The whole flight stack must share Gazebo's clock: the wall and sim clocks
+    # differ by a *rate* (RTF), not an offset, so header stamps cannot be joined
+    # across the boundary. ArduPilot SITL is lockstepped to Gazebo.
     # Overridable for the rare case of running the bridge against a real
     # vehicle, where no /clock exists and a sim-time node would freeze.
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -41,13 +38,6 @@ def generate_launch_description():
                               default_value="true",
                               description="follow Gazebo /clock; set false only "
                                           "when flying real hardware"),
-        # --- optional: start SITL+Gazebo in this launch instead of a separate terminal ---
-        # from launch.actions import IncludeLaunchDescription
-        # from launch.launch_description_sources import PythonLaunchDescriptionSource
-        # IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(
-        #     get_package_share_directory("ardupilot_gz_bringup"),
-        #     "launch", "iris_runway.launch.py"))),
-
         Node(
             package="huitzilin_sim",
             executable="mav_bridge",

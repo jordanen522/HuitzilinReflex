@@ -678,7 +678,7 @@ class DetectorNode(Node):
         old 0.18-0.48 m/s figure was a two-competing-stacks artifact), so one
         period is ~0.10 m — exactly diff_threshold_m. It is still not what
         blinds the detector during patrol: the foreground floods to ~48k points
-        even at 0.63 m/s, where one period is 0.02 m. See docs/JOURNAL.md
+        even at 0.63 m/s, where one period is 0.02 m.
         "the detector goes blind while patrolling" — the cause is the 5-frame
         rolling background buffer, not this lookup.
         """

@@ -3,7 +3,7 @@
 Runs without ROS (numpy + scipy only):
     python -m pytest src/huitzilin_perception/test/test_background_map.py
 
-The two headline tests encode the measured Week-4 failure (docs/JOURNAL.md,
+The two headline tests encode the measured Week-4 failure (
 "the detector goes blind while patrolling"):
 
   test_revisited_region_stays_background — the rolling deque forgets a region

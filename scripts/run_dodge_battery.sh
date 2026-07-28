@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Week 4 dodge battery / sweep — Dell only (live Gazebo depth required).
 #
-# Prereqs (docs/week4_dodge_runbook.md): depth world + SITL up, drone flying
+# Prereqs (docs/dodge_battery_runbook.md): depth world + SITL up, drone flying
 # patrol under `ros2 launch huitzilin_perception week4_evasion.launch.py
 # with_patrol:=true`.
 #

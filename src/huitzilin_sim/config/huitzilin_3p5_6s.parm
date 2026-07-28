@@ -2,8 +2,8 @@
 # Load via MAVProxy:  param load /path/to/huitzilin_3p5_6s.parm
 # Or via SITL flag:   --add-param-file=/path/to/huitzilin_3p5_6s.parm
 #
-# These are Pass-A (params-only) tuning targets from the Week 2 playbook §6 Day 2.
-# Pass-B (model SDF edits) runs in parallel — see models/huitzilin_duct/.
+# Params-only tuning targets for the ducted airframe; the matching SDF-fidelity
+# work is deferred to Weeks 7-8.
 #
 # IMPORTANT: SITL will learn/override some params during flight (e.g. MOT_THST_HOVER).
 # Treat these as starting points; re-save with "param save" after a stable hover.

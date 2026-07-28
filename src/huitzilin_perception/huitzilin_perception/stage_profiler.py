@@ -1,6 +1,6 @@
 """Per-stage wall-clock profiler for the detector cloud callback.
 
-Why this exists (docs/JOURNAL.md, 2026-07-27): the dodge latency was traced to
+Why this exists: the dodge latency was traced to
 detector *compute*, not transport. Clouds arrive every ~77 ms of wall time
 (15 Hz at the measured RTF 0.864) and `_cloud_cb` was taking ~160 ms mean, so
 the depth-5 queue backs up and every cloud is already stale on arrival. The

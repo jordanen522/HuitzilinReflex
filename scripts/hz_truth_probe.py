@@ -14,7 +14,7 @@ Records, one CSV row each, every sample of:
 
 Stamps come from the message header (gz sim time), never from arrival time.
 Deriving a time from arrival order on this stream is a measurement trap that
-has already produced one wrong answer in this project — see docs/JOURNAL.md,
+has already produced one wrong answer in this project —
 "never derive a velocity off /gz/dynamic_poses arrival times".
 
 Run it alongside the live stack, then throw:

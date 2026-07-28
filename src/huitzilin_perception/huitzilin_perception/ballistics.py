@@ -49,7 +49,7 @@ class MissVector(NamedTuple):
     Supplements the scalar `min_dist`, which is the PERPENDICULAR distance from
     the path to the drone and therefore cannot distinguish a lead that fired
     early from a path that drifted sideways from a gravity-compensation error —
-    three different bugs with three different fixes. See docs/JOURNAL.md
+    three different bugs with three different fixes.
     2026-07-27.
     """
     along_m: float   # + = ball ended up BEYOND the drone along its own heading

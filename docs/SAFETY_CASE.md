@@ -1,5 +1,7 @@
 # Safety Case — Project HuitzilinReflex
 
+Owns every binding safety, legal, and privacy rule for the project.
+
 ## 1. Failure Mode & Effects Analysis (FMEA)
 
 | Failure Mode | Cause | Effect | Detection | Safe Response | Severity |
@@ -36,7 +38,9 @@
 4. Disarm
 
 ### Fail-Safe Default
-FAILSAFE state = calm hover → RTL → land. Never an evasive maneuver on a fault.
+Any undefined fault → FAILSAFE (calm geofenced hover) → RTL → land. **Never** an evasive
+maneuver on a fault — the reflex is for projectiles only. All safe states trace to
+`docs/state_machine.md`.
 
 ## 3. Kill-Switch Design
 
@@ -63,6 +67,12 @@ Cuts all motors immediately regardless of flight mode.
 - Visual line-of-sight maintained at all times
 - Defined abort criteria: any unexpected behavior → kill-switch immediately
 
+### Legal & Battery Rules
+- **FAA:** register, broadcast Remote ID, maintain visual line of sight, no autonomous
+  flight over people or vehicles without a waiver, stay clear of controlled airspace.
+- **LiPo:** charge on the ISDT inside the fireproof bag, never unattended; store at
+  storage charge; 18650s cased, never loose.
+
 ### Privacy Rules
 - The drone camera records depth data only, not RGB video by default
 - Any footage captured stays on local storage, never uploaded
@@ -78,13 +88,7 @@ Cuts all motors immediately regardless of flight mode.
 | Payload malfunction | Land, props off, inspect |
 | Loss of visual line-of-sight | Kill-switch immediately |
 
-## 5. Fail-Safe Defaults
-
-- Default on any undefined fault: → FAILSAFE (calm hover) → RTL → land
-- FAILSAFE never triggers an evasive maneuver — reflex is for projectiles only
-- All safe states trace to the state machine in `docs/state_machine.md`
-
-## Requirements Traceability
+## 5. Requirements Traceability
 
 | Safety Claim | REQ ID |
 |---|---|

@@ -269,7 +269,7 @@ class ProjectileTracker:
 class MultiHypothesisTracker:
     """A small set of candidate ProjectileTracker hypotheses.
 
-    Why this exists (measured 2026-07-27, docs/JOURNAL.md): a single filter fed
+    Why this exists (measured): a single filter fed
     every centroid is forced to represent whatever arrived last. The detector
     emits ~1.4 false positives per second, so a stale FP track is usually alive
     when a ball arrives — and after ONE rejection its covariance has inflated

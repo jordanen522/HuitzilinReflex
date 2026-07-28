@@ -1,6 +1,8 @@
 # detector.yaml
-# All detection thresholds for detector_node.py (W3-11 – W3-15).
-# Tune against the bag library (W3-15); commit the sweep that justifies any change.
+# All detection thresholds for detector_node.py.
+# Tune against the bag library; commit the sweep that justifies any change.
+# The library is saturated (recall 100%) — it can no longer referee threshold
+# changes, and every trigger-side lever is a measured null (CLAUDE.md).
 #
 # NO magic numbers in detector_node.py — every tunable lives here.
 
@@ -73,35 +75,35 @@ detector:
     cloud_reliable: true
     cloud_queue_depth: 5
 
-    # ── Input cloud axis convention (W3-15) ───────────────────────────────────
+    # ── Input cloud axis convention ───────────────────────────────────
     # gz-sim PointCloudPacked stays in the gz sensor body frame (X fwd, Y left,
     # Z up); <optical_frame_id> renames the header only. "gz_flu" remaps points
     # to REP-103 optical at ingest. Set "optical" for a real OAK-D (DepthAI
     # already outputs optical-convention clouds).
     cloud_convention: "gz_flu"
 
-    # ── ROI / range gate (W3-12) ──────────────────────────────────────────────
+    # ── ROI / range gate ──────────────────────────────────────────────
     # Keep only points within this depth range (metres).
     # Reliable OAK-D Lite working band; clip edges that are too noisy.
     roi_min_range_m: 0.30
-    roi_max_range_m: 5.00   # W3-15: 8.0 let far background (12-19m) dominate the diff — hover attitude
+    roi_max_range_m: 5.00   # 8.0 let far background (12-19m) dominate the diff — hover attitude
                              # jitter x long range >> diff_threshold there, flooding fg every frame
                              # (S02 funnel: fg=25k-90k, clusters=0). Tried 6.5 to rescue S08 (14 m/s,
                              # offset_forward_m=6.0) but that regressed S03 and STILL didn't fix S08
                              # (90%->80% recall) — S08's failure isn't a range/dwell issue after all.
                              # Reverting to 5.0 (best measured train recall: 90%, TP=9/FN=1) and
-                             # moving to the held-out test split per W3-17; S08 stays a known FN.
+                             # moving to the held-out test split; S08 stays a known FN.
 
     # Forward half-angle of the ROI frustum (degrees).
     # Points outside this cone ahead of the camera are discarded.
-    roi_half_angle_deg: 45.0   # W3-15: widened 40->45 for oblique misses (S04)
+    roi_half_angle_deg: 45.0   # widened 40->45 for oblique misses (S04)
 
-    # ── Voxel downsampling (W3-12) ────────────────────────────────────────────
+    # ── Voxel downsampling ────────────────────────────────────────────
     # Leaf size for voxel grid downsampling (metres).
     # Larger = faster but misses small objects.
-    voxel_leaf_m: 0.02   # W3-15: 0.05 m voxels are COARSER than the 80 mm projectile -> it collapsed to 1-2 pts. 0.02 m resolves it into ~10-20 pts.
+    voxel_leaf_m: 0.02   # 0.05 m voxels are COARSER than the 80 mm projectile -> it collapsed to 1-2 pts. 0.02 m resolves it into ~10-20 pts.
 
-    # ── Background model / frame differencing (W3-13, reworked W4) ───────────
+    # ── Background model / frame differencing ────────────────────────────────
     # Persistent voxel-hashed background map in the fixed frame, replacing the
     # rolling deque below. Root cause it fixes (measured 2026-07-26): the deque
     # only remembers 0.267 s, so scene the camera newly sees while patrolling
@@ -121,21 +123,21 @@ detector:
     bg_history_frames: 5
 
     # Minimum per-voxel depth change (metres) to count as "foreground".
-    diff_threshold_m: 0.10   # W3-15: 0.15 missed fast/oblique closes (S03,S06,S08) — lowered sensitivity floor
+    diff_threshold_m: 0.10   # 0.15 missed fast/oblique closes (S03,S06,S08) — lowered sensitivity floor
 
     # Skip the frame entirely if more foreground points than this survive
     # differencing: whole-scene change = egomotion flood (patrol turn), not a
     # projectile. Also bounds clustering cost.
     fg_max_points: 5000
 
-    # ── Euclidean clustering (W3-13) ──────────────────────────────────────────
+    # ── Euclidean clustering ──────────────────────────────────────────
     # Points within this radius (metres) are merged into the same cluster.
     cluster_tolerance_m: 0.20
 
     # Reject clusters outside this size range (number of voxel-downsampled points).
     # W4: cluster_max_points now applies only AFTER extent splitting. Applying it
     # first discarded the ball whenever it merged into a larger blob.
-    cluster_min_points: 5     # W3-15: raised 3->5 — 3 was letting background clutter FP (N01, N03) through
+    cluster_min_points: 5     # raised 3->5 — 3 was letting background clutter FP (N01, N03) through
     cluster_max_points: 500
 
     # Extent splitting (W4): a cluster larger than cluster_max_extent_m is
@@ -155,16 +157,16 @@ detector:
     # primary FP gate — point-count ranges overlap, metric size does not.
     cluster_max_extent_m: 0.35
 
-    # ── Centroid publishing (W3-14) ───────────────────────────────────────────
+    # ── Centroid publishing ───────────────────────────────────────────
     # Minimum confidence score [0–1] to publish a centroid.
     # (Score = normalised cluster size; keeps the largest coherent blob.)
-    min_publish_score: 0.006  # W3-15: ~3 pts; let cluster_min_points be the size floor, not the score gate.
+    min_publish_score: 0.006  # ~3 pts; let cluster_min_points be the size floor, not the score gate.
 
     # ── Output topic ──────────────────────────────────────────────────────────
     threat_centroid_topic: "/threat/centroid"
     marker_topic: "/threat/marker"
 
-    # ── Egomotion compensation (W3-13) ────────────────────────────────────────
+    # ── Egomotion compensation ────────────────────────────────────────
     # Fold /huitzilin/odom into TF and difference clouds in the fixed frame
     # below instead of the moving camera frame. Requires odom with a valid
     # orientation quaternion (mav_bridge ≥ the 2026-07-06 attitude fix);

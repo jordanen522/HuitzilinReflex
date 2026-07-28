@@ -4,7 +4,7 @@
 # keeps the 5 m square because that is the Week 2 demo geometry and
 # scripts/plot_telemetry.py hardcodes it as the planned-track reference.
 #
-# WHY A BIGGER LOOP (measured, 2026-07-26 — see docs/JOURNAL.md):
+# WHY A BIGGER LOOP (measured):
 # The battery leads its throw by extrapolating the drone at constant velocity
 # over the ball's flight. patrol flies position mode, so ArduPilot decelerates
 # into every waypoint and accelerates out along a new heading — the throw is

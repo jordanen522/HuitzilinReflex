@@ -2,7 +2,7 @@
 """
 hz_dodge_response.py — measure how fast the dodge manoeuvre actually develops.
 
-Why this exists (docs/JOURNAL.md, 2026-07-27): five levers moved `tca` by +-0.05 s
+Why this exists: five levers moved `tca` by +-0.05 s
 each and dodge success did not move at all, sitting at 61-72% across six
 batteries. Failures are bimodal — successes land at 0.35-0.53 m, failures at
 ~0.155 m, which is the measured aim error, i.e. the ball's natural miss with the

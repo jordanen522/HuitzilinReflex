@@ -62,18 +62,11 @@ No event cameras, no LiDAR, no hand-built depth math: the OAK-D Lite's Myriad X 
 computes stereo depth **in-camera** and streams finished depth/point clouds to the Pi
 over USB 3 — the Pi never does per-pixel depth work.
 
-```
-[ OAK-D Lite ] —USB 3→ [ Raspberry Pi 5 ]
-    depthai-ros → PointCloud2/depth → evasion node:
-      spatial slice → moving-cluster extraction → predictive Kalman filter
-      → GPIO (buzzer + LED strobe) + pymavlink SET_POSITION_TARGET_LOCAL_NED
-→ [ MicoAir H743 AIO, ArduPilot ] velocity-loop dodge → 4-in-1 ESC → motors
-```
+Detection (incoming projectile = sudden cluster of depth differentials) → tracking
+(centroid into a predictive Kalman filter for velocity) → trigger (predicted intercept
+inside the drone's boundary → alarm GPIO + a high-rate ~1.5 m/s velocity-spike command).
 
-1. **Detection** — incoming projectile = sudden cluster of depth differentials.
-2. **Tracking** — cluster centroid piped into a predictive Kalman filter for velocity.
-3. **Trigger** — predicted intercept inside the drone's boundary → alarm GPIO + a
-   high-rate velocity-spike command (~1.5 m/s) to clear the object.
+Node graph, topics, rates, and the full contract table: `docs/architecture.md`.
 
 ---
 
@@ -101,26 +94,15 @@ over USB 3 — the Pi never does per-pixel depth work.
 Weeks 1–4 pure simulation; hardware bring-up parallel on the bench (props off); real
 flight staged late. Each week has a Definition of Done.
 
-**Done:**
-- **Week 0 — Procurement ✔** Full BOM ordered (Appendix A); all Week-5 hardware in hand.
-- **Week 1 — Architecture, safety case, sim environment ✔** SITL + Gazebo + ROS 2 up;
-  scripted arm/takeoff/hold via pymavlink.
-- **Week 2 — ROS 2 ↔ pymavlink bridge + patrol ✔** Autonomous closed patrol loop in
-  Gazebo with logged telemetry (43 laps, mean 29.51 s — `docs/week2_patrol_evidence.md`).
-  Airframe fidelity tuning deferred to Weeks 7–8.
-- **Week 3 — Perception pipeline ✔** (closed 2026-07-15) Simulated OAK-D depth sensor,
-  synthetic projectile scenarios, detection node, labeled 17-bag library + regression
-  harness. Held-out test recall 100%, gate green. Open items in `docs/JOURNAL.md`.
-- **Week 4 — Evasion logic & Kalman filter in the loop ✔** (closed 2026-07-27) Predictive
-  KF + multi-hypothesis tracker + dodge trigger, closed detection → intercept →
-  velocity-spike → alarm (mocked GPIO), swept over a 7-scenario battery. All four DoD
-  criteria met. The result is a **capability envelope, not a success rate**: over five
-  batteries (95 scored throws) **78/78 dodges at ≤ 8 m/s, 0/17 at 14 m/s, 0/12 false
-  dodges**; latency mean 95–115 ms against a 150 ms budget, with a 25% tail above it that
-  costs no outcomes. The 14 m/s failure is a time limit, not a defect — the ball crosses
-  the ~3 m detection range in 0.22 s while confirming a track costs 0.21 s — so the
-  envelope's upper bound is set by **sensing**, and Week 6 is what moves it.
-  See `docs/JOURNAL.md` and `docs/week4_dodge_runbook.md` §5.
+**Done** (results and the Week 4 envelope: `CLAUDE.md`):
+
+| Week | Delivered |
+|---|---|
+| 0 — Procurement ✔ | Full BOM ordered (Appendix A); all Week-5 hardware in hand |
+| 1 — Architecture, safety case, sim env ✔ | SITL + Gazebo + ROS 2 up; scripted arm/takeoff/hold via pymavlink |
+| 2 — ROS 2 ↔ pymavlink bridge + patrol ✔ | Autonomous closed patrol loop, logged telemetry (43 laps, mean 29.51 s). Airframe fidelity deferred to Weeks 7–8 |
+| 3 — Perception pipeline ✔ (2026-07-15) | Simulated OAK-D depth, synthetic scenarios, detection node, 17-bag labeled library + regression harness; held-out test recall 100% |
+| 4 — Evasion logic & KF in the loop ✔ (2026-07-27) | Predictive KF + multi-hypothesis tracker + dodge trigger; closed detection → intercept → velocity-spike → alarm (mocked GPIO) over a 7-scenario battery. All four DoD criteria met; result is a capability envelope bounded by sensing, so Week 6 is what moves it |
 
 **Remaining:**
 - **Week 5 — FC swap, avionics & power** (the one fabrication step). Swap F722 → H743,
@@ -146,17 +128,10 @@ flight staged late. Each week has a Definition of Done.
 
 ## 6. Safety, Legal & Ethical
 
-- **FAA:** register, broadcast Remote ID, visual line of sight, no autonomous flight over
-  people/vehicles without waiver, clear of controlled airspace.
-- **LiPo:** charge on the ISDT in the fireproof bag, never unattended; store at storage
-  charge; 18650s cased, never loose.
-- **Enclosures only:** all evasion testing inside netting, soft projectiles, hardware
-  kill-switch in reach. Ducts make blade contact safe, not a flyaway.
-- **People-tracking is sensitive:** decide up front what is recorded, where footage goes,
-  retention; never point at non-consenting people; the warning payload is a signal, never
-  harassment.
-- **Fail safe, not aggressive:** any dropout/link-loss/low-battery → calm geofenced hover
-  → RTL/land, never an evasive lunge.
+The binding rules — FAA/Remote ID, LiPo handling, netted-enclosure testing, privacy and
+consent, abort criteria, and the fail-safe default — are owned by `docs/SAFETY_CASE.md`.
+Design constraint they impose here: the ducts make blade contact safe, not a flyaway, so
+enclosure and kill-switch discipline is what actually bounds evasion testing.
 
 ---
 

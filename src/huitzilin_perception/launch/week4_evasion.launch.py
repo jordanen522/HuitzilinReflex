@@ -6,7 +6,7 @@ One-command bring-up of the Week 4 evasion stack:
   2. evasion node (Kalman + dodge trigger)
   3. Gazebo dynamic-pose bridge -> /gz/dynamic_poses (battery ground truth)
 
-USAGE (Dell, after world + SITL are up — docs/week4_dodge_runbook.md)
+USAGE (Dell, after world + SITL are up — docs/dodge_battery_runbook.md)
 ---------------------------------------------------------------------
   ros2 launch huitzilin_perception week4_evasion.launch.py with_patrol:=true
 

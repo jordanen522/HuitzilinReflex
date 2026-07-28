@@ -70,14 +70,14 @@
         The gz_ros2_bridge maps this to sensor_msgs/Image on /oak/depth and
         sensor_msgs/PointCloud2 on /oak/points (see params/bridge.yaml).
 
-        NOTE (W3-15): optical_frame_id only sets the header frame NAME.
+        NOTE: optical_frame_id only sets the header frame NAME.
         The point DATA stays in the gz sensor body frame (X-fwd, Y-left,
         Z-up) — the detector remaps to optical (cloud_convention: gz_flu).
       -->
       <sensor name="oak_d_lite_depth" type="depth_camera">
         <pose>0 0 0 0 0 0</pose>
         <always_on>true</always_on>
-        <update_rate>15</update_rate>  <!-- W3-04: 30->15 Hz; OAK-D Lite res kept 640x480; ros_gz_bridge cloud could not sustain 30 Hz on Dell i5-8400 (no GPU) -->
+        <update_rate>15</update_rate>  <!-- 15 Hz, not 30: ros_gz_bridge cannot sustain 30 Hz at 640x480 on the Dell. Resolution kept at the real OAK-D Lite's. -->
         <visualize>false</visualize>
 
         <camera name="depth">
@@ -114,13 +114,12 @@
 
 
     <!-- ================================================================== -->
-    <!-- Flight plugins (W3-04b).                                            -->
-    <!-- iris_depth merge-includes the BARE iris_with_standoffs, which ships -->
-    <!-- no flight plugins, so SITL received no FDM ("No JSON sensor message -->
-    <!-- received") and the rotors produced no lift. These are the same      -->
-    <!-- plugins ardupilot_gazebo's iris_with_ardupilot adds, with the       -->
-    <!-- "iris_with_standoffs::" prefix stripped because merge="true"        -->
-    <!-- flattens those links/joints to iris_depth's top level.              -->
+    <!-- Flight plugins.                                                     -->
+    <!-- MUST stay here: iris_depth merge-includes the BARE                  -->
+    <!-- iris_with_standoffs, which ships no flight plugins. Without these,  -->
+    <!-- SITL gets no FDM ("No JSON sensor message received") and the rotors -->
+    <!-- produce no lift. The "iris_with_standoffs::" prefix is stripped     -->
+    <!-- because merge="true" flattens links/joints to the top level.        -->
     <!-- ================================================================== -->
 
     <plugin filename="gz-sim-joint-state-publisher-system"

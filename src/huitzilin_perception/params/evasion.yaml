@@ -1,4 +1,4 @@
-# evasion.yaml — Week 4 evasion-node tuning (see docs/week4_dodge_runbook.md).
+# evasion.yaml — Week 4 evasion-node tuning (see docs/dodge_battery_runbook.md).
 #
 # Sweepable at runtime via `ros2 param set /evasion <key> <val>` (the dodge
 # battery's sweep mode uses this): dodge_speed_mps, threat_radius_m,
@@ -15,7 +15,7 @@ evasion:
     # ── Multi-hypothesis association (fixed at node start) ───────────────
     # The tracker keeps several candidate tracks instead of forcing one filter
     # to represent whatever centroid arrived last. Root cause it fixes
-    # (measured 2026-07-27, docs/JOURNAL.md): the detector emits ~1.4 false
+    # (measured): the detector emits ~1.4 false
     # positives/s, so a stale FP track was usually alive when a ball arrived
     # and — after a single rejection — its inflated covariance SWALLOWED the
     # ball, fitting a ~38 m/s velocity along the FP-to-ball line. Six frames to

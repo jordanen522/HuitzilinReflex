@@ -27,5 +27,4 @@
 | RTL/LAND | Landed | DISARMED |
 
 ## Fault Defaults
-- Any undefined condition → FAILSAFE
-- FAILSAFE behavior: calm hover → RTL → land (never an evasive maneuver)
+Any undefined condition → FAILSAFE. Behavior is owned by `docs/SAFETY_CASE.md` §2.

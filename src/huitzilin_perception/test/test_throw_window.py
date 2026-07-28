@@ -3,7 +3,7 @@
 Runs without ROS (pure arithmetic):
     python -m pytest src/huitzilin_perception/test/test_throw_window.py
 
-Failure being encoded (docs/JOURNAL.md, battery v9, 2026-07-26): 11 of 17
+Failure being encoded: 11 of 17
 throws landed off-target, aim error mean 1.50 m / max 3.79 m. The lead in
 compute_spawn extrapolates the drone at CONSTANT velocity across the ball's
 flight, but patrol_node is a *corner* follower — a 5 m square in position

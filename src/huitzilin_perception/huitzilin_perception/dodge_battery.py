@@ -13,15 +13,16 @@ Success per run:
   expect_dodge true  -> dodged AND min_dist_m > hit_radius_m
   expect_dodge false -> did NOT dodge (false-dodge check)
 
-No hard success-rate gate (2026-07-16 decision): measured rates are
-reported; the exit code is non-zero only for harness errors (no odom, no
-ground-truth stream, spawn failure, missing config).
+No hard success-rate gate: measured rates are reported; the exit code is
+non-zero only for harness errors (no odom, no ground-truth stream, spawn
+failure, missing config). The blended on-target rate this prints is not the
+headline number — report the envelope split by ball speed (CLAUDE.md).
 
 Sweep mode (-p sweep_config:=<yaml>) grids evasion-node parameters through
 the /evasion set_parameters service between battery passes.
 
 PREREQS (Dell only — live Gazebo depth): the full Week 4 stack is up and
-the drone is patrolling. See docs/week4_dodge_runbook.md.
+the drone is patrolling. See docs/dodge_battery_runbook.md.
 
 All run windows are timed in SIM time (use_sim_time:=true required).
 """
@@ -104,107 +105,70 @@ class DodgeBatteryNode(Node):
         self.declare_parameter("settle_s", 6.0)        # sim s between runs
         self.declare_parameter("latency_budget_s", 0.15)
         self.declare_parameter("evasion_node_name", "/evasion")
-        # Lead the throw at the drone's PREDICTED position. Without this the aim
-        # is a stale snapshot and a patrolling drone (measured 2.5-3.2 m/s on a
-        # single clean stack) walks clear on its own: 8 m/s "direct hit" runs
-        # measured 1.3-2.6 m closest approach, ~= |v| * t_flight, so the trigger
-        # correctly ignored them and they scored as dodge failures. Leading the
-        # same throw measures ~0.33 m. Set false only to reproduce old reports.
+        # Aim at the drone's PREDICTED position. A stale snapshot lets a
+        # patrolling drone walk clear on its own (closest approach ~= |v| *
+        # t_flight), which the trigger correctly ignores and the battery then
+        # mis-scores as a dodge failure. Set false only to reproduce old reports.
         self.declare_parameter("lead_target", True)
-        # Dead time between sampling odom and the ball actually launching.
-        #
-        # MEASURED directly 2026-07-27 (spawn_dead_s: odom-sample sim time vs.
-        # the ball's first appearance on /gz/dynamic_poses): 0.216 s mean,
-        # 0.185-0.247 s over 18 throws. So the dead time is real and it is NOT
-        # the ~0.0 s the 2026-07-26 sweep inferred — that sweep was n=2-3 per
-        # point and predates the throw-window gate, so it was reading corner
-        # noise, not latency.
-        #
-        # Set to the measured value: declaring it takes the reported undeclared
-        # remainder to -0.006 s. But note what it does NOT buy — aim error under
-        # patrol only improved 1.18 -> 0.96 m (B04 0.92-0.97 -> 0.82-0.86, B05
-        # 1.61-1.66 -> 1.45-1.47), so ~0.8-1.5 m of the patrol aim error is
-        # something else. Do not read this parameter as the fix for that; see
-        # docs/JOURNAL.md 2026-07-27 for the miss-vector decomposition that is
-        # needed next. Re-measure if the throw path ever falls back to the gz
-        # CLI (which restores gravity late).
+        # Dead time from sampling odom to the ball actually launching; measured
+        # 0.216 s (n=18). Re-measure if the throw path ever falls back to the gz
+        # CLI, which restores gravity late. This is NOT the whole patrol aim
+        # error — most of it is something else, so don't read it as that fix.
         self.declare_parameter("spawn_latency_s", 0.216)
-        # Staleness of the odom sample ITSELF, which is a second dead time on
-        # top of the spawn one above and was invisible until the miss
-        # decomposition landed. The battery treats the newest /huitzilin/odom as
-        # "where the drone is now"; it is not.
-        #
-        # MEASURED directly 2026-07-27, n=1595 cruise samples: the drone's
-        # Gazebo ground-truth position leads its odom position by 0.561 m
-        # along-track at 4.36 m/s = 129 ms (median 128 ms, sd 0.334 m). The
-        # offset's magnitude equals its along-track component almost exactly,
-        # i.e. it is pure time lag with no lateral bias — which is what makes it
-        # a latency to declare rather than a calibration error to correct.
-        #
-        # This is the same root cause as the deferred mav_bridge_node odom-stamp
-        # item: MAVLink + bridge transport delay. Fixing the stamp there would
-        # let consumers compensate properly; declaring it here compensates the
-        # lead now, and keeps the two dead times separate in the report so
-        # neither hides the other.
+        # A second, independent dead time: staleness of the odom sample itself.
+        # The battery treats the newest /huitzilin/odom as "where the drone is
+        # now"; it is not. Measured 0.129 s (n=1595) as pure time lag with no
+        # lateral bias — hence a latency to declare, not a calibration to
+        # correct. Same root cause as the deferred mav_bridge_node odom-stamp
+        # item (MAVLink + bridge transport delay); fixing the stamp there would
+        # let consumers compensate properly. Kept separate from spawn_latency_s
+        # in the report so neither dead time hides the other.
         self.declare_parameter("odom_lag_s", 0.129)
-        # The lead extrapolates the drone at CONSTANT velocity across the
-        # ball's flight (0.43 s at 14 m/s, 1.5 s at 4 m/s). That is false while
-        # patrol is turning a waypoint, which is what still spoiled battery v7:
-        # slow B01 runs missed by 1.0-4.2 m and B07's nominal 1.5 m wide miss
-        # arrived at 0.30 m. Waiting for the velocity to stop changing makes the
+        # The lead extrapolates the drone at CONSTANT velocity across the ball's
+        # flight (0.43 s at 14 m/s, 1.5 s at 4 m/s), which is false while patrol
+        # turns a waypoint. Waiting for velocity to stop changing makes the
         # assumption true before spending a throw on it.
         self.declare_parameter("steady_vel_gate_mps", 0.35)
         self.declare_parameter("steady_vel_timeout_s", 5.0)  # wall
-        # The steady-velocity gate above is necessary but NOT sufficient: it
-        # samples |dv| over 0.15 s, and ArduPilot decelerating into a waypoint
-        # looks smooth by that measure while the path is still about to bend.
-        # Battery v9 shipped with only that gate and still put 11/17 throws
-        # off-target (aim error mean 1.50 m, max 3.79 m). The geometric gate
-        # below refuses any throw whose flight would span a patrol corner —
-        # see throw_window.py. Requires /huitzilin/patrol_state (patrol_node
-        # >= 2026-07-26); with require_throw_window true and no such topic,
-        # every run is skipped rather than thrown blind.
+        # Necessary but NOT sufficient on its own: the gate above samples |dv|
+        # over 0.15 s, and ArduPilot decelerating into a waypoint looks smooth by
+        # that measure while the path is still about to bend. The geometric gate
+        # refuses any throw whose flight would span a patrol corner — see
+        # throw_window.py. Requires /huitzilin/patrol_state; with this true and
+        # no such topic every run is skipped rather than thrown blind.
         self.declare_parameter("require_throw_window", True)
         self.declare_parameter("throw_window_margin_s", 0.30)
         self.declare_parameter("throw_window_timeout_s", 40.0)  # wall
-        # Cruise is ESTIMATED from odom (rolling max over this window) rather
-        # than read from patrol's cruise_speed_ms: patrol flies position mode,
-        # so ArduPilot's WPNAV_SPEED governs, not patrol's parameter. Measured
-        # 3.49 m/s max against a patrol.yaml cruise_speed_ms of 1.5.
+        # Cruise is ESTIMATED from odom (rolling max over this window), not read
+        # from patrol's cruise_speed_ms: patrol flies position mode, so
+        # ArduPilot's WPNAV_SPEED governs. Measured 3.49 m/s against a
+        # patrol.yaml cruise_speed_ms of 1.5.
         self.declare_parameter("cruise_estimate_window_s", 20.0)  # wall
-        # 0.95, derived from v12's residual bias — see throw_window.py.
-        self.declare_parameter("min_cruise_frac", 0.95)
-        # ── Hover control mode (2026-07-27) ──────────────────────────────────
-        # Aim error under patrol has two possible sources — the constant-velocity
-        # lead being wrong, and the spawn geometry itself being wrong — and the
-        # patrol battery cannot separate them. Against a stationary target the
-        # lead is exact by construction, so any residual error is geometry.
-        #
-        # This needs its own mode because a hover battery is otherwise
-        # impossible to run: evasion_node resumes patrol when a dodge completes
-        # ("dodge complete -> TRACKING (patrol resumed)"), so simply calling
-        # /huitzilin/start_patrol false before the battery only holds for the
-        # first successful dodge. Measured 2026-07-27: run 1 hovered, all 17
-        # after it were back at cruise. Patrol is therefore re-stopped before
-        # every throw, not once at the start.
+        self.declare_parameter("min_cruise_frac", 0.95)  # see throw_window.py
+        # Hover mode separates the two possible sources of patrol aim error: a
+        # wrong constant-velocity lead vs. wrong spawn geometry. Against a
+        # stationary target the lead is exact by construction, so any residual
+        # is geometry. It needs its own mode because evasion_node resumes patrol
+        # on every completed dodge, so calling /huitzilin/start_patrol false once
+        # at the start only holds for the first run — patrol is re-stopped before
+        # every throw.
         self.declare_parameter("hover_mode", False)
         self.declare_parameter("hover_speed_gate_mps", 0.15)
         self.declare_parameter("hover_settle_timeout_s", 25.0)  # wall
-        # A throw whose measured closest approach is this far from the
-        # scenario's miss_distance_m did not test what the scenario claims.
-        # Reported separately so aiming error is never read as trigger error.
+        # A throw landing this far from the scenario's miss_distance_m did not
+        # test what the scenario claims. Reported separately so aiming error is
+        # never read as trigger error.
         self.declare_parameter("off_target_tol_m", 0.5)
-        # How closely a centroid's own range must match the ball's true range to
+        # How closely a centroid's range must match the ball's true range to
         # count as a detection OF THE BALL rather than of patrol clutter. Sized
         # above the detector's centroid error on a partly-observed sphere and
         # well below the spacing between the ball and anything else in frame.
         self.declare_parameter("det_match_tol_m", 0.75)
-        # A ball measured slower than this fraction of its scenario speed never
-        # launched — the impulse wrench was dropped. That is a harness failure,
-        # and it must be reported as one rather than scored: one such run
-        # (ball_speed 0.0) put a 1312 s "flight time" and a 7.98 m "aim error"
-        # into the 2026-07-27 means, moving the reported aim error 0.41 -> 1.44 m.
-        # Averaging a throw that never happened is worse than losing the row.
+        # A ball slower than this fraction of its scenario speed never launched
+        # (impulse wrench dropped). That is a harness failure and must be
+        # reported as one, not scored: a single such row once moved the reported
+        # aim error 0.41 -> 1.44 m. Averaging a throw that never happened is
+        # worse than losing the row.
         self.declare_parameter("min_launch_speed_frac", 0.25)
 
         self._battery_f = Path(self.get_parameter("battery_config").value)
@@ -257,23 +221,16 @@ class DodgeBatteryNode(Node):
         self._latest_odom = None
         self._latest_patrol = None    # None until /huitzilin/patrol_state arrives
         self._speed_hist = collections.deque()   # (wall_t, |v|) for cruise est
-        # _odom_cb mutates _speed_hist on the executor thread while
-        # _cruise_est reads it on the run() worker thread; without this the
-        # read raises "deque mutated during iteration" and kills a run
-        # (observed once in battery v13, B01 r2).
+        # _odom_cb mutates _speed_hist on the executor thread while _cruise_est
+        # reads it on the run() worker thread; without this the read raises
+        # "deque mutated during iteration" and kills the run.
         self._speed_lock = threading.Lock()
         self._pose_stream_seen = False
         self._active_ball = None
-        # Sim time at which the spawned ball first appeared on
-        # /gz/dynamic_poses. Paired with the sim time the odom sample was taken,
-        # this measures the spawn dead time the lead has to compensate for --
-        # compute_spawn's spawn_latency_s. It is currently parameterised at 0.0
-        # while the docstring estimates ~0.5 s of sim time for the gz create
-        # call, and at a 5.26 m/s cruise every 0.1 s of it is 0.5 m of aim
-        # error. The hover control (2026-07-27) showed the spawn geometry is
-        # exact (aim error 0.10 m mean, 0/19 off-target), so this dead time is
-        # the leading candidate for the whole patrol aim error -- measure it
-        # rather than assume the 0.5 s.
+        # Sim time the spawned ball first appeared on /gz/dynamic_poses. Paired
+        # with the odom sample's sim time, this re-measures the spawn dead time
+        # that compute_spawn's spawn_latency_s compensates for, so the declared
+        # value can be checked against every run rather than trusted.
         self._ball_seen_sim = None
         self._min_dist = float("inf")
         # (ball_enu, drone_enu) at the closest-approach sample — see _pose_cb.
@@ -830,7 +787,7 @@ class DodgeBatteryNode(Node):
                                 f"{ball_speed:.2f} m/s vs {speed:.1f} m/s "
                                 f"specified — impulse wrench dropped (see the "
                                 f"duplicate/missing wrench-bridge note in "
-                                f"docs/week4_dodge_runbook.md)"}
+                                f"docs/dodge_battery_runbook.md)"}
 
         if base["expect_dodge"]:
             success = dodged and min_dist > self._hit_radius
