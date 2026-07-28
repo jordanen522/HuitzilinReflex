@@ -1,40 +1,28 @@
 #!/usr/bin/env python3
 """
-hz_dodge_response.py — measure how fast the dodge manoeuvre actually develops.
+hz_dodge_response.py — escape displacement vs. time since the dodge command,
+from Gazebo ground truth. Answers whether the airframe's rise time, rather than
+the trigger, is what a dodge is losing to.
 
-Why this exists: five levers moved `tca` by +-0.05 s
-each and dodge success did not move at all, sitting at 61-72% across six
-batteries. Failures are bimodal — successes land at 0.35-0.53 m, failures at
-~0.155 m, which is the measured aim error, i.e. the ball's natural miss with the
-dodge contributing NOTHING. That is not a trigger problem. The remaining
-suspect is the manoeuvre's rise time: a velocity step commanded 0.2-0.3 s before
-closest approach buys nothing if the airframe needs longer than that to move.
+Escape is measured against the drone's OWN pre-dodge motion, not a fixed point:
+patrol cruise (~5.25 m/s) otherwise dominates raw displacement. The baseline
+velocity is fitted over the 0.2 s before the trigger and extrapolated; escape is
+the residual, projected onto the commanded ENU escape direction. Ideal is
+dodge_speed_mps * t, what a perfect step response would deliver.
 
-So this measures the one curve nobody has plotted: escape displacement versus
-time since the dodge command, from Gazebo ground truth.
-
-Escape is measured against the drone's OWN pre-dodge motion, not against a fixed
-point: the drone is cruising at ~5.25 m/s on patrol when the dodge fires, and
-raw displacement is dominated by that cruise. The baseline velocity is fitted
-over the 0.2 s before the trigger and extrapolated; escape is the residual,
-projected onto the commanded ENU escape direction. Ideal is dodge_speed_mps * t,
-what a perfect step response would deliver.
-
-Run alongside the live stack, then throw (or run the battery):
+Run alongside the live stack, then throw (or run the battery); Ctrl-C to stop:
 
     source /opt/ros/jazzy/setup.bash && source ~/huitzilin_ws/install/setup.bash
     python3 ~/huitzilin_ws/scripts/hz_dodge_response.py --out /tmp/dodge_resp.csv
 
-Ctrl-C to stop; a summary line prints per dodge as it completes.
-
-Two measurement traps this respects (both cost a night already):
+Two measurement traps this respects:
   * /gz/dynamic_poses carries EVERY link in the world, and recording all of them
-    measurably blinded the detector being observed. Only the drone model is kept.
+    measurably blinds the detector being observed. Only the drone model is kept.
   * That topic is stamped with Gazebo's own clock (seconds since world start)
-    while the evade event carries ROS sim time (wall-anchored). They cannot be
-    joined on stamps, so poses are keyed by ROS-sim ARRIVAL time, which is the
-    same clock the event uses. Transport delay is a few ms against windows of
-    100-400 ms, and this is a displacement measurement, not a velocity one.
+    while the evade event carries ROS sim time, so they cannot be joined on
+    stamps. Poses are keyed by ROS-sim ARRIVAL time, the same clock the event
+    uses. Acceptable only because this is a displacement measurement over
+    100-400 ms windows — never derive a velocity this way.
 """
 
 from __future__ import annotations

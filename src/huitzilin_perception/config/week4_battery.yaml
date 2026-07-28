@@ -1,12 +1,13 @@
-# week4_battery.yaml — Week 4 dodge battery (see docs/dodge_battery_runbook.md).
+# Dodge battery (procedure: docs/dodge_battery_runbook.md).
 #
-# Every run spawns one projectile at the patrolling drone and scores the
-# outcome against Gazebo ground truth. compensate_gravity: true makes
-# "direct hit" runs genuinely intercept the drone (flat Week 3 throws pass
-# 0.7-2.8 m below it). expect_dodge: false rows are the false-dodge check.
+# Every run spawns one projectile at the patrolling drone and scores the outcome
+# against Gazebo ground truth. compensate_gravity: true makes "direct hit" runs
+# genuinely intercept (a flat throw passes 0.7-2.8 m below the drone).
+# expect_dodge: false rows are the false-dodge check.
 #
-# No hard success-rate gate (2026-07-16 decision): the battery reports
-# measured rates; only harness errors fail the run.
+# No hard success-rate gate by design: the battery reports measured rates and
+# only harness errors fail the run. Results are an envelope split by ball speed,
+# never a blended rate (CLAUDE.md).
 
 defaults:
   offset_forward_m: 6.0
@@ -24,21 +25,17 @@ runs:
     approach_angle_deg: 0.0
     miss_distance_m: 0.0
     expect_dodge: true
-    # Shorter throw than the 6.0 m default, because at 4 m/s that default flies
-    # for 1.50 s and the throw-window gate then needs 1.80 s of straight leg at
-    # cruise. The 12 m patrol loop's best observed leg is 2.18 s and it rarely
-    # coincides with the 95%-cruise floor, so B01 was SKIPPED on every attempt
-    # across batteries v12-v23 — measured, not assumed. 4.0 m gives a 1.00 s
-    # flight needing 1.30 s, which this loop supplies routinely.
+    # Shorter than the 6.0 m default: at 4 m/s that default flies 1.50 s and the
+    # throw-window gate then needs 1.80 s of straight leg at cruise, which the
+    # 12 m loop never supplied — B01 was skipped on every attempt. 4.0 m needs
+    # 1.30 s, which it supplies routinely.
     #
     # Shortening the flight is the right knob: lowering throw_window_margin_s
-    # would buy the same window by weakening the gate that fixed the aiming, and
-    # lengthening the patrol loop would move the baseline every other scenario is
-    # measured against. The scenario still tests what it claims, a slow head-on
-    # intercept, just from 4 m. One caveat when reading its numbers: 4 m starts
-    # the ball inside the 5 m range gate, so B01 is the only scenario whose
-    # detection is not range-limited — its first_det_range_m is not comparable to
-    # the others.
+    # would weaken the gate that fixed the aiming, and lengthening the patrol
+    # loop would move the baseline every other scenario is measured against.
+    # CAVEAT when reading B01: 4 m starts the ball inside the 5 m range gate, so
+    # it is the only scenario whose detection is not range-limited and its
+    # first_det_range_m is not comparable to the others.
     offset_forward_m: 4.0
 
   - id: B02

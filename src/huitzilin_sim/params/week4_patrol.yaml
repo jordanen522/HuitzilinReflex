@@ -1,29 +1,19 @@
-# week4_patrol.yaml — patrol geometry for the Week 4 dodge battery ONLY.
+# Patrol geometry for the dodge battery ONLY. Same node and parameters as
+# patrol.yaml, bigger loop. patrol.yaml keeps the 5 m square because that is the
+# Week 2 demo geometry and scripts/plot_telemetry.py hardcodes it as the
+# planned-track reference.
 #
-# Same node and same parameters as patrol.yaml; the loop is bigger. patrol.yaml
-# keeps the 5 m square because that is the Week 2 demo geometry and
-# scripts/plot_telemetry.py hardcodes it as the planned-track reference.
+# WHY 12 m LEGS: throws are only aimable on the steady middle of a leg (see
+# throw_window.py). Measured cruise is 3.4 m/s max (median 2.09) — NOT the
+# cruise_speed_ms below, which position mode ignores. A 5 m loop therefore
+# leaves at most (5.0 - 0.6) / 3.4 = 1.29 s of straight leg, less than B01
+# needs (1.80 s), so B01 is structurally unmeasurable there. 12 m legs give
+# 3.35 s; minus the accel/decel ramps (WPNAV_ACCEL 2.5 m/s^2 => ~2.3 m each)
+# that is ~2.7 s of genuinely constant-velocity flight.
 #
-# WHY A BIGGER LOOP (measured):
-# The battery leads its throw by extrapolating the drone at constant velocity
-# over the ball's flight. patrol flies position mode, so ArduPilot decelerates
-# into every waypoint and accelerates out along a new heading — the throw is
-# only aimable on the steady middle of a leg. Measured cruise is 3.49 m/s max
-# (median 2.09), NOT the cruise_speed_ms below, which position mode ignores.
-#
-# On the 5 m loop that leaves at most (5.0 - 0.6) / 3.4 = 1.29 s of straight
-# leg. Battery v11 measured a best-ever window of 1.51 s and had to skip 8/20
-# runs; B01 (4 m/s over 6 m = 1.50 s flight + 0.30 s margin = 1.80 s needed)
-# was skipped all three times as structurally unmeasurable.
-#
-# 12 m legs give (12.0 - 0.6) / 3.4 = 3.35 s of leg. Subtracting the accel and
-# decel ramps (WPNAV_ACCEL 2.5 m/s^2 => ~2.3 m each to reach/leave 3.4 m/s)
-# leaves ~9.1 m ~= 2.7 s of genuinely constant-velocity flight, which covers
-# B01's 1.80 s with room to spare.
-#
-# Kept inside the world's 200x200 m ground plane, and the extra scanned area
-# only takes the detector's background map to roughly 190k voxels against its
-# 400k cap (77.5k measured on the 5 m loop, scaling with loop perimeter).
+# Bounds if this loop is ever grown: the world ground plane is 200x200 m, and
+# the detector's background map scales with loop perimeter — 77.5k voxels on the
+# 5 m loop, ~190k here, against a 400k cap.
 
 patrol:
   ros__parameters:

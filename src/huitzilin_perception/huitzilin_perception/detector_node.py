@@ -1,19 +1,13 @@
 """
-detector_node.py — HuitzilinReflex Week 3, W3-11 through W3-14.
+detector_node.py — projectile detection from the depth cloud.
 
 Pipeline (one PointCloud2 callback):
-  1. ROI / range gate             (W3-12)
-  2. Voxel downsampling           (W3-12)
-  3. NaN / outlier strip          (W3-12)
-  4. Background model             (W3-13; persistent voxel map since W4)
-  5. Frame differencing           (W3-13)
-  6. Euclidean clustering + split (W3-13; extent split since W4)
-  7. Centroid extraction          (W3-14)
-  8. Publish /threat/centroid     (W3-14)
-  9. Publish RViz marker          (W3-14)
+  ROI/range gate -> voxel downsample -> NaN/outlier strip -> persistent-voxel
+  background model -> frame differencing -> Euclidean clustering + extent split
+  -> centroid extraction -> publish /threat/centroid + RViz marker
 
-All thresholds come from ROS params (params/detector.yaml).  No magic numbers
-in this file — every tunable has a corresponding yaml key.
+INVARIANT: no magic numbers in this file. Every threshold is a ROS param with a
+corresponding key in params/detector.yaml, which owns the reason for its value.
 
 QoS contract:
   /oak/points  — subscriber: best_effort, keep_last 1  (must match publisher)

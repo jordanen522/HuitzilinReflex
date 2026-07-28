@@ -85,13 +85,11 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("camera_link_y", default_value="0.0"),
         DeclareLaunchArgument("camera_link_z", default_value="0.02"),
 
-        # Detector param file
         DeclareLaunchArgument(
             "detector_params",
             default_value=os.path.join(pkg_perception, "params", "detector.yaml"),
         ),
 
-        # Scorer params (only used in score mode)
         DeclareLaunchArgument("bag_dir", default_value="/data/huitzilin_bags"),
         DeclareLaunchArgument("split", default_value="test"),
         DeclareLaunchArgument(

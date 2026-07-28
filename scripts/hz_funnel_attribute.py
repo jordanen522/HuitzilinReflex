@@ -3,18 +3,14 @@
 hz_funnel_attribute.py — attribute a detection MISS to a specific gate.
 
 Offline join of two recordings made during one throw:
-  * the detector's per-frame dump   (detector.yaml: debug_dump_dir)
+  * the detector's per-frame dump   (detector.yaml: debug_dump_dir — costs
+    ~40 ms/frame, so no latency number from such a run is valid)
   * ground truth                    (scripts/hz_truth_probe.py)
 
-The open Week-4 question is why ~1.7 m of range is detected and then discarded:
-the ball is first seen at ~4.5 m, but the track that fires a dodge always begins
-at ~2.8 m and is always exactly three consecutive frames old. Something drops
-the ball on the frames in between, and the funnel log cannot say what — it
-reports survivor counts, and a frame with no ball-sized cluster reads the same
-whether the background map absorbed the ball or the ball fell under
-cluster_min_points.
-
-This resolves that by asking, per frame, where the ball's own points went:
+The detector's own funnel log cannot attribute a miss: it reports survivor
+counts, so a frame with no ball-sized cluster reads identically whether the
+background map absorbed the ball or the ball fell under cluster_min_points.
+This asks instead, per frame, where the ball's own points went:
 
     absent      the cloud never contained a point near the ball
                 (occlusion, range/angle gate, or nothing rendered)

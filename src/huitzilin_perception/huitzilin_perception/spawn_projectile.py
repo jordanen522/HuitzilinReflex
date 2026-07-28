@@ -416,7 +416,6 @@ class SpawnProjectileNode(Node):
         self._spawned = True
 
         odom = self._latest_odom
-        # Drone ENU position
         dx = odom.pose.pose.position.x
         dy = odom.pose.pose.position.y
         dz = odom.pose.pose.position.z
@@ -489,7 +488,6 @@ class SpawnProjectileNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = SpawnProjectileNode()
-    # Spin until spawned, then exit
     while rclpy.ok() and not node._spawned:
         rclpy.spin_once(node, timeout_sec=0.1)
     node.destroy_node()

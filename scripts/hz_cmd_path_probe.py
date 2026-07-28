@@ -1,42 +1,34 @@
 #!/usr/bin/env python3
 """hz_cmd_path_probe.py — where does a dodge command die?
 
-~25% of dodges produce no airframe movement at all (measured 2026-07-27 with
-scripts/hz_dodge_response.py: escape flat to the millimetre for a full second,
-despite the event firing with a valid tca and direction). The trigger and the
-publish both happened, so the failure is somewhere on the command path:
+Attributes a dodge that produced no airframe movement to one boundary on the
+command path. READ-ONLY: publishes nothing, touches no flight node; run it
+alongside a normal battery.
 
     evasion_node                mav_bridge_node              ArduPilot
     /cmd/evade  --20 Hz-->  send_velocity_body() --:14552-->   ^
                                                                | fights
     patrol_node --10 Hz send_position_ned() -------:14553------+
 
-This probe watches every boundary on that diagram and, for each dodge, says
-which one broke. It is READ-ONLY: it publishes nothing and touches no flight
-node. Run it alongside a normal battery.
-
-Discriminates three failure modes:
-  (a) the stream stopped   -- n_evade_cmds far below rate*duration
+Three failure modes:
+  (a) stream died          -- n_evade_cmds far below rate*duration
   (b) patrol never yielded -- patrol_state.running stayed True through the
-                              dodge, so its 10 Hz absolute position setpoints
-                              kept flying the drone to the waypoint on a SECOND
-                              MAVLink connection that the bridge cannot preempt
+                              dodge, so its position setpoints kept flying to
+                              the waypoint on a SECOND MAVLink connection the
+                              bridge cannot preempt
   (c) commanded but inert  -- stream fine, patrol stopped, odom velocity flat
-                              => the fault is below the bridge (ArduPilot)
+                              => fault is below the bridge (ArduPilot)
 
-TIMEBASE TRAP (this cost a session once): week2_sitl.launch.py never sets
-use_sim_time, so mav_bridge / patrol / telemetry_logger stamp their messages
-with the WALL clock while everything Gazebo-sourced runs on sim time. Every
-message this probe consumes is therefore keyed by its RECEIPT time in the
-probe's own clock -- never by msg.header.stamp. Run the probe with
-    --ros-args -p use_sim_time:=true
-so those receipt times share a timebase with the evasion node's t_trigger_s.
+TIMEBASE: every message is keyed by RECEIPT time in the probe's own clock,
+never by msg.header.stamp, and the probe must run on sim time so those receipts
+share a timebase with the evasion node's t_trigger_s.
 
-Usage (on the Dell, alongside a battery):
     python3 scripts/hz_cmd_path_probe.py --out /tmp/cmd_path.jsonl \
         --ros-args -p use_sim_time:=true
-Then analyse:
     python3 scripts/hz_cmd_path_probe.py --summarise /tmp/cmd_path.jsonl
+
+Result: the command path is NOT the bottleneck — this probe returned ok 16/16.
+Do not re-run it to explain a missed dodge (`CLAUDE.md`, measured nulls).
 """
 
 from __future__ import annotations

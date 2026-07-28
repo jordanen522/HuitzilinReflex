@@ -173,7 +173,6 @@ class ScorerNode(Node):
         sid = scen["id"]
         label = scen["label"]
 
-        # Find bag file
         bag_path = self._find_bag(sid)
         if bag_path is None:
             # A missing bag is a harness error, NOT a detection result: it
@@ -185,11 +184,9 @@ class ScorerNode(Node):
                 "note": "BAG MISSING — capture it (scripts/capture_scenario.sh)",
             }
 
-        # Load sidecar
         sidecar = self._load_sidecar(sid)
         window_s = sidecar.get("detection_window_s", DETECTION_WINDOW_DEFAULT_S)
 
-        # Replay bag and collect detections
         self.start_listening()
         bag_duration = self._replay_bag(bag_path)
         detections = self.stop_listening()
@@ -337,7 +334,6 @@ def main(args=None) -> None:
 
     def _run():
         exit_code[0] = node.run()
-        # Signal done
         node._done = True
 
     thread = threading.Thread(target=_run, daemon=True)
