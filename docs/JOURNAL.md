@@ -1581,3 +1581,75 @@ dodge that commits 0.27 s out, with a manoeuvre that over-delivers at 160% of
 1.5 m/s, still leave the drone at 0.155 m". That is a question about the
 manoeuvre and the geometry, not the trigger, and it should start by plotting
 commanded vs achieved displacement for a single failing 8 m/s run.
+
+### 2026-07-27 — The dodge has moved 4 cm when the ball arrives
+
+Wrote `scripts/hz_dodge_response.py` and measured the one curve nobody had
+plotted: escape displacement versus time since the dodge command, from Gazebo
+ground truth, measured against the drone's own pre-dodge cruise (fitted over the
+0.2 s before the trigger and extrapolated) and projected onto the commanded ENU
+escape direction. Fourteen dodges over a full battery, taken with the shipped
+config that scored 13/17 on-target this run.
+
+Escape achieved **at the moment of closest approach**, per dodge:
+
+    +0.003  +0.005  +0.012  +0.016  +0.027  +0.030  +0.051
+    +0.056  +0.063  +0.111  +0.112   and one at -0.057
+
+Median 4 cm. Against a 0.30 m hit radius. **The manoeuvre contributes
+essentially nothing by the time the ball is there** — which is exactly the
+bimodal signature in the battery: a "successful" dodge at 0.35-0.53 m is a throw
+that was going to miss anyway, and a failure at 0.155 m is the aim error showing
+through undisturbed.
+
+The rise is quadratic, not a step. Pooling the samples:
+
+| t since command | escape (median) | ideal at 1.5 m/s |
+|---|---|---|
+| 0.05 s | 0.011 m | 0.075 m |
+| 0.10 s | 0.023 m | 0.150 m |
+| 0.20 s | 0.051 m | 0.300 m |
+| 0.40 s | 0.153 m | 0.600 m |
+| 1.00 s | 0.71 m | 1.50 m |
+
+That is constant acceleration at **~2 m/s²**, not a velocity step: 0.5*a*t² fits
+every column to within a centimetre. The quadrotor has to tilt before it can
+translate, and tilting is what takes the time.
+
+### This closes the question, arithmetically
+
+To clear the 0.30 m hit radius at 2 m/s² takes **0.55 s** of warning.
+Measured `tca` is 0.218 s. The shortfall is 0.33 s, and every lever tried
+tonight — tracker, confirmation count, cluster size, ROI range, frame rate —
+moved `tca` by ±0.05 s. None of them was ever going to be enough, and that is
+why success sat at 61-76% no matter which was in play. The trigger has not been
+the problem for some time.
+
+Two honest caveats on this measurement. The 1.00 s column is contaminated: the
+patrol loop turns corners, and a constant-velocity baseline extrapolated a full
+second across a turn puts the turn into the residual — that is almost certainly
+what the one negative dodge is (-0.057 m at tca, -0.709 m at 1.0 s, i.e.
+consistently "away" from the commanded direction for the whole second). Columns
+at and below 0.3 s are short enough to trust, and they are the ones that matter.
+Second, this contradicts the older "the manoeuvre over-delivers at 160% of
+commanded" note: terminal displacement here is 0.22-1.09 m against an ideal
+1.5 m, i.e. under-delivering. Whatever that 160% measured, it was not escape
+displacement in the window where the ball is still inbound.
+
+### What is actually left to try
+
+Not more warning — 0.55 s needs detection at roughly double the current range
+and the sensor cannot supply it. The lever is the 2 m/s², and it has never been
+touched: it is set by ArduPilot's lateral acceleration and lean-angle limits
+(`PSC_ACC_XY`, `ANGLE_MAX`, and the attitude-rate gains behind them), all of
+which are SITL parameters that can be raised and re-measured in one battery.
+Doubling the achievable acceleration halves the required warning to 0.39 s,
+which is within reach of a `tca` that already touches 0.45-0.58 s on its good
+runs.
+
+The other axis is literally the other axis: a quadrotor changes vertical
+velocity by changing thrust, with no tilt to wait for, so a vertical escape
+should develop several times faster than a lateral one. `dodge_floor_m` blocks
+downward escape for good reason and `clamp_dodge_to_clearance` never flips a
+dodge upward, deliberately — but "climb into the descending ball" was reasoned
+about, never measured, and the response curve above is a reason to measure it.
