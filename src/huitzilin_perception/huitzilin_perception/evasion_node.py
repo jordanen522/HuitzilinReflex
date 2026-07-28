@@ -51,6 +51,7 @@ from huitzilin_perception.cloud_geometry import (
 from huitzilin_perception.kalman import (
     GRAVITY_ENU,
     MultiHypothesisTracker,
+    dodge_velocity_command,
     plan_dodge,
     should_dodge,
 )
@@ -67,7 +68,7 @@ RELIABLE_QOS = QoSProfile(
 # actually grids, not an exhaustive allow-list.
 SWEEPABLE = {
     "dodge_speed_mps", "threat_radius_m", "trigger_horizon_s",
-    "dodge_duration_s", "min_track_updates",
+    "dodge_duration_s", "min_track_updates", "dodge_max_speed_mps",
 }
 
 # Declared params that are consumed exactly once at node start (tracker
@@ -117,6 +118,7 @@ class EvasionNode(Node):
         self.declare_parameter("dodge_speed_mps", 1.5)
         self.declare_parameter("dodge_duration_s", 1.0)
         self.declare_parameter("dodge_floor_m", 1.0)
+        self.declare_parameter("dodge_max_speed_mps", 6.0)
         self.declare_parameter("recover_hold_s", 0.5)
         self.declare_parameter("patrol_handoff_s", 0.8)
         self.declare_parameter("evade_cmd_rate_hz", 20.0)
@@ -132,7 +134,7 @@ class EvasionNode(Node):
                 "max_assoc_sigma_m", "min_track_updates",
                 "threat_radius_m", "trigger_horizon_s", "prediction_horizon_s",
                 "latency_budget_s", "dodge_speed_mps", "dodge_duration_s",
-                "dodge_floor_m",
+                "dodge_floor_m", "dodge_max_speed_mps",
                 "recover_hold_s", "patrol_handoff_s", "evade_cmd_rate_hz",
                 "auto_resume_patrol",
             )
@@ -277,14 +279,23 @@ class EvasionNode(Node):
         self._publish_intercept(plan, pos_proj, vel_proj, T_odom_bl,
                                 msg.header.stamp)
         if fires:
-            self._start_dodge(plan, track, q, msg.header.stamp)
+            self._start_dodge(plan, track, q, msg.header.stamp, v_drone)
 
     # ── Dodge lifecycle ──────────────────────────────────────────────────
 
-    def _start_dodge(self, plan, track, q, stamp) -> None:
+    def _start_dodge(self, plan, track, q, stamp, v_drone) -> None:
         R = quat_to_rot(q.x, q.y, q.z, q.w)          # base_link -> odom
         dir_body = R.T @ plan.direction               # odom -> body FLU
-        self._dodge_cmd_body = dir_body * float(self._p["dodge_speed_mps"])
+        # Escape is measured against the drone's OWN extrapolated track,
+        # because that is where a thrown ball is aimed. Commanding an absolute
+        # dodge_speed here instead of adding it to the cruise is what made a
+        # dodge along the direction of travel do nothing -- see
+        # dodge_velocity_command for the arithmetic and the measurement.
+        cmd_enu = dodge_velocity_command(
+            plan.direction, v_drone,
+            dodge_speed_mps=float(self._p["dodge_speed_mps"]),
+            max_speed_mps=float(self._p["dodge_max_speed_mps"]))
+        self._dodge_cmd_body = R.T @ cmd_enu
 
         now = self.get_clock().now()
         latency = now.nanoseconds * 1e-9 - self._stamp_to_sec(stamp)
@@ -317,6 +328,11 @@ class EvasionNode(Node):
             "hypotheses_spawned": self._tracker.n_spawned,
             "dodge_body": [float(v) for v in self._dodge_cmd_body],
             "dodge_enu": [float(v) for v in plan.direction],
+            # The cruise the escape is added to, and the absolute velocity that
+            # results. Escape is deviation from the extrapolated cruise, so a
+            # dodge can only be judged against the speed it started from.
+            "cruise_speed_mps": float(np.linalg.norm(v_drone)),
+            "cmd_enu": [float(v) for v in cmd_enu],
             "over_budget": over,
         })
         self._event_pub.publish(event)

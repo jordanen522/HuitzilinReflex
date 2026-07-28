@@ -489,6 +489,73 @@ def clamp_dodge_to_clearance(
                      -max_down])
 
 
+def dodge_velocity_command(
+    direction,
+    v_drone,
+    *,
+    dodge_speed_mps: float,
+    max_speed_mps: Optional[float] = None,
+) -> np.ndarray:
+    """
+    ENU velocity to command so the drone leaves its OWN predicted track at
+    dodge_speed_mps, whichever way it was already flying.
+
+    A thrown ball is aimed where the drone is predicted to be, and the
+    prediction is the drone's current velocity extrapolated (that is exactly
+    what the battery's lead does, and what a thrower does). Escape is therefore
+    deviation from that extrapolation -- not ground speed, and not distance
+    from where the drone was when the dodge fired.
+
+    Commanding an absolute dodge_speed_mps * direction gets this wrong,
+    measured 2026-07-27 over 16 dodges (scripts/hz_cmd_path_probe.py): it
+    REPLACES the ~4.2 m/s patrol cruise with a 1.5 m/s command, so the drone
+    sheds 2.5-3.9 m/s within a second and the deviation is dominated by
+    -v_cruise. Its component along the escape direction is
+
+        dodge_speed_mps - v_drone . direction
+
+    which collapses toward zero as the escape lines up with the cruise, and
+    reverses once the cruise outruns the command. Escape at 1.0 s correlated
+    r = -0.911 with that alignment, and battery min_dist r = -0.67. The
+    "dodges that never moved the airframe" were this: the airframe moved, it
+    just stayed on the line the ball was thrown at.
+
+    Adding the escape to the current velocity instead makes the deviation
+    exactly dodge_speed_mps * direction * t for any cruise.
+
+    max_speed_mps caps the result. The cap is spent on the CRUISE term, never
+    on the escape term -- a capped dodge should stop chasing its waypoint, not
+    stop dodging.
+    """
+    d = np.asarray(direction, dtype=np.float64)
+    n = np.linalg.norm(d)
+    if n < 1e-9:
+        return np.zeros(3)
+    d = d / n
+    escape = float(dodge_speed_mps) * d
+    v = np.asarray(v_drone, dtype=np.float64)
+
+    if max_speed_mps is None:
+        return v + escape
+
+    cap = float(max_speed_mps)
+    if np.linalg.norm(v + escape) <= cap:
+        return v + escape
+    # Keep the escape whole and scale the cruise until the sum fits. A cap
+    # tight enough to bite into the escape itself leaves nothing to preserve.
+    esc_norm = np.linalg.norm(escape)
+    if esc_norm >= cap:
+        return escape * (cap / esc_norm)
+    # The cruise component ALONG the escape axis is the term that cancels the
+    # escape, so drop it entirely and keep what fits perpendicular.
+    v_perp = v - (v @ d) * d
+    perp_budget = math.sqrt(max(cap ** 2 - esc_norm ** 2, 0.0))
+    perp_norm = np.linalg.norm(v_perp)
+    if perp_norm > perp_budget:
+        v_perp = v_perp * (perp_budget / perp_norm)
+    return v_perp + escape
+
+
 def should_dodge(
     n_updates: int,
     miss_m: float,

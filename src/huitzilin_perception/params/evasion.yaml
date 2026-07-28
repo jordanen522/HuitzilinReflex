@@ -44,6 +44,19 @@ evasion:
                                # disarmed. The clamp caps the downward part to
                                # the headroom above this floor and re-spends
                                # the rest horizontally. Raise for real flight.
+    dodge_max_speed_mps: 6.0   # cap on cruise + escape. The dodge ADDS its
+                               # escape to the drone's current velocity rather
+                               # than replacing it: a ball is aimed where the
+                               # cruise predicts the drone will be, so escape
+                               # is deviation from that extrapolation, and a
+                               # command that replaced a 4.2 m/s cruise with a
+                               # 1.5 m/s dodge shed 2.5-3.9 m/s and left the
+                               # drone ON the predicted line whenever the
+                               # escape pointed along the cruise (measured
+                               # 2026-07-27: escape vs alignment r = -0.911,
+                               # min_dist r = -0.67). Cruise 4.2 + escape 1.5
+                               # asks for 5.7; the cap is spent on the cruise
+                               # term, never on the escape.
     recover_hold_s: 0.5        # zero-velocity settle before patrol resumes
     patrol_handoff_s: 0.8      # silent gap before patrol resumes; MUST exceed
                                # the bridge cmd_timeout_s (0.7) or zero-velocity

@@ -296,6 +296,82 @@ def test_plan_dodge_applies_clearance_when_altitude_given():
     assert clamped.tca_s == pytest.approx(free.tca_s)   # geometry unchanged
 
 
+# ── Escape must not depend on which way the drone was already flying ─────────
+# Measured 2026-07-27 (scripts/hz_cmd_path_probe.py, 16 dodges): escape at 1.0 s
+# correlates r = -0.911 with the alignment between the commanded escape
+# direction and the drone's own cruise, and battery min_dist correlates
+# r = -0.67 with the same quantity. The cause is arithmetic, not control.
+#
+# The battery leads its aim assuming the drone holds velocity, so the ball is
+# thrown at where the cruise WOULD put the drone. Escape is therefore deviation
+# from that extrapolated cruise. Commanding an absolute body velocity of
+# dodge_speed * direction REPLACES a ~4.2 m/s cruise with a 1.5 m/s command, so
+# the deviation is dominated by -v_cruise; its component along the escape
+# direction is (dodge_speed - v_drone . direction), which collapses to zero --
+# or reverses -- exactly when the escape happens to point along the cruise.
+# That is the "dodge that never moved the airframe": the airframe moved, it
+# just did not leave the predicted intercept point.
+
+from huitzilin_perception.kalman import dodge_velocity_command  # noqa: E402
+
+
+@pytest.mark.parametrize("v_drone", [
+    [0.0, 0.0, 0.0],       # hover
+    [4.2, 0.0, 0.0],       # cruising straight along the escape direction
+    [-4.2, 0.0, 0.0],      # cruising straight against it
+    [3.0, -2.9, 0.4],      # oblique, the usual case on a patrol leg
+])
+def test_escape_rate_is_independent_of_cruise(v_drone):
+    """Deviation from the extrapolated cruise must always open at dodge_speed.
+
+    This is the property the old command lacked. Same escape direction, four
+    very different cruises: the escape rate must not move.
+    """
+    direction = np.array([1.0, 0.0, 0.0])
+    cmd = dodge_velocity_command(direction, v_drone, dodge_speed_mps=1.5)
+    deviation_rate = (cmd - np.asarray(v_drone, dtype=np.float64)) @ direction
+    assert deviation_rate == pytest.approx(1.5)
+
+
+def test_absolute_command_would_have_collapsed_the_escape():
+    """Pin the defect itself, so a revert cannot pass silently.
+
+    Cruising at 4.2 m/s along the escape direction, the OLD command
+    (dodge_speed * direction) opened the gap at 1.5 - 4.2 = -2.7 m/s: it moved
+    the drone TOWARD where the ball was aimed. Measured live as B04r0,
+    u.cruise +0.124, escape -0.93 m/s, min_dist 0.161 m -- a hit.
+    """
+    direction = np.array([1.0, 0.0, 0.0])
+    v_drone = np.array([4.2, 0.0, 0.0])
+    old_cmd = 1.5 * direction
+    assert (old_cmd - v_drone) @ direction == pytest.approx(-2.7)
+
+    new_cmd = dodge_velocity_command(direction, v_drone, dodge_speed_mps=1.5)
+    assert (new_cmd - v_drone) @ direction == pytest.approx(1.5)
+
+
+def test_dodge_velocity_command_caps_total_speed():
+    """Cruise + escape must stay inside what the frame will actually fly.
+
+    Preserving a 4.2 m/s cruise and adding 1.5 m/s of escape asks for 5.7 m/s.
+    The cap must not steal from the escape term -- that is the whole point of
+    the command -- so it is the CRUISE that gets scaled back.
+    """
+    direction = np.array([0.0, 1.0, 0.0])
+    v_drone = np.array([5.5, 0.0, 0.0])
+    cmd = dodge_velocity_command(direction, v_drone, dodge_speed_mps=1.5,
+                                 max_speed_mps=4.0)
+    assert np.linalg.norm(cmd) <= 4.0 + 1e-9
+    assert cmd @ direction == pytest.approx(1.5)     # escape term intact
+
+
+def test_dodge_velocity_command_normalises_direction():
+    """Callers pass plan.direction, which is unit -- but never trust that."""
+    cmd = dodge_velocity_command([0.0, 0.0, 3.0], [0.0, 0.0, 0.0],
+                                 dodge_speed_mps=1.5)
+    assert cmd == pytest.approx(np.array([0.0, 0.0, 1.5]))
+
+
 # ── The dodge-authority mechanism (2026-07-27) ───────────────────────────────
 # Measured live: the detector publishes the TRUE ball on 5-6 consecutive frames
 # from ~4.7 m inwards, yet the track that fires a dodge is invariably exactly 3
