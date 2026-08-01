@@ -22,6 +22,7 @@ Coordinate frames:
 
 from __future__ import annotations
 
+import sys
 import math
 import os
 import time
@@ -43,6 +44,7 @@ from visualization_msgs.msg import Marker
 
 import tf2_ros
 import tf2_geometry_msgs  # noqa: F401  (registers PointStamped transform support)
+from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 
 from huitzilin_perception.background_map import VoxelBackgroundMap
 from huitzilin_perception.cloud_geometry import (
@@ -747,8 +749,14 @@ class DetectorNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = DetectorNode()
+    install_clock_guard(node)
+    clock_failed = False
     try:
         rclpy.spin(node)
+    except ClockGuardError:
+        # Already logged fatal by the guard; exit non-zero so a launch
+        # file or shell script cannot mistake this for a clean start.
+        clock_failed = True
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
@@ -757,6 +765,9 @@ def main(args=None) -> None:
         # raises RCLError (seen as a traceback after every regression run).
         if rclpy.ok():
             rclpy.shutdown()
+
+    if clock_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

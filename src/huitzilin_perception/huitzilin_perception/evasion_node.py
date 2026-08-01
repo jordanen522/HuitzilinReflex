@@ -26,6 +26,7 @@ commands go out in body FLU; mav_bridge owns the only NED conversion.
 
 from __future__ import annotations
 
+import sys
 import json
 from enum import Enum
 
@@ -61,6 +62,7 @@ RELIABLE_QOS = QoSProfile(
     history=QoSHistoryPolicy.KEEP_LAST,
     depth=10,
 )
+from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 
 # Documented sweep surface used by the dodge battery's sweep config (ros2
 # param set /evasion ...). Any live-read key in self._p outside
@@ -441,14 +443,23 @@ class EvasionNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = EvasionNode()
+    install_clock_guard(node)
+    clock_failed = False
     try:
         rclpy.spin(node)
+    except ClockGuardError:
+        # Already logged fatal by the guard; exit non-zero so a launch
+        # file or shell script cannot mistake this for a clean start.
+        clock_failed = True
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
+    if clock_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

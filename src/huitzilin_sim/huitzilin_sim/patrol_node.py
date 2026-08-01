@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Patrol path-follower: walk a closed loop of NED waypoints, advance on arrival."""
+import sys
 import json
 import math
 
@@ -12,6 +13,7 @@ from std_srvs.srv import SetBool
 from visualization_msgs.msg import Marker, MarkerArray
 
 from huitzilin_sim.mav_bridge import MavBridge, MASK_POS_ONLY  # reuse frame helpers
+from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 
 
 class PatrolNode(Node):
@@ -166,13 +168,22 @@ class PatrolNode(Node):
 def main():
     rclpy.init()
     node = PatrolNode()
+    install_clock_guard(node)
+    clock_failed = False
     try:
         rclpy.spin(node)
+    except ClockGuardError:
+        # Already logged fatal by the guard; exit non-zero so a launch
+        # file or shell script cannot mistake this for a clean start.
+        clock_failed = True
     except KeyboardInterrupt:
         pass
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+    if clock_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

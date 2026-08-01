@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ROS 2 Jazzy wrapper around MavBridge: cmd_vel/evade in, odom/state out, services."""
+import sys
 import json
 import math
 import threading
@@ -12,6 +13,7 @@ from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 
 from huitzilin_sim.mav_bridge import MavBridge
+from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 
 
 class MavBridgeNode(Node):
@@ -192,13 +194,22 @@ class MavBridgeNode(Node):
 def main():
     rclpy.init()
     node = MavBridgeNode()
+    install_clock_guard(node)
+    clock_failed = False
     try:
         rclpy.spin(node)
+    except ClockGuardError:
+        # Already logged fatal by the guard; exit non-zero so a launch
+        # file or shell script cannot mistake this for a clean start.
+        clock_failed = True
     except KeyboardInterrupt:
         pass
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+    if clock_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
