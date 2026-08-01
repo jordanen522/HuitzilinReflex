@@ -1,0 +1,30 @@
+# hw_evasion.yaml - evasion against the real vehicle, Week 5 S5-2.
+#
+# A NEW FILE, never an edit to evasion.yaml. Overlay only.
+#
+# The Week 4 tuning is carried across UNCHANGED on purpose. It is re-derived
+# from real sensor noise in S6-6 (meas_std_m, process_accel_std,
+# max_assoc_sigma_m), and pre-guessing it here would just be a number nobody
+# measured that later looks like one somebody did.
+#
+# Do not re-open any measured null here: roi_max_range_m 5->8,
+# min_track_updates 3->2, cluster_min_points 5->3, dodge_speed_mps 1.5->4.0,
+# the multi-hypothesis tracker, vertical escape. Each was measured over a full
+# battery with the baseline best on every column. The one exception is a null
+# whose sim derivation rested on the 15 Hz rate or the ~3 m range, and only
+# once S6-4 has measured something materially different.
+
+evasion:
+  ros__parameters:
+    # The ONLY value deliberately changed from sim. The 1.0 m sim floor exists
+    # because a descending throw drove the drone into the runway at 2 m AGL,
+    # and its own comment says to raise it for real flight. 1.5 m is a
+    # conservative placeholder: the real value comes from the netted enclosure
+    # ceiling in H8-1 / S7-5. test_hw_config.py asserts only that it is above
+    # the sim value, because the enclosure has not been built.
+    dodge_floor_m: 1.5
+
+    # Coupled to hw_bridge.yaml cmd_timeout_s (0.7): handoff MUST stay
+    # greater, or the zero-velocity handback fights patrol's position
+    # setpoints. Restated here so the pair moves together.
+    patrol_handoff_s: 0.8

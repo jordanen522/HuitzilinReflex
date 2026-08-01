@@ -1,0 +1,36 @@
+# hw_bridge.yaml - mav_bridge against the real H743, Week 5 S5-2.
+#
+# A NEW FILE, never an edit to bridge.yaml: --symlink-install makes the
+# installed copy a symlink into src/, so editing the shipped yaml edits the
+# real config. bridge.yaml stays the SITL path.
+#
+#   ros2 run huitzilin_sim mav_bridge --ros-args \
+#     --params-file .../params/hw_bridge.yaml -p use_sim_time:=false
+
+mav_bridge:
+  ros__parameters:
+    # Serial to the flight controller, not UDP to SITL. Use the by-id path:
+    # /dev/ttyACM0 renumbers when anything else enumerates first, and the
+    # bridge would then talk to the wrong device or nothing at all.
+    # DEFERRED (H5-2): the real id does not exist until the H743 is flashed
+    # and enumerated. test_hw_config.py asserts the shape, not the value.
+    connection: "/dev/serial/by-id/usb-ArduPilot-CHANGE-ME-if00"
+
+    cmd_rate_hz: 10.0
+
+    # cmd_timeout_s and evasion.yaml's patrol_handoff_s (0.8) are coupled:
+    # handoff MUST stay greater than this timeout, or the zero-velocity
+    # handback fights patrol's position setpoints. If either moves on
+    # hardware, both move. test_hw_config.py asserts the inequality.
+    cmd_timeout_s: 0.7
+
+    takeoff_alt_m: 2.0
+
+    # DEFERRED (S6-4): the justification for outpacing the cloud is that odom
+    # must beat the depth rate for egomotion compensation, and that rate was
+    # 15 Hz only because ros_gz_bridge could not sustain more. If the real
+    # camera delivers faster, 30 no longer satisfies its own reason and must
+    # rise. Do not treat this number as settled.
+    stream_rate_hz: 30.0
+
+    mode: "GUIDED"

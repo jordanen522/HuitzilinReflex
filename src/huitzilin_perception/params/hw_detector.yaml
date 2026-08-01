@@ -1,0 +1,32 @@
+# hw_detector.yaml - detector against the real OAK-D Lite, Week 5 S5-2.
+#
+# A NEW FILE, never an edit to detector.yaml (--symlink-install makes the
+# installed copy a symlink into src/). detector.yaml stays the sim path.
+# Overlay only: everything not listed here keeps its detector.yaml value.
+#
+#   ros2 run huitzilin_perception detector --ros-args \
+#     --params-file .../params/detector.yaml \
+#     --params-file .../params/hw_detector.yaml -p use_sim_time:=false
+#
+# STAGED IN WEEK 5, VERIFIED IN WEEK 6 (S6-3). Both flips below are read off
+# the DepthAI contract, not off a real stream. Confirm them against live
+# topics before trusting a detection result.
+
+detector:
+  ros__parameters:
+    # DepthAI publishes clouds in optical convention (x right, y down, z
+    # forward). gz_flu is the Gazebo bridge's convention and would rotate
+    # every point by 90 degrees, so nothing would clear the ROI gate.
+    cloud_convention: "optical"
+
+    # DepthAI publishes best-effort. A RELIABLE subscription does not match a
+    # best-effort publisher in ROS 2 -- the topic looks alive in `ros2 topic
+    # list` and the detector receives nothing at all.
+    cloud_reliable: false
+
+    # Diagnostics must never ship in a hardware config. debug_dump_dir costs
+    # ~40 ms/frame, which alone would blow the 150 ms budget and invalidate
+    # every latency number from the run. Asserted by test_hw_params.py.
+    debug_dump_dir: ""
+    debug_funnel: false
+    profile_stages: false

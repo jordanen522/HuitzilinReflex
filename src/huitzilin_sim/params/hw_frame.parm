@@ -1,0 +1,40 @@
+# hw_frame.parm - real vehicle (MicoAir H743 V2 AIO), Week 5 S5-3.
+#
+# Load this file rather than typing parameters by hand. Hand entry is how a
+# safety parameter goes missing, and half of these are safety parameters.
+#
+#   MAVProxy:  param load hw_frame.parm
+#   readback:  ./scripts/hw_param_readback.py
+#
+# NO INLINE COMMENTS. MAVProxy breaks on them, and parm_file.parse_parm
+# raises on them so the test suite catches it before the board does.
+#
+# Every value below is asserted by test_hw_config.py. Change one and the test
+# tells you which invariant you broke.
+
+# Frame. FRAME_CLASS 0 is the silent no-lift trap: a fresh EEPROM arms and
+# accepts takeoff, then maxes throttle with zero lift.
+FRAME_CLASS 1
+FRAME_TYPE 1
+
+# Geofence, SAFETY_CASE.md section 2. Type 3 = circle + altitude.
+FENCE_ENABLE 1
+FENCE_TYPE 3
+FENCE_RADIUS 10
+FENCE_ALT_MAX 5
+FENCE_ACTION 1
+
+# RTL_ALT is in CENTIMETRES; FENCE_ALT_MAX is in METRES. 400 cm = 4 m, which
+# leaves 1 m of ceiling margin and still clears the 2 m takeoff altitude.
+# ArduPilot's default of 1500 cm = 15 m is three times the fence ceiling, so a
+# fence-breach RTL would climb straight through the fence it is responding to.
+# check_fence_consistency asserts RTL_ALT/100 < FENCE_ALT_MAX.
+RTL_ALT 400
+
+# Failsafes. BATT_FS_LOW_ACT 2 = RTL.
+FS_THR_ENABLE 1
+BATT_FS_LOW_ACT 2
+
+# Kill-switch: motor emergency stop on its own dedicated momentary switch,
+# never a shared or mode switch (SAFETY_CASE.md section 3).
+RC7_OPTION 31
