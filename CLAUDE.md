@@ -9,6 +9,8 @@ Non-obvious facts only. Architecture, roadmap, and BOM live in `docs/` and
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink · Python 3.12 · Ubuntu 24.04.
 
 **Current phase: Week 5** (hardware bring-up — FC swap; `docs/hardware_bringup.md`).
+Weeks 5-9 are planned as parallel hardware/software lanes in `docs/weeks_5_9_plan.md`;
+the software lane is the larger half and is not blocked by the FC swap.
 
 Weeks 1–4 closed: patrol loop (Wk2), detection pipeline scored against a labeled bag
 library (Wk3), Kalman filter + dodge trigger (Wk4). Week 4's result is a **capability
@@ -120,6 +122,7 @@ dodge authority. Only a real camera with more range or frame rate moves it.
 | `docs/requirements.md` | REQ-01…REQ-16 + non-goals |
 | `docs/SAFETY_CASE.md` | FMEA, geofence/RTL, kill-switch, safety/legal rules |
 | `docs/SETUP.md` | Install from scratch |
+| `docs/weeks_5_9_plan.md` | Weeks 5-9 plan, split into hardware and software lanes with cross-lane gates |
 | `docs/hardware_bringup.md` | Weeks 5–6 physical checklist: FC swap, radio bind, Pi power, payload wiring |
 | `docs/bag_capture_runbook.md` | Bag re-capture + regression/tuning procedure (Dell) |
 | `docs/dodge_battery_runbook.md` | Dodge battery + sweep procedure (Dell) |

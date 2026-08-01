@@ -104,7 +104,9 @@ flight staged late. Each week has a Definition of Done.
 | 3 — Perception pipeline ✔ (2026-07-15) | Simulated OAK-D depth, synthetic scenarios, detection node, 17-bag labeled library + regression harness; held-out test recall 100% |
 | 4 — Evasion logic & KF in the loop ✔ (2026-07-27) | Predictive KF + multi-hypothesis tracker + dodge trigger; closed detection → intercept → velocity-spike → alarm (mocked GPIO) over a 7-scenario battery. All four DoD criteria met; result is a capability envelope bounded by sensing, so Week 6 is what moves it |
 
-**Remaining:**
+**Remaining** — planned in detail, hardware lane vs software lane, in
+`docs/weeks_5_9_plan.md`:
+
 - **Week 5 — FC swap, avionics & power** (the one fabrication step). Swap F722 → H743,
   flash ArduPilot, motor test (props off), bind radio + failsafes + kill-switch, wire
   Pololu BEC, mount Pi + OAK-D. *DoD:* clean bench arm-up, failsafes verified, Pi powered
