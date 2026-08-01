@@ -9,6 +9,8 @@ Non-obvious facts only. Architecture, roadmap, and BOM live in `docs/` and
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink · Python 3.12 · Ubuntu 24.04.
 
 **Current phase: Week 5** (hardware bring-up — FC swap; `docs/hardware_bringup.md`).
+The Week 5 **software** lane is complete (supervisor, payload, clock guard, hardware
+config overlays, hardware preflight); everything still open is gated on the FC swap.
 Weeks 5-9 are planned as parallel hardware/software lanes in `docs/weeks_5_9_plan.md`;
 the software lane is the larger half and is not blocked by the FC swap.
 
@@ -55,7 +57,14 @@ ros2 service call /huitzilin/takeoff std_srvs/srv/Trigger
 ros2 service call /huitzilin/start_patrol std_srvs/srv/SetBool '{data: true}'
 ```
 
-Preflight: `./scripts/preflight_check.sh`.
+Optional Week 5 nodes (neither runs by default):
+```bash
+ros2 launch huitzilin_sim week2_sitl.launch.py with_supervisor:=true
+ros2 run huitzilin_perception payload --ros-args   --params-file src/huitzilin_perception/params/payload.yaml
+```
+
+Preflight: `./scripts/preflight_check.sh` (SITL) · `./scripts/preflight_hw.sh` (hardware;
+warns rather than fails, always exits 0).
 Perception stack (depth world + detector, Dell only): `docs/bag_capture_runbook.md`.
 Dodge batteries: `docs/dodge_battery_runbook.md`.
 
@@ -88,6 +97,11 @@ Full frame table and TF tree: `docs/frames.md`.
 - **`debug_dump_dir` costs ~40 ms/frame.** No latency number from a dumping run is valid.
 - **Never derive velocity from `/gz/dynamic_poses` arrival times** — arrival is not emission; use the pose stamps.
 - **Never edit a shipped yaml for a diagnostic.** `--symlink-install` makes the installed copy a symlink into `src/`, so you are editing the real config. Copy to `/tmp` and `sed` that.
+- **`use_sim_time` is no longer in any yaml.** It is a launch argument only. A node started with `use_sim_time:=true` and no `/clock` now logs FATAL and exits 1 after a 5 s grace window instead of silently freezing at t=0 (`huitzilin_sim/clock_guard.py`). `use_sim_time:=false` with a `/clock` present only warns — that is the Week 7 HITL shape. `test_hw_config.py` fails if anyone re-adds the key to a params file.
+- **`set -u` breaks `/opt/ros/jazzy/setup.bash`.** Source ROS first, then enable it (`run_regression.sh`), or leave it off (`preflight_hw.sh`). A script that sources ROS under `-u` exits at that line.
+- **Hardware config lives in `hw_*` files, never as edits.** `params/hw_bridge.yaml`, `hw_frame.parm`, `hw_detector.yaml`, `hw_evasion.yaml` are overlays; the sim files stay the regression path. `test_hw_config.py` asserts each overlay's node name and keys exist in the file it overlays — in ROS 2 a mistyped node name silently loads *nothing*.
+- **`RTL_ALT` is centimetres; `FENCE_ALT_MAX` is metres.** `hw_frame.parm` pins `RTL_ALT 400` (4 m) under the 5 m ceiling, because ArduPilot's 15 m default would make a fence-breach RTL climb through the fence it is answering.
+- **`supervisor_node` reports no faults while disarmed.** Half the watched topics are legitimately silent on the bench. Faults are gated on `armed`, and no fault path can reach EVADE — that is asserted over all states × faults, not by inspection.
 - **`ECC/` at repo root** is an unrelated plugin marketplace (untracked). Ignore it.
 
 ## Measured nulls — do not re-run

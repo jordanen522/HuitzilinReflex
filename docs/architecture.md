@@ -14,8 +14,8 @@ contracts are provisional until their nodes land. The evasion path
 | camera_driver | Depth + point cloud (sim: Gazebo bridge; real: OAK-D Lite) | sensor | `/oak/points`, `/oak/depth` | 15 Hz sim (30 Hz real target) | **active, sim (Wk3)** | Pi (real, Wk6) / Dell (sim) |
 | detector_node | ROI gate, egomotion-compensated differencing, clustering, centroid | `/oak/points`, `/huitzilin/odom` (TF) | `/threat/centroid` + RViz marker | per cloud | **active, sim (Wk3)** | Pi / dev PC |
 | evasion_node | Kalman filter + dodge trigger + patrol pause/resume | `/threat/centroid`, `/huitzilin/odom` | `/threat/intercept`, `/cmd/evade`, `/payload/alarm` (mock), `/threat/evade_event` | per centroid; 20 Hz while evading | **active, sim (Wk4)** | Pi / dev PC |
-| payload_node | LED strip + buzzer via GPIO | `/payload/alarm` | GPIO | on-event | Wk6 | Pi only |
-| supervisor_node | State machine, fault monitoring | node statuses | `/huitzilin/set_mode`, `/huitzilin/start_patrol` | 1 Hz | Wk2+ | Pi / dev PC |
+| payload_node | LED strip + siren via GPIO; every backend degrades to a logging no-op if the library is missing | `/payload/alarm` | GPIO (WS2812B via level shifter; siren via transistor) | on-event, 10 Hz dead-man tick | **active (Wk5)** | Pi (real output) / anywhere (no-op) |
+| supervisor_node | 7-state machine + FMEA fault monitor; faults resolve before the threat branch, so no fault can produce EVADE | message ages on `/huitzilin/odom`, `/huitzilin/state`, `/oak/points`, `/huitzilin/patrol_state`, `/huitzilin/cmd_vel`, `/payload/alarm` | `/huitzilin/set_mode`, `/huitzilin/start_patrol` (edge-triggered) | 1 Hz | **active (Wk5)**, opt-in via `with_supervisor:=true` | Pi / dev PC |
 
 ## Diagram
 
@@ -25,7 +25,9 @@ supervisor_node → mode/start → patrol_node → position targets → mav_brid
                                mav_bridge → /huitzilin/odom, /huitzilin/state → all
 camera_driver → /oak/points, /oak/depth → detector_node → /threat/centroid → RViz marker
 detector_node → /threat/centroid → evasion_node → /threat/intercept, /cmd/evade → mav_bridge
-                                   evasion_node → /payload/alarm (mock until Wk6); /huitzilin/start_patrol (pause/resume)
+                                   evasion_node → /payload/alarm → payload_node → LED + siren (GPIO)
+                                   evasion_node → /huitzilin/start_patrol (pause/resume)
+supervisor_node watches every topic above for staleness → /huitzilin/set_mode, /huitzilin/start_patrol
 
 [ Wk5–6 future ]
 evasion_node → /payload/alarm → payload_node
@@ -40,6 +42,12 @@ evasion_node → /payload/alarm → payload_node
 | `/huitzilin/cmd_vel` | `geometry_msgs/Twist` | patrol → bridge | Reliable, keep-last 10 | body **FLU** |
 | `/huitzilin/odom` | `nav_msgs/Odometry` | bridge → all | Reliable, keep-last 10 | `odom` (ENU) |
 | `/huitzilin/state` | `std_msgs/String` (JSON) | bridge → all | Reliable | N/A |
+
+`/huitzilin/state` JSON keys: `n`, `e`, `alt`, `yaw` (position/attitude), plus `armed`,
+`mode`, `batt_v`, `batt_pct`, `fc_failsafe` from `HEARTBEAT` and `SYS_STATUS`. **A key
+may be `null`**: absent telemetry stays absent rather than defaulting, so a consumer can
+distinguish "never reported" from "reported false". `batt_v` is `null` rather than 65.5
+when ArduPilot reports its 65535 mV unknown sentinel.
 | `/huitzilin/mission_marker` | `visualization_msgs/MarkerArray` | patrol → RViz | Reliable, keep-last 1 | `odom` (ENU) |
 | `/huitzilin/arm` | `std_srvs/SetBool` | → bridge | service | N/A |
 | `/huitzilin/takeoff` | `std_srvs/Trigger` | → bridge | service | N/A |
@@ -65,10 +73,10 @@ conversion lives in `mav_bridge` (see `docs/frames.md`). Velocity setpoints use
 | `/threat/intercept` | `geometry_msgs/PointStamped` | Reliable | `base_link` |
 | `/cmd/evade` | `geometry_msgs/Twist` | Reliable | body **FLU** (bridge priority over `/huitzilin/cmd_vel`) |
 | `/threat/evade_event` | `std_msgs/String` (JSON) | Reliable | N/A |
-| `/payload/alarm` | `std_msgs/Bool` | Reliable | N/A (consumer arrives Wk6) |
+| `/payload/alarm` | `std_msgs/Bool` | Reliable | N/A (consumer: `payload_node`, Wk5) |
 
 ### Provisional (Wk5–6)
 
 | Topic | Type | QoS | Frame | Phase |
 |---|---|---|---|---|
-| `/payload/alarm` | `std_msgs/Bool` | Reliable | N/A | Wk6 |
+| — | — | — | — | `/payload/alarm` was promoted to active in Wk5 when `payload_node` landed |

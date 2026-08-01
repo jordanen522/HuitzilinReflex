@@ -87,6 +87,12 @@ W9  everything ──> S9-1 validation matrix ──> S9-3 post-mortem
 
 ---
 
+> **Status 2026-07-31.** The Week 5 software lane is built, tested and committed on the
+> Dell: S5-2, S5-3, S5-4, S5-5, S5-6 and S6-1 are done, and S5-7 holds (253 unit tests
+> green, both launch files answer `--show-args`). S5-1 is **not** started — it needs the
+> Pi, and the Dell is x86_64. Everything still open in Weeks 5–6 is gated on hardware:
+> H5-1…H5-6, H6-1, H6-2, and the measurement items S6-2…S6-7.
+
 # Week 5 — FC swap, avionics & power
 
 **Theme:** the one fabrication step. The HW lane is the critical path; the SW lane is
@@ -154,7 +160,7 @@ duplicate them here; work the checklist there and tick these gates.
       - [ ] Decide and record where telemetry/bags land on the SD card, and what the
             retention rule is — `SAFETY_CASE.md` §4 requires footage deleted after 30
             days unless kept for analysis.
-- [ ] **S5-2 — Hardware config files (new files, never edits).** `--symlink-install`
+- [x] **S5-2 — Hardware config files (new files, never edits).** `--symlink-install`
       makes the installed yaml a symlink into `src/`, so editing a shipped yaml edits
       the real config. Every hardware value goes in a *new* file.
       - [ ] `params/hw_bridge.yaml` — `connection:` moves from `udpin:0.0.0.0:14552` to
@@ -177,7 +183,7 @@ duplicate them here; work the checklist there and tick these gates.
             "Raise for real flight" — the sim floor exists because a descending throw
             drove the drone into the runway at 2 m AGL. Set the real value against the
             actual enclosure in H8-1, but never leave it at 1.0.
-- [ ] **S5-3 — `params/hw_frame.parm` for the real vehicle.** One file, loaded to the
+- [x] **S5-3 — `params/hw_frame.parm` for the real vehicle.** One file, loaded to the
       board, so no safety parameter depends on someone remembering to type it.
       - [ ] Frame: `FRAME_CLASS=1`, `FRAME_TYPE=1`.
       - [ ] Geofence (`SAFETY_CASE.md` §2): `FENCE_ENABLE=1`, `FENCE_TYPE=3`,
@@ -194,7 +200,7 @@ duplicate them here; work the checklist there and tick these gates.
       - [ ] **No inline comments** — MAVProxy breaks on them. Comment-only lines only.
       - [ ] Never `ARMING_CHECK 0` and never blind force-arm (`param2=21196`). Both hide
             the message that tells you what is actually wrong.
-- [ ] **S5-4 — Sim-time → wall-clock audit.** *Blocks every later SW item.* See finding
+- [x] **S5-4 — Sim-time → wall-clock audit.** *Blocks every later SW item.* See finding
       2 above. The goal is that a node started against real hardware is either correct
       or loudly wrong, never silently drifting.
       - [ ] Enumerate every `use_sim_time` declaration and every launch file that sets
@@ -210,7 +216,7 @@ duplicate them here; work the checklist there and tick these gates.
             on the Dell under depth rendering).
       - [ ] Restate the Week 4 latency figures in *wall* ms alongside sim ms, so Week 6
             and Week 8 numbers are comparable to something.
-- [ ] **S5-5 — Write `supervisor_node`.** Promised in `architecture.md` at 1 Hz,
+- [x] **S5-5 — Write `supervisor_node`.** Promised in `architecture.md` at 1 Hz,
       publishing `/huitzilin/set_mode` and `/huitzilin/start_patrol`; does not exist.
       *Blocks: W7.*
       - [ ] Implement the state table in `docs/state_machine.md`: DISARMED, ARMING,
@@ -223,7 +229,7 @@ duplicate them here; work the checklist there and tick these gates.
             RTL → land. **Never** an evasive maneuver on a fault. The reflex is for
             projectiles only.
       - [ ] Unit-test the transition table, including that no fault path can reach EVADE.
-- [ ] **S5-6 — Hardware preflight script.** `scripts/preflight_check.sh` is a Week 2
+- [x] **S5-6 — Hardware preflight script.** `scripts/preflight_check.sh` is a Week 2
       SITL script (checks Gazebo, `ardu_ws`, a SITL heartbeat). Add
       `scripts/preflight_hw.sh`: serial link present, heartbeat on the real FC, all
       expected params readback-matched against `hw_frame.parm`, OAK-D at SuperSpeed, Pi
@@ -276,7 +282,7 @@ envelope, and it is a headline result, not a checkbox.
 
 ## SW lane — Week 6
 
-- [ ] **S6-1 — Write `payload_node`.** The `/payload/alarm` publisher has had no
+- [x] **S6-1 — Write `payload_node`.** The `/payload/alarm` publisher has had no
       subscriber since Week 4. *Blocks: H6-1 validation.*
       - [ ] Subscribe `/payload/alarm` (`std_msgs/Bool`, Reliable), drive WS2812B via
             `rpi_ws281x` and the siren GPIO. On-event, per `architecture.md`.
