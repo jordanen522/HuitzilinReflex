@@ -24,6 +24,9 @@ Owns every binding safety, legal, and privacy rule for the project.
 - Max altitude: 5 m AGL
 - ArduPilot params: `FENCE_ENABLE=1`, `FENCE_TYPE=3` (circle + altitude), `FENCE_RADIUS=10`, `FENCE_ALT_MAX=5`
 
+All of these ship in `src/huitzilin_sim/params/hw_frame.parm` and are asserted by
+`test_hw_config.py`. Load that file; do not type them in by hand.
+
 ### RTL Triggers
 | Trigger | ArduPilot Param |
 |---|---|
@@ -32,10 +35,17 @@ Owns every binding safety, legal, and privacy rule for the project.
 | Fence breach | `FENCE_ACTION=1` (RTL) |
 
 ### RTL Sequence
-1. Climb to `RTL_ALT` (default 15 m)
+1. Climb to `RTL_ALT` = **4 m** (`RTL_ALT 400`; the parameter is in centimetres)
 2. Fly back to launch point
 3. Descend and land
 4. Disarm
+
+**`RTL_ALT` must stay below `FENCE_ALT_MAX`.** ArduPilot's default is 1500 cm = 15 m,
+three times the 5 m fence ceiling above, so an RTL triggered by a fence breach would
+climb straight through the fence it is responding to. 4 m leaves 1 m of ceiling margin
+and still clears the 2 m takeoff altitude. `param_audit.check_fence_consistency`
+asserts `RTL_ALT / 100 < FENCE_ALT_MAX` — note the conversion, since a plausible-looking
+`RTL_ALT` of `4` would mean 4 cm.
 
 ### Fail-Safe Default
 Any undefined fault → FAILSAFE (calm geofenced hover) → RTL → land. **Never** an evasive
