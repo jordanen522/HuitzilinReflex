@@ -156,10 +156,21 @@ class MavBridgeNode(Node):
                 od.twist.twist.linear.z = vz
             self.odom_pub.publish(od)
             st = String()
+            # armed/mode/batt_v/fc_failsafe cover four of the six detection
+            # columns in SAFETY_CASE.md section 1. They were already on the
+            # wire -- request_streams asks for SYS_STATUS and HEARTBEAT is
+            # unsolicited -- and were being drained and dropped. Absent keys
+            # stay absent rather than defaulting, so a consumer can tell
+            # "not reported yet" from "reported as false".
             st.data = json.dumps({
                 "n": s.get("n"), "e": s.get("e"),
                 "alt": -s.get("d", 0.0),
                 "yaw": s.get("yaw"),
+                "armed": s.get("armed"),
+                "mode": s.get("mode"),
+                "batt_v": s.get("batt_v"),
+                "batt_pct": s.get("batt_pct"),
+                "fc_failsafe": s.get("fc_failsafe"),
             })
             self.state_pub.publish(st)
 

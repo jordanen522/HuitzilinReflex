@@ -27,6 +27,16 @@ MASK_POS_YAW  = 0b0000101111111000   # use position x/y/z + yaw           (clear
 # stall the caller's timer tick.
 _DRAIN_MAX_MSGS = 200
 
+# ArduPilot signals "no reading" with sentinels rather than omitting the field.
+# 65535 mV would read as a 65.5 V pack and -1% as a real charge level, so both
+# have to be mapped to None before anything compares them to a threshold.
+_BATT_MV_UNKNOWN = 65535
+_BATT_PCT_UNKNOWN = -1
+
+# MAV_STATE at or beyond CRITICAL means the flight controller has itself
+# decided something is wrong. That is a failsafe, not a mode change.
+_MAV_STATE_CRITICAL = 5
+
 
 class MavBridge:
     def __init__(self, connect="udp:127.0.0.1:14550", source_system=255):
@@ -186,7 +196,39 @@ class MavBridge:
             elif kind == "ATTITUDE":
                 self._state.update(dict(roll=msg.roll, pitch=msg.pitch,
                                         yaw=msg.yaw))
+            elif kind == "SYS_STATUS":
+                mv = getattr(msg, "voltage_battery", _BATT_MV_UNKNOWN)
+                pct = getattr(msg, "battery_remaining", _BATT_PCT_UNKNOWN)
+                self._state.update(dict(
+                    batt_v=None if mv in (0, _BATT_MV_UNKNOWN) else mv / 1000.0,
+                    batt_pct=None if pct == _BATT_PCT_UNKNOWN else float(pct)))
+            elif kind == "HEARTBEAT":
+                # MAVProxy, the GCS and this bridge all heartbeat on the same
+                # link. Only the autopilot's own says anything about armed
+                # state, mode or failsafe; a GCS heartbeat would report
+                # disarmed forever.
+                if self.target_system and msg.get_srcSystem() != self.target_system:
+                    continue
+                base = getattr(msg, "base_mode", 0)
+                self._state.update(dict(
+                    armed=bool(base & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED),
+                    mode=self.mode_name(msg),
+                    fc_failsafe=getattr(msg, "system_status", 0) >= _MAV_STATE_CRITICAL))
         return dict(self._state)
+
+    @staticmethod
+    def mode_name(heartbeat):
+        """Flight-mode string, or None if it cannot be resolved.
+
+        pymavlink's mode table is keyed by vehicle type and raises on
+        combinations it does not know. A supervisor deciding whether to hand
+        control back to patrol must not die because a mode name was
+        unrecognised, so an unknown mode is reported as absent, not fatal.
+        """
+        try:
+            return mavutil.mode_string_v10(heartbeat)
+        except Exception:
+            return None
 
     # -- frame helpers (NED <-> ENU) used by the ROS node ---------------------
     @staticmethod
