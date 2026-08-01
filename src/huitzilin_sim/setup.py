@@ -12,7 +12,11 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/huitzilin_sim"]),
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
-        (os.path.join("share", package_name, "params"), glob("params/*.yaml")),
+        # params/ holds .parm as well as .yaml (sitl_frame.parm, and the
+        # hardware overlay). Without the second glob they resolve only via
+        # their absolute src/ path, so anything reading share/ finds nothing.
+        (os.path.join("share", package_name, "params"),
+         glob("params/*.yaml") + glob("params/*.parm")),
         (os.path.join("share", package_name, "config"), glob("config/*.parm")),
     ],
     install_requires=["setuptools"],
