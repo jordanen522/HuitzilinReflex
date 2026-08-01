@@ -1,0 +1,39 @@
+# supervisor.yaml
+# Thresholds for the flight state machine (huitzilin_sim/supervisor.py).
+# Every value here is a Limits field; the node builds Limits straight from
+# these, so a name that does not match a Limits field will fail at startup
+# rather than be silently ignored.
+#
+# NOTE for hardware: these are sim-derived. The topic timeouts are generous
+# against sim publisher rates, and the real delivered depth rate is not
+# measured until S6-4. sensor_timeout_s in particular must be re-checked
+# against the real camera, not carried over.
+
+supervisor:
+  ros__parameters:
+    tick_hz: 1.0                  # architecture.md specifies 1 Hz
+
+    # Topic staleness. Each is well above one publish period: depth cloud
+    # 15 Hz, odom 30 Hz (stream_rate_hz), patrol state 10 Hz, cmd_vel 10 Hz.
+    sensor_timeout_s: 1.0
+    odom_timeout_s: 1.0
+    patrol_state_timeout_s: 2.0
+    cmd_vel_timeout_s: 1.0
+
+    batt_low_v: 21.0              # 6S at ~3.5 V/cell
+
+    # Second line of defence only. FENCE_RADIUS / FENCE_ALT_MAX on the flight
+    # controller are the first; keep these two in step with hw_frame.parm.
+    fence_radius_m: 10.0
+    fence_alt_max_m: 5.0
+
+    takeoff_alt_m: 2.0
+    alt_tolerance_m: 0.3
+
+    # Must exceed dodge_duration_s 1.0 + recover_hold_s 0.5 +
+    # patrol_handoff_s 0.8 from evasion.yaml. evasion_node publishes the alarm
+    # clear exactly once, so this timeout is what stops a dropped message
+    # stranding the machine in EVADE.
+    evade_max_s: 3.5
+
+    failsafe_settle_s: 3.0

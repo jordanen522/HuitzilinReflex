@@ -11,6 +11,7 @@ Keeping the sim in its own terminal makes failures easier to read.
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -22,6 +23,7 @@ def generate_launch_description():
     # Overridable so Week 4 can fly a longer loop without changing the Week 2
     # demo geometry (scripts/plot_telemetry.py hardcodes the 5 m square).
     default_patrol_params = os.path.join(pkg, "params", "patrol.yaml")
+    supervisor_params = os.path.join(pkg, "params", "supervisor.yaml")
 
     # The whole flight stack must share Gazebo's clock: the wall and sim clocks
     # differ by a *rate* (RTF), not an offset, so header stamps cannot be joined
@@ -34,6 +36,14 @@ def generate_launch_description():
         DeclareLaunchArgument("patrol_params",
                               default_value=default_patrol_params,
                               description="patrol node params yaml"),
+        # Off by default: the Week 3/4 regression path and every recorded
+        # battery ran without a supervisor, and a fault monitor that starts
+        # commanding modes mid-battery would change what those numbers mean.
+        # Opt in explicitly for HITL and flight work.
+        DeclareLaunchArgument("with_supervisor",
+                              default_value="false",
+                              description="run supervisor_node (state machine "
+                                          "+ fault monitor)"),
         DeclareLaunchArgument("use_sim_time",
                               default_value="true",
                               description="follow Gazebo /clock; set false only "
@@ -59,5 +69,13 @@ def generate_launch_description():
             name="telemetry_logger",
             output="screen",
             parameters=[{"use_sim_time": use_sim_time}],
+        ),
+        Node(
+            package="huitzilin_sim",
+            executable="supervisor",
+            name="supervisor",
+            output="screen",
+            condition=IfCondition(LaunchConfiguration("with_supervisor")),
+            parameters=[supervisor_params, {"use_sim_time": use_sim_time}],
         ),
     ])

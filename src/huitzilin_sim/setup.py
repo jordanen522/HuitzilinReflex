@@ -31,6 +31,7 @@ setup(
             "mav_bridge = huitzilin_sim.mav_bridge_node:main",
             "patrol = huitzilin_sim.patrol_node:main",
             "telemetry_logger = huitzilin_sim.telemetry_logger:main",
+            "supervisor = huitzilin_sim.supervisor_node:main",
         ],
     },
 )
