@@ -1,0 +1,42 @@
+# payload.yaml
+# WS2812B strip + piezo siren, driven from /payload/alarm.
+#
+# The payload is a SAFETY SIGNAL ONLY -- it announces that the aircraft
+# believes it is under threat. Never used to follow or harass a person
+# (SAFETY_CASE.md section 4).
+#
+# Runs on the Pi only. On any other machine every backend degrades to a
+# logging no-op, which is expected and is warned about once at startup.
+
+payload:
+  ros__parameters:
+    alarm_topic: "/payload/alarm"
+
+    # auto  - try both, degrade whatever is missing (the Pi default)
+    # ws2812 / gpio - one channel only
+    # none  - no hardware at all; use on a dev box to silence the warnings
+    backend: "auto"
+
+    # WS2812B data line. GPIO18 is the PWM-capable pin rpi_ws281x wants.
+    # The strip needs 5 V logic, so the data line goes through a 3.3->5 V
+    # level shifter (74AHCT125) before DIN -- the Pi's 3.3 V is out of spec
+    # driving the strip directly. See hardware_bringup.md section 7.
+    led_pin: 18
+    led_count: 8
+
+    # Piezo siren through an NPN transistor switch, never straight off a pin.
+    siren_chip: "gpiochip0"
+    siren_line: 17
+
+    # A lone True must still produce a signal a human can see and hear.
+    min_on_s: 0.5
+
+    # Dead-man. evasion_node publishes the clear exactly once, at the end of a
+    # dodge; without this the siren latches on forever if that node dies
+    # mid-dodge. Must exceed dodge_duration_s + recover_hold_s.
+    max_on_s: 5.0
+
+    # Silence means the publisher is gone; it is not consent to keep running.
+    stale_off_s: 3.0
+
+    tick_hz: 10.0
