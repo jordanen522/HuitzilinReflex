@@ -34,7 +34,8 @@ COORDINATE FRAMES
     └── camera_link            x=+0.10 y=0 z=+0.02 (10 cm forward, 2 cm up)
           └── camera_optical_frame   roll=-π/2, yaw=-π/2 (standard optical)
 
-These values are provisional (exact offset measured in Phase B / Week 6).
+These values are nominal, from the CAD mount (measured against the real airframe
+in Week 6). Override with the camera_link_x/y/z launch arguments.
 Update camera_link_x, camera_link_z params if the physical mount changes.
 Document the change in docs/frames.md in the same commit.
 """

@@ -66,7 +66,7 @@ Cuts all motors immediately regardless of flight mode.
 ### Operating Rule
 - Kill-switch must be in hand for all powered tests, no exceptions
 - Operator's thumb stays on the switch during any armed state
-- Switch is wired and tested in Phase B before any real flights
+- Switch is wired and tested in **Week 5 (gate H5-3)** before any real flights
 
 ## 4. Test Enclosure & Operating Rules
 

@@ -24,7 +24,11 @@ envelope, not a success rate** — always report it split by ball speed, never b
 | 14 m/s | B03 | 0/17 |
 | false dodges | B07 | 0/12 |
 
-95 scored throws over five batteries. Latency mean 95–115 ms/battery against a 150 ms
+95 scored throws over five batteries. The counts do **not** divide by
+`week4_battery.yaml` as it ships today (`repeats: 3` × 5 scenarios × 5 batteries = 75,
+not 78): battery composition drifted across the five runs. These are measured results —
+do not "correct" them to match the yaml, and do not re-derive the yaml from them.
+Latency mean 95–115 ms/battery against a 150 ms
 budget; ~25% of individual dodges exceed it (max 282 ms) but this costs no outcomes,
 because tca at commit is 0.18–0.29 s — latency is not the binding term.
 
@@ -73,6 +77,8 @@ A timeout of `0.0` in `supervisor.yaml` disables that watch; `cmd_vel` ships
 disabled because position-mode patrol publishes no ROS setpoint stream to
 watch. See the sharp edge below.
 
+Unit tests: `./scripts/run_tests.sh` (both packages; forwards pytest args).
+`.github/workflows/tests.yml` runs the ROS-free subset on every push.
 Preflight: `./scripts/preflight_check.sh` (SITL) · `./scripts/preflight_hw.sh` (hardware;
 warns rather than fails, always exits 0).
 Perception stack (depth world + detector, Dell only): `docs/bag_capture_runbook.md`.
@@ -92,7 +98,7 @@ Full frame table and TF tree: `docs/frames.md`.
 ## Sharp edges (read before touching SITL)
 
 - **`FRAME_CLASS=0` = silent no-lift.** Fresh EEPROM arms and accepts takeoff but throttle maxes with zero lift (`PreArm: Motors: Check frame class and type`). Always load `sitl_frame.parm` via `--add-param-file` (`FRAME_CLASS=1`, `FRAME_TYPE=1`). Never `ARMING_CHECK 0` — it hides the message. By hand: `param set FRAME_CLASS 1`, `FRAME_TYPE 1`, then `reboot`.
-- **Port mismatch = `TimeoutError: no heartbeat`.** `bridge.yaml` listens on `:14552`, `patrol.yaml` on `:14553`; `sim_vehicle.py --out` must fan out to both. MAVProxy's default `:14550` is for `first_flight.py` / QGC only.
+- **Port mismatch = `TimeoutError: no heartbeat`.** `bridge.yaml` listens on `:14552`, `patrol.yaml` on `:14553`; `sim_vehicle.py --out` must fan out to both. `first_flight.py` connects on `:14551`; MAVProxy's default `:14550` is for QGC only.
 - **Patrol autostart is `false` in `patrol.yaml` intentionally.** `patrol_node.py` defaults `autostart=True`; the yaml overrides it. Autostarting floods GUIDED with position setpoints during takeoff and the drone never leaves the ground. Start via `/huitzilin/start_patrol` *after* takeoff.
 - **Don't blind force-arm** (`param2=21196`). Fix the root cause (frame/EKF).
 - **Never `Ctrl-Z` a launch.** A suspended job holds the SITL TCP socket. Restart Gazebo+SITL together if the FDM link goes half-broken.

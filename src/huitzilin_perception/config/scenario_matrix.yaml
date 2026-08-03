@@ -238,7 +238,7 @@ scenarios:
     size_class: medium
     closest_approach_m: 10.0
     time_to_closest_s: 0
-    notes: "CAPTURE AT ALTITUDE: drone must fly >= ~10.5 m (e.g. takeoff_alt_m: 12.0) or the spawn lands underground and capture_scenario.sh aborts. Ball passes ~10 m below -> camera range >= 10 m > roi_max_range_m (8.0) -> range gate must reject."
+    notes: "CAPTURE AT ALTITUDE: drone must fly >= ~10.5 m (e.g. takeoff_alt_m: 12.0) or the spawn lands underground and capture_scenario.sh aborts. Ball passes ~10 m below -> camera range >= 10 m > roi_max_range_m, which ships at 5.0 (8.0 was tried and is a recorded null) -> range gate must reject. The margin is 2x, so this scenario does not depend on which of the two is loaded."
 
   - id: N05
     label: negative

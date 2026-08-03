@@ -68,9 +68,16 @@ motion means the bridge priority path; no commands means the trigger never fired
 ./scripts/run_dodge_battery.sh sweep
 ```
 
-Grids `dodge_speed_mps × trigger_horizon_s` (3×2) over B02/B03/B06 via `ros2 param set`
+Grids `min_track_updates × dodge_speed_mps` (2×2, read from `config/week4_sweep.yaml` —
+edit that file, not this sentence, to change the grid) over B02/B03/B06 via
+`ros2 param set`
 on the live evasion node — no restarts. Results → `/tmp/week4_sweep.{txt,csv}`. Write the
-winning combo into `params/evasion.yaml` and re-run the full battery to confirm. The
+winning combo into `params/evasion.yaml` and re-run the full battery to confirm.
+
+**Both shipped axes are already measured nulls.** Running the grid as it stands
+re-derives a known answer — the baseline won on every column. It is kept as the
+worked example of the sweep format. Change the axes before spending a session on it,
+and check the null list in `CLAUDE.md` first. The
 battery restores baseline evasion params afterwards; if a sweep aborts partway, restart
 T3 before the confirmation battery.
 

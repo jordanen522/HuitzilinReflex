@@ -5,6 +5,11 @@
 # result. min_track_updates 3->2 and dodge_speed_mps 1.5->4.0 were each swept
 # over a full battery and the baseline won on every column (see CLAUDE.md).
 # tca is bounded by detection range and frame rate, not by these knobs.
+#
+# Note the mismatch, which is deliberate: the recorded dodge_speed_mps null runs
+# to 4.0, while the grid below stops at 2.5. This file is the format example, not
+# the experiment that produced the null. Do not "re-derive" the null from a run
+# of this grid — it does not contain the value that was refuted.
 parameters:
   min_track_updates: [2, 3]
   dodge_speed_mps: [1.5, 2.5]

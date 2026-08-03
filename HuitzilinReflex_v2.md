@@ -38,7 +38,7 @@ perception + evasion loop, de-risked in sim. The one fabrication step is the FC 
 | **Propulsion** (stock) | SPEEDX2 2105.5 motors, HQProp D-T90 props | ~150–200 g payload overhead |
 | **Flight controller** (replacement, Wk5) | MicoAir H743 V2 AIO — STM32H743 + integrated 4-in-1 45 A AM32 ESC | Replaces stock GEP F722-45A (Betaflight-only, not an ArduPilot target). Same 25.5×25.5 mm mount and 45 A rating — like-for-like swap; integrated ESC = no separate ESC |
 | **Companion computer** | Raspberry Pi 5 (4 GB) + Active Cooler + 64 GB microSD | ROS 2 + evasion node; depth arrives pre-computed |
-| **Bench power (Pi)** | Official 27 W USB-C PSU | Phases A–B desk power |
+| **Bench power (Pi)** | Official 27 W USB-C PSU | Desk power through Week 5 bring-up; flight power is the Pololu BEC below |
 | **Flight power (Pi)** | Pololu D24V50F5 5 V/5 A step-down | 6S → 5 V/5 A to Pi GPIO pins; see §4 |
 | **Depth sensor** | Luxonis OAK-D Lite + USB-C↔USB-A 3.1 Gen 2 cable | On-chip stereo depth over USB 3 (USB-2 cable would throttle it) |
 | **Flight battery** | CNHL 1300 mAh 130C 6S ×2 (XT60) | Matches recommended 1050–1300 mAh 6S |
@@ -111,10 +111,11 @@ flight staged late. Each week has a Definition of Done.
   flash ArduPilot, motor test (props off), bind radio + failsafes + kill-switch, wire
   Pololu BEC, mount Pi + OAK-D. *DoD:* clean bench arm-up, failsafes verified, Pi powered
   with no FC-rail draw.
-- **Week 6 — Payload wiring & real OAK-D bring-up.** WS2812B (level-shifted) + siren on
+- **Week 6 — Payload *wiring* & real OAK-D bring-up.** WS2812B (level-shifted) + siren on
   GPIO; depthai-ros streaming over verified USB-3; characterize real stereo noise into
   the KF model; Remote ID / registration. *DoD:* live depth frames + payload triggers
-  within latency budget.
+  within latency budget. (The `payload_node` software landed early, in the Week 5 SW
+  lane — Week 6 is the hardware it drives.)
 - **Week 7 — HITL & tethered hover.** Real H743 + simulated world; tethered/netted hover.
   *DoD:* stable tethered hover with full stack running and logging.
 - **Week 8 — Incremental real flight.** Manual hover → autonomous patrol → evasion, only

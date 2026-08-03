@@ -35,21 +35,21 @@ runs in HITL still needs every Week 5–7 software item.
 Recorded here because each one changes what the weeks contain, and each was found by
 auditing the tree rather than by reading the roadmap.
 
-**1. Two promised nodes do not exist.** `docs/architecture.md` lists `supervisor_node`
-as phase "Wk2+" and `payload_node` as "Wk6". Neither is in `src/`. `supervisor_node` is
-the component that owns every fault response in `SAFETY_CASE.md` §1 — sensor dropout,
-Pi brownout, GUIDED setpoint-stream loss — and `docs/state_machine.md` describes a state
-machine that nothing currently implements. Today `evasion_node` publishes
-`/payload/alarm` to no subscriber. Both are scheduled below: supervisor in Week 5
-(it blocks Week 7), payload in Week 6.
+**1. Two promised nodes did not exist. — CLOSED, Week 5 SW lane.** `architecture.md`
+listed `supervisor_node` and `payload_node` as future and neither was in `src/`;
+`evasion_node` published `/payload/alarm` to no subscriber. Both are now shipped entry
+points with tested behaviour, and `payload_node` subscribes the alarm. Kept here because
+it is why Week 5's SW lane is shaped the way it is — the supervisor owns every fault
+response in `SAFETY_CASE.md` §1 and blocks Week 7.
 
-**2. The whole stack is pinned to sim time.** `evasion_node.py` states "All timing is
-SIM time"; commit `cceb0d5` deliberately put the flight nodes on `/clock`, and
-`detector.yaml` ships `use_sim_time: true`. Real hardware publishes no `/clock`. Every
-timing gate in the system — `latency_budget_s` 0.15, `track_timeout_s` 0.5,
-`patrol_handoff_s` 0.8, `cmd_timeout_s` 0.7, `bg_map_ttl_s` 20.0 — is currently
-denominated in sim seconds. This is the quietest available way for the stack to
-misbehave on hardware, so it is a Week 5 gate (S5-4), not a Week 7 discovery.
+**2. The whole stack was pinned to sim time. — CLOSED, S5-4.** `use_sim_time` is now a
+launch argument only, present in no params file (`test_hw_config.py` fails if anyone
+re-adds it), and `clock_guard.py` makes a missing `/clock` under `use_sim_time:=true` a
+FATAL exit rather than a silent freeze at t=0. Every timing gate — `latency_budget_s`
+0.15, `track_timeout_s` 0.5, `patrol_handoff_s` 0.8, `cmd_timeout_s` 0.7, `bg_map_ttl_s`
+20.0 — is still *denominated* in whichever clock the node was started against, so the
+Week 6 hardware runs must state which. That was the quietest available way for the stack
+to misbehave on hardware, which is why it was a Week 5 gate and not a Week 7 discovery.
 
 **3. Nothing has ever run on arm64.** All Week 1–4 numbers come from x86 (WSL2 laptop,
 native-Ubuntu Dell). The 2026-07-27 profiling found `voxel_downsample` (66→5-17 ms) and
@@ -152,10 +152,11 @@ duplicate them here; work the checklist there and tick these gates.
       - [ ] Install Ubuntu 24.04 arm64 + ROS 2 Jazzy on the 64 GB microSD.
       - [ ] `colcon build --symlink-install` both packages (`huitzilin_sim`,
             `huitzilin_perception`). Expect missing/rebuilt native deps — record which.
-      - [ ] Run the existing unit tests on the Pi: `test_frames`, `test_kalman`,
-            `test_ballistics`, `test_cloud_geometry`, `test_background_map`,
-            `test_throw_window`, `test_stage_profiler`. Any arch-dependent failure is a
-            real finding, not a nuisance.
+      - [ ] Run the **whole** unit suite on the Pi with `./scripts/run_tests.sh` — do
+            not hand-list modules here. This gate is the arm64 port, so a partial list
+            is the failure mode: the suite is 15 modules and growing, and an
+            arch-dependent failure in an unlisted one would go unseen. Any failure here
+            is a real finding, not a nuisance.
       - [ ] Set `usb_max_current_enable=1` in `config.txt` (pairs with H5-4).
       - [ ] Decide and record where telemetry/bags land on the SD card, and what the
             retention rule is — `SAFETY_CASE.md` §4 requires footage deleted after 30
@@ -163,54 +164,63 @@ duplicate them here; work the checklist there and tick these gates.
 - [x] **S5-2 — Hardware config files (new files, never edits).** `--symlink-install`
       makes the installed yaml a symlink into `src/`, so editing a shipped yaml edits
       the real config. Every hardware value goes in a *new* file.
-      - [ ] `params/hw_bridge.yaml` — `connection:` moves from `udpin:0.0.0.0:14552` to
-            the H743's serial device. Prefer a stable `/dev/serial/by-id/...` path over
-            `/dev/ttyACM0`, which renumbers.
-      - [ ] Preserve the coupling `patrol_handoff_s` (0.8) **>** `cmd_timeout_s` (0.7).
+      - [x] `params/hw_bridge.yaml` — `connection:` moves from `udpin:0.0.0.0:14552` to
+            the H743's serial device, as a stable `/dev/serial/by-id/...` path rather
+            than `/dev/ttyACM0`, which renumbers. The id itself is a `CHANGE-ME`
+            placeholder until H5-2 flashes and enumerates the board;
+            `test_hw_config.py` asserts the *shape*, not the value.
+      - [x] Preserve the coupling `patrol_handoff_s` (0.8) **>** `cmd_timeout_s` (0.7).
             If either moves on hardware, both move. Violating it makes the
             zero-velocity handback fight patrol's position setpoints.
       - [ ] Re-examine `stream_rate_hz: 30.0`. Its stated justification is that odom
             must outpace the 15 Hz depth cloud for egomotion compensation. If S6-4
             measures the real camera above 15 Hz, this value no longer satisfies its
             own reason and must rise.
-      - [ ] `params/hw_detector.yaml` — two flips already documented in `detector.yaml`
+      - [x] `params/hw_detector.yaml` — two flips already documented in `detector.yaml`
             itself: `cloud_convention` `gz_flu` → `optical` (DepthAI already emits
             optical-convention clouds), and `cloud_reliable` `true` → `false` (DepthAI
             publishes best-effort). Both are Week 6 to *verify*, Week 5 to *stage*.
-      - [ ] `params/hw_evasion.yaml` — carry Week 4 tuning across unchanged for now.
+      - [x] `params/hw_evasion.yaml` — carry Week 4 tuning across unchanged for now.
             It gets re-derived in S6-6 against real noise; do not pre-guess it.
-      - [ ] Raise `dodge_floor_m` from its sim value of 1.0 m. Its comment says
+      - [x] Raise `dodge_floor_m` from its sim value of 1.0 m. Its comment says
             "Raise for real flight" — the sim floor exists because a descending throw
-            drove the drone into the runway at 2 m AGL. Set the real value against the
-            actual enclosure in H8-1, but never leave it at 1.0.
+            drove the drone into the runway at 2 m AGL. Now 1.5 m, a deliberate
+            placeholder; the real value comes from the enclosure ceiling in H8-1 / S7-5,
+            and `test_hw_config.py` asserts only that it exceeds the sim value.
 - [x] **S5-3 — `params/hw_frame.parm` for the real vehicle.** One file, loaded to the
       board, so no safety parameter depends on someone remembering to type it.
-      - [ ] Frame: `FRAME_CLASS=1`, `FRAME_TYPE=1`.
-      - [ ] Geofence (`SAFETY_CASE.md` §2): `FENCE_ENABLE=1`, `FENCE_TYPE=3`,
+      - [x] Frame: `FRAME_CLASS=1`, `FRAME_TYPE=1`.
+      - [x] Geofence (`SAFETY_CASE.md` §2): `FENCE_ENABLE=1`, `FENCE_TYPE=3`,
             `FENCE_RADIUS=10`, `FENCE_ALT_MAX=5`, `FENCE_ACTION=1`.
-      - [ ] Failsafes: `FS_THR_ENABLE=1`, `BATT_FS_LOW_ACT=2`.
-      - [ ] Kill-switch: `RC7_OPTION=31` (motor emergency stop) or another free channel.
-      - [ ] **Resolve a live contradiction before flashing:** `SAFETY_CASE.md` §2 sets
-            `FENCE_ALT_MAX=5` and separately describes RTL climbing to `RTL_ALT`
-            (default **15 m**). An RTL triggered by a fence breach would climb straight
-            through the fence ceiling it is responding to. Pick `RTL_ALT` below
-            `FENCE_ALT_MAX`, set it explicitly in this file, and correct
-            `SAFETY_CASE.md` §2 to match. *Do not flash the board with both values as
-            currently written.*
-      - [ ] **No inline comments** — MAVProxy breaks on them. Comment-only lines only.
-      - [ ] Never `ARMING_CHECK 0` and never blind force-arm (`param2=21196`). Both hide
+      - [x] Failsafes: `FS_THR_ENABLE=1`, `BATT_FS_LOW_ACT=2`.
+      - [x] Kill-switch: `RC7_OPTION=31` (motor emergency stop) or another free channel.
+      - [x] **RTL/fence contradiction — RESOLVED in `5d9f9b5`. The earlier stop-work
+            instruction here no longer applies: `hw_frame.parm` is safe to flash.**
+            ArduPilot's default `RTL_ALT` of 15 m sits three times above
+            `FENCE_ALT_MAX=5`, so a fence-breach RTL would have climbed through the
+            ceiling it was answering. `hw_frame.parm` now pins `RTL_ALT 400` — the
+            units differ, `RTL_ALT` is **centimetres** and `FENCE_ALT_MAX` is metres,
+            so that is 4 m. `SAFETY_CASE.md` §2 matches, and
+            `param_audit.check_fence_consistency` asserts `RTL_ALT/100 < FENCE_ALT_MAX`
+            so the pair cannot drift apart again unnoticed.
+      - [x] **No inline comments** — MAVProxy breaks on them. Comment-only lines only.
+            `parm_file.parse_parm` raises on one, so the test suite catches it before
+            the board does.
+      - [x] Never `ARMING_CHECK 0` and never blind force-arm (`param2=21196`). Both hide
             the message that tells you what is actually wrong.
 - [x] **S5-4 — Sim-time → wall-clock audit.** *Blocks every later SW item.* See finding
       2 above. The goal is that a node started against real hardware is either correct
       or loudly wrong, never silently drifting.
-      - [ ] Enumerate every `use_sim_time` declaration and every launch file that sets
+      - [x] Enumerate every `use_sim_time` declaration and every launch file that sets
             it. Make it a launch argument with a hardware default of `false`, rather
-            than a value baked into `detector.yaml`.
-      - [ ] Audit every duration parameter for which clock it is denominated in:
+            than a value baked into `detector.yaml`. `test_hw_config.py` now fails if
+            anyone re-adds the key to a params file.
+      - [x] Audit every duration parameter for which clock it is denominated in:
             `latency_budget_s` 0.15, `track_timeout_s` 0.5, `patrol_handoff_s` 0.8,
             `cmd_timeout_s` 0.7, `recover_hold_s` 0.5, `dodge_duration_s` 1.0,
             `trigger_horizon_s` 1.5, `prediction_horizon_s` 3.0, `bg_map_ttl_s` 20.0.
-      - [ ] Make a missing `/clock` under `use_sim_time:=true` a hard startup failure.
+      - [x] Make a missing `/clock` under `use_sim_time:=true` a hard startup failure.
+            `huitzilin_sim/clock_guard.py`: FATAL and exit 1 after a 5 s grace window.
             Silently falling back to wall-clock is how a timing gate quietly changes
             meaning by a factor of ~4 (Gazebo runs ~24% real-time under WSL2, ~0.33 RTF
             on the Dell under depth rendering).
@@ -219,16 +229,18 @@ duplicate them here; work the checklist there and tick these gates.
 - [x] **S5-5 — Write `supervisor_node`.** Promised in `architecture.md` at 1 Hz,
       publishing `/huitzilin/set_mode` and `/huitzilin/start_patrol`; does not exist.
       *Blocks: W7.*
-      - [ ] Implement the state table in `docs/state_machine.md`: DISARMED, ARMING,
+      - [x] Implement the state table in `docs/state_machine.md`: DISARMED, ARMING,
             TAKEOFF, PATROL, EVADE, RTL/LAND, FAILSAFE, with the transitions as listed.
-      - [ ] Implement the detection column of the `SAFETY_CASE.md` §1 FMEA: topic
-            timeout (sensor dropout), heartbeat timeout (RC/link loss, Pi brownout),
-            voltage monitor (low battery), FC status (FC failsafe), geofence breach
-            (flyaway), bridge watchdog (GUIDED setpoint-stream loss).
-      - [ ] Enforce the fail-safe default explicitly: any undefined fault → FAILSAFE →
-            RTL → land. **Never** an evasive maneuver on a fault. The reflex is for
-            projectiles only.
-      - [ ] Unit-test the transition table, including that no fault path can reach EVADE.
+      - [x] Implement the detection column of the `SAFETY_CASE.md` §1 FMEA — one `Fault`
+            member per row: `SENSOR_DROPOUT`, `LINK_LOSS`, `COMPANION_LOSS`,
+            `LOW_BATTERY`, `FC_FAILSAFE`, `FENCE_BREACH`, `SETPOINT_STALL`, `UNKNOWN`.
+      - [x] Enforce the fail-safe default explicitly: any undefined fault → FAILSAFE →
+            RTL → land. `FAULT_RESPONSE` lists only the two faults whose answer is "come
+            home"; everything else, including a member added later and forgotten, falls
+            through `.get()`'s default to FAILSAFE. **Never** an evasive maneuver on a
+            fault — the reflex is for projectiles only.
+      - [x] Unit-test the transition table, including that no fault path can reach EVADE.
+            Asserted over all states × faults × `armed`, not by inspection.
 - [x] **S5-6 — Hardware preflight script.** `scripts/preflight_check.sh` is a Week 2
       SITL script (checks Gazebo, `ardu_ws`, a SITL heartbeat). Add
       `scripts/preflight_hw.sh`: serial link present, heartbeat on the real FC, all
@@ -249,7 +261,12 @@ duplicate them here; work the checklist there and tick these gates.
   clock is ambiguous (S5-4).
 - `supervisor_node` exists with a tested transition table (S5-5).
 - `RTL_ALT` / `FENCE_ALT_MAX` contradiction resolved in both the param file and
-  `SAFETY_CASE.md` (S5-3).
+  `SAFETY_CASE.md` (S5-3). **Done** — `5d9f9b5`, and asserted by
+  `check_fence_consistency`.
+
+**Status:** the SW lane's desk-side half is closed (S5-2 … S5-6). What remains is S5-1
+(the arm64 port, needs the Pi) and S5-7 (SITL still green), plus the whole HW lane —
+all of it gated on the FC swap.
 
 ---
 
@@ -284,21 +301,28 @@ envelope, and it is a headline result, not a checkbox.
 
 - [x] **S6-1 — Write `payload_node`.** The `/payload/alarm` publisher has had no
       subscriber since Week 4. *Blocks: H6-1 validation.*
-      - [ ] Subscribe `/payload/alarm` (`std_msgs/Bool`, Reliable), drive WS2812B via
+      - [x] Subscribe `/payload/alarm` (`std_msgs/Bool`, Reliable), drive WS2812B via
             `rpi_ws281x` and the siren GPIO. On-event, per `architecture.md`.
-      - [ ] Per `SAFETY_CASE.md` §1, a GPIO/payload fault is severity Low: log and
-            continue. A dead LED must never take down the flight stack.
-      - [ ] Promote `/payload/alarm` from "provisional (Wk5–6)" to active in
+      - [x] Per `SAFETY_CASE.md` §1, a GPIO/payload fault is severity Low: log and
+            continue. A dead LED must never take down the flight stack — every backend
+            degrades to a logging no-op, including on the `RuntimeError` that
+            `rpi_ws281x` raises on a DMA / `/dev/mem` failure.
+      - [x] Promote `/payload/alarm` from "provisional (Wk5–6)" to active in
             `architecture.md` once it lands.
-      - [ ] Payload is a **safety signal only** — never used to follow or harass a
+      - [x] Payload is a **safety signal only** — never used to follow or harass a
             person (`SAFETY_CASE.md` §4). State it in the node's docstring.
+
+      S6-1 landed early, in the Week 5 SW lane. `payload_node` is **Week 5**
+      everywhere; if you find it called Week 6, that is the stale copy.
 - [ ] **S6-2 — Validate payload trigger latency.** `hardware_bringup.md` §7 calls for a
       plain GPIO toggle script *before* wiring into the evasion node. Measure the alarm
       path separately from the dodge path — REQ-05 (alarm on detection) and REQ-04
       (evade within 150 ms) are different requirements and must not be measured as one.
 - [ ] **S6-3 — Real OAK-D bring-up over `depthai-ros`.** `hardware_bringup.md` §8.
-      *Blocked by: H5-4, H5-5.* Replaces the `ros_gz_bridge` path in
-      `perception_bridge.yaml`; that file stays as the sim path.
+      *Blocked by: H5-4, H5-5.* Replaces the `ros_gz_bridge` path, which lives in
+      `week3_perception.launch.py` as `parameter_bridge` `arguments=[...]` — there is no
+      bridge yaml to point at. (`params/perception_bridge.yaml` claimed to be that file
+      and was loaded by nothing; deleted in `fd330b8`.)
       - [ ] Install `depthai-ros` on the Pi; confirm depth + point-cloud topics publish.
       - [ ] Confirm the Myriad X VPU is doing the stereo work — Pi CPU stays low. Any
             per-pixel depth reconstruction on the Pi means the pipeline is
@@ -584,10 +608,12 @@ runs.
       measured-nulls list are the project's working memory. Update them so the next
       session starts from hardware truth rather than sim truth — including a new
       measured-nulls section for anything hardware proved dead.
-- [ ] **S9-5 — Update the contract docs to as-built.** `architecture.md` still marks
-      `payload_node` and `supervisor_node` as future and `/payload/alarm` as
-      provisional. Promote them, and correct any topic, rate or QoS that hardware
-      changed.
+- [ ] **S9-5 — Update the contract docs to as-built.** The provisional-block residue is
+      already gone from `architecture.md` — both nodes and `/payload/alarm` are listed
+      active, and `/huitzilin/patrol_state` and the two marker topics now have contract
+      rows. What is left for Week 9 is the hardware half: correct any topic, rate or QoS
+      that the real camera and the real FC changed, and re-check `frames.md`'s
+      `base_link → camera_link` offset against the measured mount.
 - [ ] **S9-6 — Final vlog.** The project is vlogged weekly
       (`HuitzilinReflex_v2.md`). The strongest available story is not "the drone dodges"
       — it is that Week 4 predicted the envelope was bounded by sensing, named the

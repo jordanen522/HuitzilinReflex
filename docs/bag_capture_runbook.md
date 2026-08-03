@@ -48,13 +48,17 @@ kill -SIGINT $BAG_PID
 
 Special cases:
 - **N02** — no spawn; time the window to span a patrol waypoint turn.
-- **N04** — needs ~10 m *vertical* miss; `spawn_projectile.py` only does lateral. Set
-  `takeoff_alt_m: 12.0` in `bridge.yaml` (restore 2.0 after), or spawn manually via
-  `gz service … EntityFactory` with a low Z. Don't silently mislabel it.
+- **N04** — needs ~10 m *vertical* miss. `spawn_projectile.py` has
+  `offset_vertical_m` (the matrix row sets `-10.0`) and `capture_scenario.sh` passes it
+  automatically — no manual `gz service … EntityFactory` spawn, and no editing the
+  parameter out. What you *do* still have to do by hand is fly high enough: set
+  `takeoff_alt_m: 12.0` in `bridge.yaml` and restore 2.0 afterwards, or the spawn lands
+  underground and `capture_scenario.sh` aborts.
 - **N05** — 60 s of clean patrol, no spawn.
 
-After **every** bag write `/data/huitzilin_bags/week3_<ID>.label.yaml` (fields map 1:1
-from the matrix row):
+Every bag needs a `/data/huitzilin_bags/week3_<ID>.label.yaml` sidecar.
+**`capture_scenario.sh` writes it for you** — hand-write one only when you captured
+the bag manually with the block above. Fields map 1:1 from the matrix row:
 
 ```yaml
 scenario_id: S02
@@ -62,8 +66,10 @@ label: positive            # positive | negative
 closest_approach_m: 0.0
 time_to_closest_s: 0.75
 detection_window_s: 4.0    # widen for slow scenarios
-bag_start_sim_t: 0.0       # first /clock value in the bag (ros2 bag info)
 ```
+
+There is no `bag_start_sim_t` field. Nothing writes one and nothing reads one; a
+sidecar carrying it is not more complete, just inconsistent with the tooling.
 
 All 17 sidecars must exist. `score_bags.py` fails explicitly on a missing *bag*, but a
 missing *sidecar* silently drops the scenario from the recall math.
