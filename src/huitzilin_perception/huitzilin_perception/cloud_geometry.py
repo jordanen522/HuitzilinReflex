@@ -242,9 +242,15 @@ def euclidean_cluster(pts: np.ndarray, tol: float,
     Greedy radius-based Euclidean clustering on (N, 3) float32 xyz.
     Returns a list of (k, 3) arrays, each being one cluster.
 
-    Clusters outside [min_pts, max_pts] are dropped. Prefer
-    cluster_and_split() in the live pipeline — see its docstring for why the
-    max_pts drop is the wrong behaviour when the scene is cluttered.
+    Clusters outside [min_pts, max_pts] are dropped.
+
+    NOT on any live path — detector_node calls cluster_and_split(), which
+    re-clusters an over-large cluster instead of dropping it (see its docstring
+    for why the max_pts drop is wrong in a cluttered scene). This is kept
+    deliberately, as the Week 3 reference the A/B tests compare against:
+    test_background_map.test_euclidean_cluster_behaviour_unchanged pins its
+    output, and test_cloud_geometry uses it as the known-good baseline. Deleting
+    it removes the only independent implementation those comparisons have.
     """
     return [c for c in cluster_all(pts, tol, min_pts) if c.shape[0] <= max_pts]
 

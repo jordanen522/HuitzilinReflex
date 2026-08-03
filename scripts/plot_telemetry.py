@@ -1,28 +1,57 @@
 #!/usr/bin/env python3
 """Quick plot of a Week 2 telemetry CSV. Run after a patrol session.
 
-Usage: python3 scripts/plot_telemetry.py week2_telemetry_XXXX.csv
+Usage: python3 scripts/plot_telemetry.py week2_telemetry_XXXX.csv [patrol.yaml]
+
+The planned loop is read from the patrol params yaml, defaulting to
+params/patrol.yaml. Pass params/week4_patrol.yaml for a dodge-battery run: the
+loops are different sizes (5 m vs 12 m square), so plotting one against the
+other draws a "planned track" the drone was never asked to fly.
 
 CSV schema (from telemetry_logger.py): t,x,y,z,vx,vy,vz,cmd_vx,cmd_vy,cmd_vz
 Frames: odom topic is ENU (x=East, y=North, z=Up).
 
 Outputs <csv>_proof.png with three panels:
-  1. Patrol ground track (ENU x/y) with the 4 waypoints overlaid
+  1. Patrol ground track (ENU x/y) with the waypoints overlaid
   2. Altitude hold (z vs time)
   3. Commanded vs measured forward velocity (vx)
 """
+import os
 import sys
+import yaml
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")          # headless-safe (WSL has no display); savefig still works
 import matplotlib.pyplot as plt
 
-# Patrol waypoints, converted NED [n,e,d] -> ENU (x=e, y=n) for the odom frame.
-# patrol.yaml square: (5,0,-2) (5,5,-2) (0,5,-2) (0,0,-2)  ->  ENU x/y below.
-WAYPOINTS_ENU = [(0, 5), (5, 5), (5, 0), (0, 0)]
-TARGET_ALT_M = 2.0
+DEFAULT_PARAMS = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "src", "huitzilin_sim", "params", "patrol.yaml"))
+
+
+def load_patrol(path):
+    """(ENU [(x,y), ...], target altitude m) from a patrol params yaml.
+
+    Reads the same waypoints_ned key patrol_node declares, so the planned loop
+    drawn here is the loop that was actually flown. It used to be a hardcoded
+    copy of patrol.yaml's 5 m square, which silently mislabelled every Week 4
+    run -- those fly week4_patrol.yaml's 12 m square.
+    """
+    with open(path) as fh:
+        flat = yaml.safe_load(fh)["patrol"]["ros__parameters"]["waypoints_ned"]
+    ned = [tuple(float(v) for v in flat[i:i + 3]) for i in range(0, len(flat), 3)]
+    # NED [n,e,d] -> ENU (x=e, y=n); d is negative-up, so altitude is -d.
+    return [(e, n) for n, e, _ in ned], -ned[0][2]
+
 
 csv_path = sys.argv[1] if len(sys.argv) > 1 else "week2_telemetry.csv"
+params_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_PARAMS
+try:
+    WAYPOINTS_ENU, TARGET_ALT_M = load_patrol(params_path)
+except (OSError, KeyError, TypeError, ValueError) as exc:
+    sys.exit(f"cannot read waypoints from {params_path}: {exc}\n"
+             "pass the patrol params yaml as the second argument")
+
 df = pd.read_csv(csv_path)
 t = df["t"] - df["t"].iloc[0]
 

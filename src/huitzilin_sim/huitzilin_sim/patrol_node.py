@@ -13,7 +13,7 @@ from std_msgs.msg import String
 from std_srvs.srv import SetBool
 from visualization_msgs.msg import Marker, MarkerArray
 
-from huitzilin_sim.mav_bridge import MavBridge, MASK_POS_ONLY  # reuse frame helpers
+from huitzilin_sim.mav_bridge import MavBridge  # reuse frame helpers
 from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 
 
@@ -132,9 +132,7 @@ class PatrolNode(Node):
         if not self.running:
             self._publish_state(self._dist_to_target(n, e, d))
             return
-        tn, te, td = self.wps[self.idx]
-        dist = math.sqrt((tn - n) ** 2 + (te - e) ** 2 + (td - d) ** 2)
-
+        dist = self._dist_to_target(n, e, d)
         if dist < self.accept:
             self.get_logger().info(f"reached WP {self.idx} {self.wps[self.idx]}")
             self.idx += 1

@@ -22,7 +22,7 @@ _NODE_NAME_RE = re.compile(r'super\(\)\.__init__\(\s*["\']([A-Za-z_][A-Za-z0-9_]
 RTL_ALT_CM_PER_M = 100.0
 
 
-def flatten_ros_params(doc) -> dict:
+def flatten_ros_params(doc) -> dict[str, dict]:
     """{node_name: {param: value}} from a parsed ROS 2 params yaml."""
     out = {}
     for node, body in (doc or {}).items():
@@ -31,7 +31,7 @@ def flatten_ros_params(doc) -> dict:
     return out
 
 
-def check_overlay(base_doc, overlay_doc) -> list:
+def check_overlay(base_doc, overlay_doc) -> list[str]:
     """Problems with `overlay_doc` used as a hardware overlay on `base_doc`.
 
     Two failure modes, both silent in ROS 2 at runtime. A node name that does
@@ -63,7 +63,7 @@ def declared_node_names(source: str) -> set:
     return set(_NODE_NAME_RE.findall(source))
 
 
-def check_node_names(doc, declared) -> list:
+def check_node_names(doc, declared) -> list[str]:
     """Problems with a params yaml's node keys against the names nodes declare.
 
     check_overlay only compares an overlay against its base file, so a typo
@@ -84,7 +84,7 @@ def check_node_names(doc, declared) -> list:
     return problems
 
 
-def check_fence_consistency(parms: dict) -> list:
+def check_fence_consistency(parms: dict) -> list[str]:
     """Problems with a .parm file's geofence and failsafe set.
 
     The headline check is RTL_ALT against FENCE_ALT_MAX. SAFETY_CASE.md sets a

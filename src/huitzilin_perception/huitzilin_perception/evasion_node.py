@@ -64,15 +64,6 @@ RELIABLE_QOS = QoSProfile(
 )
 from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 
-# Documented sweep surface used by the dodge battery's sweep config (ros2
-# param set /evasion ...). Any live-read key in self._p outside
-# FIXED_AT_START also accepts writes -- this set is the subset the battery
-# actually grids, not an exhaustive allow-list.
-SWEEPABLE = {
-    "dodge_speed_mps", "threat_radius_m", "trigger_horizon_s",
-    "dodge_duration_s", "min_track_updates", "dodge_max_speed_mps",
-}
-
 # Declared params that are consumed exactly once at node start (tracker
 # construction, topic wiring, timer creation). Rejecting writes keeps the
 # ROS parameter surface honest: what `ros2 param get` shows is what runs.
@@ -208,7 +199,12 @@ class EvasionNode(Node):
                            "edit params/evasion.yaml and restart")
 
         for prm in params:
-            if prm.name in self._p:  # SWEEPABLE + live-read tunables
+            # Every live-read tunable, i.e. everything in the shadow dict that
+            # FIXED_AT_START did not already refuse above. There is deliberately
+            # no second allow-list: the sweep surface the battery actually grids
+            # is owned by config/week4_sweep.yaml, and a hand-maintained copy of
+            # it here would drift without anything failing.
+            if prm.name in self._p:
                 self._p[prm.name] = prm.value
                 self.get_logger().info(f"param {prm.name} -> {prm.value}")
         return SetParametersResult(successful=True)

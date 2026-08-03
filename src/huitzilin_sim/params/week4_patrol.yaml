@@ -1,7 +1,8 @@
 # Patrol geometry for the dodge battery ONLY. Same node and parameters as
 # patrol.yaml, bigger loop. patrol.yaml keeps the 5 m square because that is the
-# Week 2 demo geometry and scripts/plot_telemetry.py hardcodes it as the
-# planned-track reference.
+# Week 2 demo geometry. To plot a run flown against THIS file, pass it to
+# scripts/plot_telemetry.py as the second argument -- it defaults to
+# patrol.yaml, so the planned track would otherwise be drawn 5 m wide.
 #
 # WHY 12 m LEGS: throws are only aimable on the steady middle of a leg (see
 # throw_window.py). Measured cruise is 3.4 m/s max (median 2.09) — NOT the

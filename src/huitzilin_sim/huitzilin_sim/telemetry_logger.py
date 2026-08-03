@@ -26,7 +26,16 @@ class TelemetryLogger(Node):
         self.cmd = (0.0, 0.0, 0.0)
         self.create_subscription(Odometry, "/huitzilin/odom", self._on_odom, 50)
         self.create_subscription(Twist, "/huitzilin/cmd_vel", self._on_cmd, 50)
+        # Flush on a timer, not per row. Odom arrives at ~30 Hz and a flush is a
+        # write(2) each time, inside the subscription callback on the same
+        # single-threaded executor everything else here runs on. Once a second
+        # bounds the loss on a hard kill to ~30 rows, which is what tailing the
+        # file live actually needs. destroy_node still closes (and so flushes).
+        self.create_timer(1.0, self._flush)
         self.get_logger().info(f"logging telemetry -> {path}")
+
+    def _flush(self):
+        self.f.flush()
 
     def _on_cmd(self, m):
         self.cmd = (m.linear.x, m.linear.y, m.linear.z)
@@ -42,7 +51,6 @@ class TelemetryLogger(Node):
                          p.x, p.y, p.z,
                          v.x, v.y, v.z,
                          *self.cmd])
-        self.f.flush()
 
     def destroy_node(self):
         self.f.close()

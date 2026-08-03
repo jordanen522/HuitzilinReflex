@@ -174,7 +174,7 @@ def fault_response(fault: Fault) -> State:
     return FAULT_RESPONSE.get(fault, State.FAILSAFE)
 
 
-def detect_faults(obs: Observation, limits: Limits) -> list:
+def detect_faults(obs: Observation, limits: Limits) -> list[Fault]:
     """Faults present right now, most severe first.
 
     Returns nothing while disarmed. On the bench with props off most of these

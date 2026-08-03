@@ -55,11 +55,13 @@ NEAR_POINT_M = 0.20
 NEAR_CLUSTER_M = 0.40
 
 
-def load_truth(path: str) -> tuple[dict, dict]:
+def load_truth(path: str) -> tuple[dict, dict, dict]:
     """Group truth rows by (kind, name) -> (times, Nx3 positions), time-sorted.
 
-    Returns (positions, recv) where recv maps the same key to the ROS sim clock
-    at arrival, needed to bracket the two clocks (see fit_gz_offset).
+    Returns (positions, recv, quat): recv maps the same key to the ROS sim clock
+    at arrival, needed to bracket the two clocks (see fit_gz_offset), and quat
+    to the orientation columns. Three values, which is what the one caller
+    unpacks — the annotation said two.
     """
     rows: dict[tuple[str, str], list] = defaultdict(list)
     with open(path, newline="") as fh:

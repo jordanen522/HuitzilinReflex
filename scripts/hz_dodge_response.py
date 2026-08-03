@@ -31,6 +31,7 @@ import argparse
 import csv
 import json
 import sys
+from collections import deque
 
 import numpy as np
 import rclpy
@@ -71,7 +72,12 @@ class DodgeResponse(Node):
         self._drone_model = drone_model
         self.set_parameters([Parameter("use_sim_time", value=True)])
 
-        self._poses: list[tuple[float, np.ndarray]] = []   # (recv_s, xyz world)
+        # (recv_s, xyz world). A deque, not a list: the eviction below runs once
+        # per /gz/dynamic_poses message and list.pop(0) shifts the whole buffer
+        # each time. This script's own docstring warns that recording too much
+        # of that topic blinds the detector it is observing, so the per-message
+        # cost here is not free -- it competes with the pipeline being measured.
+        self._poses: deque[tuple[float, np.ndarray]] = deque()
         self._pending: list[dict] = []
         self._n_dodges = 0
 
@@ -99,7 +105,7 @@ class DodgeResponse(Node):
                                 np.array([t.x, t.y, t.z], dtype=np.float64)))
         cutoff = self._now() - HISTORY_S
         while self._poses and self._poses[0][0] < cutoff:
-            self._poses.pop(0)
+            self._poses.popleft()
 
     def _event_cb(self, msg: String) -> None:
         try:

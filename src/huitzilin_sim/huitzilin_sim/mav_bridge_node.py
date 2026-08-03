@@ -2,7 +2,6 @@
 """ROS 2 Jazzy wrapper around MavBridge: cmd_vel/evade in, odom/state out, services."""
 import sys
 import json
-import math
 import threading
 
 import rclpy
