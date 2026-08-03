@@ -64,6 +64,7 @@ class GpioBuzzerBackend(PayloadBackend):
 
     def __init__(self, line):
         self._line = line
+        self.close_error = None
 
     def set(self, on: bool) -> None:
         self._line.set_value(1 if on else 0)
@@ -71,8 +72,12 @@ class GpioBuzzerBackend(PayloadBackend):
     def close(self) -> None:
         try:
             self._line.release()
-        except Exception:
-            pass
+        except Exception as exc:            # noqa: BLE001
+            # Still swallowed -- shutdown must continue -- but recorded rather
+            # than discarded. A line that will not release may be leaving the
+            # siren asserted, and a bare `pass` left no evidence of the one
+            # failure at shutdown you would actually want to hear about.
+            self.close_error = exc
 
 
 class CompositeBackend(PayloadBackend):
@@ -101,10 +106,16 @@ class CompositeBackend(PayloadBackend):
                 self.error_count += 1
 
 
-# Everything that can go wrong reaching for optional hardware. PermissionError
-# matters as much as ImportError: rpi_ws281x imports fine and then fails on
-# /dev/mem when the process is not privileged.
-_BACKEND_ERRORS = (ImportError, OSError, PermissionError, AttributeError, ValueError)
+# Everything that can go wrong reaching for optional hardware. The failures
+# that matter most are the ones *after* a clean import: rpi_ws281x imports
+# fine and then fails on /dev/mem when the process is not privileged, which
+# surfaces as PermissionError (an OSError, hence covered) -- or, for a DMA
+# channel it cannot claim, as a bare RuntimeError. RuntimeError was missing,
+# so that path escaped select_backend and killed node construction, against
+# both this function's "never raises" contract and SAFETY_CASE.md, which
+# rates a dead payload log-and-continue. PermissionError is not listed
+# separately: it is a subclass of OSError and was always redundant.
+_BACKEND_ERRORS = (ImportError, OSError, RuntimeError, AttributeError, ValueError)
 
 
 def select_backend(want: str = "auto",

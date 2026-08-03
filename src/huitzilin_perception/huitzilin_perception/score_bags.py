@@ -52,6 +52,7 @@ import subprocess
 import sys
 import time
 import threading
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -333,8 +334,17 @@ def main(args=None) -> None:
     exit_code = [0]
 
     def _run():
-        exit_code[0] = node.run()
-        node._done = True
+        # _done in a finally, not after the call. run() raising left the flag
+        # unset, so the loop below spun on a dead thread forever with no
+        # output and no traceback -- a hung regression rather than a failed
+        # one, which under run_regression.sh looks like a slow scoring pass.
+        try:
+            exit_code[0] = node.run()
+        except Exception:
+            exit_code[0] = 1
+            traceback.print_exc()
+        finally:
+            node._done = True
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
@@ -344,7 +354,11 @@ def main(args=None) -> None:
 
     thread.join(timeout=5.0)
     node.destroy_node()
-    rclpy.shutdown()
+    # A SIGTERM during scoring already shut the context down; shutting down
+    # twice raises RCLError, which would replace the scoring exit code with a
+    # traceback and make a failed run indistinguishable from a crashed one.
+    if rclpy.ok():
+        rclpy.shutdown()
     sys.exit(exit_code[0])
 
 

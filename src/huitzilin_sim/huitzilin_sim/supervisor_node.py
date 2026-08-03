@@ -175,20 +175,54 @@ class SupervisorNode(Node):
         """Ask mav_bridge for a flight mode.
 
         /huitzilin/set_mode is a Trigger that reads the mode from mav_bridge's
-        own parameter, so the parameter has to be set first. Both calls are
-        async on purpose: the bridge's set_mode blocks its single-threaded
-        executor for up to 10 s, and a supervisor that blocked alongside it
-        would stop monitoring faults for exactly as long.
+        own parameter, so the parameter has to be set first -- and *first* has
+        to be enforced, not assumed. Two independent call_async calls have no
+        happens-before between them: they are separate DDS endpoints, and the
+        single-threaded executor serialises them without ordering them. It
+        worked only because rclpy walks its wait set in entity-creation order
+        and the built-in parameter services predate /huitzilin/set_mode.
+
+        That is a live hazard rather than a style point, because the bridge's
+        set_mode blocks its executor for up to 10 s. If the Trigger were
+        serviced first, the pending SetParameters could not run during the
+        block, so the mode applied would be the *previous* one -- and
+        edge_only() only emits on a state change, so a lost mode command is
+        never retried. Worst case: FAILSAFE -> RTL_LAND asks for RTL, sends
+        LOITER, and the aircraft hovers while RTL_LAND waits for a landing
+        that will not come.
+
+        Chaining off the future keeps both calls async, so the reasoning that
+        made them async in the first place still holds: a supervisor that
+        blocked alongside the bridge would stop monitoring faults for as long.
         """
-        if self._bridge_param_cli.service_is_ready():
-            req = SetParameters.Request()
-            req.parameters = [
-                Parameter("mode", Parameter.Type.STRING, mode).to_parameter_msg()]
-            self._bridge_param_cli.call_async(req)
-        if self._mode_cli.service_is_ready():
-            self._mode_cli.call_async(Trigger.Request())
-        else:
+        if not self._bridge_param_cli.service_is_ready():
+            self.get_logger().warning(
+                "bridge parameter service not ready (wanted %s)" % mode)
+            return
+        if not self._mode_cli.service_is_ready():
+            # Return rather than set the parameter anyway: a mode written with
+            # no Trigger to consume it silently arms the *next* fault response
+            # with this mode.
             self.get_logger().warning("set_mode service not ready (wanted %s)" % mode)
+            return
+
+        req = SetParameters.Request()
+        req.parameters = [
+            Parameter("mode", Parameter.Type.STRING, mode).to_parameter_msg()]
+
+        def _trigger_when_set(future):
+            try:
+                result = future.result()
+            except Exception as exc:                     # noqa: BLE001
+                self.get_logger().error(
+                    "mode parameter set failed (%s): %s" % (mode, exc))
+                return
+            if not all(r.successful for r in result.results):
+                self.get_logger().error("bridge refused mode %s" % mode)
+                return
+            self._mode_cli.call_async(Trigger.Request())
+
+        self._bridge_param_cli.call_async(req).add_done_callback(_trigger_when_set)
 
 
 def main():

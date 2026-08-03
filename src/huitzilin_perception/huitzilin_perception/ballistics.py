@@ -165,6 +165,16 @@ def compute_spawn(
     if compensate_gravity:
         if speed_mps <= 0.0:
             raise ValueError("compensate_gravity requires speed_mps > 0")
+        if offset_forward_m <= 0.0:
+            # t_flight is the whole compensation. At offset_forward_m == 0 the
+            # ball starts on top of the drone, so there is no flight to
+            # compensate -- and the line below divides by t_flight, making this
+            # a ZeroDivisionError from inside the maths rather than a rejected
+            # scenario. Only speed_mps was guarded.
+            raise ValueError(
+                "compensate_gravity requires offset_forward_m > 0 "
+                "(got %r): flight time is offset_forward_m / speed_mps"
+                % (offset_forward_m,))
         t_flight = offset_forward_m / speed_mps
         vel[2] = 0.5 * g * t_flight - offset_vertical_m / t_flight
 

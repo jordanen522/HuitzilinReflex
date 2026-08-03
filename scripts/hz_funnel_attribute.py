@@ -306,7 +306,12 @@ def main() -> int:
             # the same displacement the detector's own TF applied to the cloud.
             d_o = interp_xyz(t, odom_t, odom_p)
             off_t = offset if d_o is None else (d_o - d_w)
-            d = dict(np.load(files[i], allow_pickle=False))
+            # `with`: np.load on an .npz returns a lazy NpzFile holding an open
+            # zip handle. Discarding it without closing leaks one file
+            # descriptor per dumped frame, and a dump runs at 15 Hz -- long
+            # attributions reliably died on "OSError: Too many open files".
+            with np.load(files[i], allow_pickle=False) as z:
+                d = dict(z)
             ball_odom = b_w + off_t
             verdict, detail = classify(d, ball_odom, args.near_radius)
             if verdict == "absent" and d_o is not None:
@@ -338,15 +343,28 @@ def main() -> int:
         # from outside the two are indistinguishable. The period is taken from
         # the run's own median gap rather than assumed to be 15 Hz — the dump
         # itself costs latency, so the achieved rate is the honest baseline.
+        # The dropped-frame estimate needs at least two stamps to difference.
+        # The tally does not, and used to be printed from inside this branch --
+        # so a ball seen in exactly one frame, which is the most interesting
+        # outcome there is, printed no summary at all.
         if len(in_window) > 1:
             gaps = np.diff(stamps[in_window])
             period = float(np.median(gaps))
-            missed = int(np.clip(np.round(gaps / period) - 1, 0, None).sum())
-            print(f"\n         frame period (median) {period * 1000:.0f} ms "
-                  f"= {1 / period:.1f} Hz")
-            print(f"\nsummary: {dict(sorted(tally.items()))}")
-            print(f"         ~{missed} camera frames never reached the detector "
-                  f"during this flight (max gap {gaps.max() * 1000:.0f} ms)")
+            if period > 0.0:
+                missed = int(np.clip(np.round(gaps / period) - 1, 0, None).sum())
+                print(f"\n         frame period (median) {period * 1000:.0f} ms "
+                      f"= {1 / period:.1f} Hz")
+                print(f"         ~{missed} camera frames never reached the "
+                      f"detector during this flight "
+                      f"(max gap {gaps.max() * 1000:.0f} ms)")
+            else:
+                # Duplicate stamps (a replayed or stalled clock) make the
+                # median gap zero; 1/period was a ZeroDivisionError that threw
+                # away the tally computed above it.
+                print("\n         frame period (median) is 0 ms — duplicate "
+                      "stamps, cannot infer dropped frames")
+
+        print(f"\nsummary: {dict(sorted(tally.items()))}")
     return 0
 
 

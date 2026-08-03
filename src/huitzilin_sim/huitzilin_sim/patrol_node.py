@@ -5,6 +5,7 @@ import json
 import math
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -14,6 +15,29 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from huitzilin_sim.mav_bridge import MavBridge, MASK_POS_ONLY  # reuse frame helpers
 from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
+
+
+def parse_waypoints(flat):
+    """Flat [n,e,d, n,e,d, ...] -> [(n,e,d), ...], or raise with the reason.
+
+    Both failure modes were silent at construction and loud 10 Hz later, which
+    is the worst place to find them: a length that is not a whole number of
+    triples left a short final tuple that raised ValueError on every _tick
+    unpack, and an empty list raised IndexError inside _target. Neither
+    traceback names the parameter at fault, so fail here, once, by name.
+    """
+    flat = list(flat)
+    if not flat:
+        raise ValueError(
+            "waypoints_ned is empty -- patrol needs at least one waypoint, "
+            "as a flat [n,e,d] triple (NED metres, d negative = up)")
+    if len(flat) % 3:
+        raise ValueError(
+            "waypoints_ned has %d values, which is not a whole number of "
+            "[n,e,d] triples (%d left over). Waypoints are flat NED metres, "
+            "3 values each." % (len(flat), len(flat) % 3))
+    return [tuple(float(v) for v in flat[i:i + 3])
+            for i in range(0, len(flat), 3)]
 
 
 class PatrolNode(Node):
@@ -29,8 +53,7 @@ class PatrolNode(Node):
         self.declare_parameter("loop", True)
         self.declare_parameter("autostart", True)      # True = patrol on launch (demo-friendly)
 
-        flat = list(self.get_parameter("waypoints_ned").value)
-        self.wps = [tuple(flat[i:i + 3]) for i in range(0, len(flat), 3)]
+        self.wps = parse_waypoints(self.get_parameter("waypoints_ned").value)
         self.accept = float(self.get_parameter("accept_radius_m").value)
         self.cruise = float(self.get_parameter("cruise_speed_ms").value)
         self.mode = self.get_parameter("mode").value
@@ -176,11 +199,14 @@ def main():
         # Already logged fatal by the guard; exit non-zero so a launch
         # file or shell script cannot mistake this for a clean start.
         clock_failed = True
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # SIGTERM/SIGINT already shut the context down; a second shutdown
+        # raises RCLError (seen as a traceback after every launch teardown).
+        if rclpy.ok():
+            rclpy.shutdown()
 
     if clock_failed:
         sys.exit(1)

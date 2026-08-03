@@ -14,6 +14,7 @@ Exit codes: 0 all parameters match, 1 mismatches, 2 could not reach the FC.
 import argparse
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "src", "huitzilin_sim"))
@@ -29,20 +30,29 @@ def fetch(connection, timeout_s):
     from pymavlink import mavutil
 
     master = mavutil.mavlink_connection(connection)
-    if master.wait_heartbeat(timeout=timeout_s) is None:
-        raise TimeoutError("no heartbeat on %s" % connection)
-    master.mav.param_request_list_send(master.target_system,
-                                       master.target_component)
-    live = {}
-    deadline = __import__("time").time() + timeout_s
-    while __import__("time").time() < deadline:
-        msg = master.recv_match(type="PARAM_VALUE", blocking=True, timeout=2)
-        if msg is None:
-            break
-        live[msg.param_id.strip("\x00").upper()] = float(msg.param_value)
-        if msg.param_count and len(live) >= msg.param_count:
-            break
-    return live
+    # finally, because all three exits mattered: the timeout raise, the early
+    # break, and the normal return each left a serial port claimed. On
+    # /dev/ttyACM0 that makes the *next* tool report a dead flight controller.
+    try:
+        if master.wait_heartbeat(timeout=timeout_s) is None:
+            raise TimeoutError("no heartbeat on %s" % connection)
+        master.mav.param_request_list_send(master.target_system,
+                                           master.target_component)
+        live = {}
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            msg = master.recv_match(type="PARAM_VALUE", blocking=True, timeout=2)
+            if msg is None:
+                break
+            live[msg.param_id.strip("\x00").upper()] = float(msg.param_value)
+            if msg.param_count and len(live) >= msg.param_count:
+                break
+        return live
+    finally:
+        try:
+            master.close()
+        except Exception:                # noqa: BLE001 — teardown must not raise
+            pass
 
 
 def main():

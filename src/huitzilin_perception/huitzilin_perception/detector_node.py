@@ -33,6 +33,7 @@ import numpy as np
 import rclpy
 from geometry_msgs.msg import PointStamped, TransformStamped
 from nav_msgs.msg import Odometry
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
@@ -88,12 +89,20 @@ class DetectorNode(Node):
         super().__init__("detector")
 
         # ── Declare all params (values come from detector.yaml) ──────────────
+        # These defaults are only reachable via a bare `ros2 run
+        # huitzilin_perception detector` -- both real callers pass
+        # params/detector.yaml explicitly. They still have to match it: the
+        # three below previously declared 8.00 / 0.05 / 0.15, every one of
+        # which detector.yaml documents as a *measured regression* (far
+        # background floods the diff; 0.05 m voxels are coarser than the 80 mm
+        # ball; 0.15 m missed the fast oblique closes). Booting the manual
+        # diagnostic path into the known-broken settings is exactly backwards.
         self.declare_parameter("roi_min_range_m", 0.30)
-        self.declare_parameter("roi_max_range_m", 8.00)
+        self.declare_parameter("roi_max_range_m", 5.00)
         self.declare_parameter("roi_half_angle_deg", 40.0)
-        self.declare_parameter("voxel_leaf_m", 0.05)
+        self.declare_parameter("voxel_leaf_m", 0.02)
         self.declare_parameter("bg_history_frames", 5)
-        self.declare_parameter("diff_threshold_m", 0.15)
+        self.declare_parameter("diff_threshold_m", 0.10)
         self.declare_parameter("cluster_tolerance_m", 0.20)
         self.declare_parameter("cluster_min_points", 5)
         self.declare_parameter("cluster_max_points", 500)
@@ -164,6 +173,7 @@ class DetectorNode(Node):
 
         # ── Cache params ─────────────────────────────────────────────────────
         self._p = self._load_params()
+        self.add_on_set_parameters_callback(self._on_param_set)
         self._funnel_throttle_s = float(
             self.get_parameter("debug_funnel_throttle_s").value)
 
@@ -256,6 +266,29 @@ class DetectorNode(Node):
         )
 
     # ── Param helper ─────────────────────────────────────────────────────────
+
+    def _on_param_set(self, params) -> SetParametersResult:
+        """Refuse live writes to anything snapshotted at construction.
+
+        Every key in self._p is read once, here, at start: the background map,
+        the history deque and the publishers are all built from that snapshot,
+        so a later write to the declared parameter changed nothing at all --
+        while `ros2 param set` reported success and `ros2 param get` echoed the
+        new value back. That is the worst of the three possible behaviours,
+        because it looks like tuning worked. Making them genuinely live is a
+        different change: it means rebuilding the map and deque mid-run, and
+        it would need a bag re-score to trust.
+
+        Names outside self._p are left alone deliberately -- use_sim_time and
+        friends are managed by rclpy itself.
+        """
+        for prm in params:
+            if prm.name in self._p:
+                return SetParametersResult(
+                    successful=False,
+                    reason=f"{prm.name} is read once at detector start — "
+                           "edit params/detector.yaml and restart the node")
+        return SetParametersResult(successful=True)
 
     def _load_params(self) -> dict:
         return {

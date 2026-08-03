@@ -59,6 +59,9 @@ RELIABLE_QOS = QoSProfile(
 SAMPLES_S = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.60, 1.00)
 BASELINE_FIT_S = 0.20     # window before the trigger used to fit cruise velocity
 HISTORY_S = 3.0           # pose ring-buffer span
+# evasion.yaml's SHIPPED dodge_speed_mps -- assumed, not measured. It is a
+# swept parameter, so a run at another value makes every figure derived from
+# this constant wrong in proportion. Rescale, or re-read it from the node.
 DODGE_SPEED_MPS = 1.5     # evasion.yaml dodge_speed_mps; the command is a step
 
 

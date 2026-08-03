@@ -6,6 +6,7 @@ import math
 import threading
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -213,11 +214,14 @@ def main():
         # Already logged fatal by the guard; exit non-zero so a launch
         # file or shell script cannot mistake this for a clean start.
         clock_failed = True
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # SIGTERM/SIGINT already shut the context down; a second shutdown
+        # raises RCLError (seen as a traceback after every launch teardown).
+        if rclpy.ok():
+            rclpy.shutdown()
 
     if clock_failed:
         sys.exit(1)

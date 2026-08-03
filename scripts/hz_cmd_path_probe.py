@@ -157,6 +157,12 @@ def main(argv=None) -> int:
             self.get_logger().info(
                 f"cmd-path probe up (read-only) -> {args.out}")
 
+        def close(self) -> None:
+            try:
+                self._out.close()
+            except Exception:            # noqa: BLE001 — teardown must not raise
+                pass
+
         def _now(self) -> float:
             return self.get_clock().now().nanoseconds * 1e-9
 
@@ -267,6 +273,11 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        # Close the jsonl explicitly, as hz_truth_probe and hz_dodge_response
+        # already do. It is line-buffered so no rows are lost either way, but
+        # leaving the handle to the interpreter keeps the file claimed for the
+        # life of the process.
+        node.close()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

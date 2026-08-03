@@ -190,12 +190,24 @@ class EvasionNode(Node):
     # ── Param updates (sweep support) ────────────────────────────────────
 
     def _on_param_set(self, params) -> SetParametersResult:
+        """Validate every parameter in the set before applying any of them.
+
+        `ros2 param set` is atomic from ROS's side: one rejected parameter
+        rolls back the whole request, so none of the declared values change.
+        A single loop that wrote self._p as it went could not honour that --
+        an earlier key was already live in the shadow dict by the time a later
+        key was refused, leaving self._p and `ros2 param get` disagreeing with
+        no way to tell from either side. The dodge battery's sweep sets several
+        keys in one call, so that divergence would silently mislabel a row.
+        """
         for prm in params:
             if prm.name in FIXED_AT_START:
                 return SetParametersResult(
                     successful=False,
                     reason=f"{prm.name} is fixed at node start — "
                            "edit params/evasion.yaml and restart")
+
+        for prm in params:
             if prm.name in self._p:  # SWEEPABLE + live-read tunables
                 self._p[prm.name] = prm.value
                 self.get_logger().info(f"param {prm.name} -> {prm.value}")

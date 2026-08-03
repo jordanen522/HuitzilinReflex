@@ -113,7 +113,7 @@ def install_clock_guard(node, grace_s: float = DEFAULT_GRACE_S,
 
     steady = Clock(clock_type=ClockType.STEADY_TIME)
     started_ns = steady.now().nanoseconds
-    state = {"timer": None, "warned": False}
+    state = {"timer": None}
 
     def _poll():
         elapsed_s = (steady.now().nanoseconds - started_ns) / 1e9
@@ -126,13 +126,22 @@ def install_clock_guard(node, grace_s: float = DEFAULT_GRACE_S,
         )
         if check.verdict is Verdict.WAIT:
             return
-        if check.verdict is Verdict.WARN:
-            if not state["warned"]:
-                node.get_logger().warning(check.message)
-                state["warned"] = True
-            return
+
+        # Every other verdict is terminal, WARN included. WARN used to log once
+        # and return with the timer still live, so the guard kept polling at
+        # 2 Hz for the life of the process -- and WARN is the Week 7 HITL shape
+        # (use_sim_time false with a /clock present), i.e. the case that runs
+        # longest. destroy_timer, not cancel: a cancelled timer stays on the
+        # node's timer list and is rebuilt into the executor's wait set on
+        # every cycle. Destroying a one-shot timer from inside its own callback
+        # is the standard rclpy pattern.
         if state["timer"] is not None:
-            state["timer"].cancel()
+            node.destroy_timer(state["timer"])
+            state["timer"] = None
+
+        if check.verdict is Verdict.WARN:
+            node.get_logger().warning(check.message)
+            return
         if check.verdict is Verdict.FAIL:
             node.get_logger().fatal(check.message)
             raise ClockGuardError(check.message)

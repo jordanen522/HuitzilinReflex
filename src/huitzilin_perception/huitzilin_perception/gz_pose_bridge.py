@@ -54,6 +54,7 @@ from typing import Optional
 import rclpy
 from builtin_interfaces.msg import Time
 from geometry_msgs.msg import TransformStamped
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from tf2_msgs.msg import TFMessage
@@ -301,6 +302,20 @@ class GzPoseBridgeNode(Node):
                 self._proc.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+        # Close the stdout pipe and join the reader. The thread is a daemon, so
+        # the process could exit without either -- but only at exit. Every
+        # destroy_node() before that leaked a pipe fd and left a thread blocked
+        # in `for line in self._proc.stdout`, which matters because the dodge
+        # battery constructs and tears down this bridge once per scenario.
+        # Ordering: the child is already dead, so the read hits EOF and the
+        # loop ends on its own; closing first would race it into a ValueError.
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+        try:
+            if self._proc.stdout is not None:
+                self._proc.stdout.close()
+        except Exception:  # noqa: BLE001 — shutdown must not raise
+            pass
         try:
             self._stderr_file.close()
         except Exception:  # noqa: BLE001 — shutdown must not raise
@@ -313,11 +328,14 @@ def main(args=None) -> None:
     node = GzPoseBridgeNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # SIGTERM/SIGINT already shut the context down; a second shutdown
+        # raises RCLError (seen as a traceback after every launch teardown).
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

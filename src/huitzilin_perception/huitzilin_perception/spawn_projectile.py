@@ -54,6 +54,7 @@ from typing import Optional
 
 import rclpy
 from nav_msgs.msg import Odometry
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 
@@ -488,10 +489,19 @@ class SpawnProjectileNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = SpawnProjectileNode()
-    while rclpy.ok() and not node._spawned:
-        rclpy.spin_once(node, timeout_sec=0.1)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        while rclpy.ok() and not node._spawned:
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        node.destroy_node()
+        # SIGTERM/SIGINT already shut the context down; a second shutdown
+        # raises RCLError. The battery spawns one of these per throw, so an
+        # unguarded teardown puts a traceback between every pair of scored
+        # rows and hands capture_scenario.sh an exit code to misread.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

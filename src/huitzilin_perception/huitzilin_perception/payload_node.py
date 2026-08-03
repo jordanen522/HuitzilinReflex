@@ -88,8 +88,13 @@ class PayloadNode(Node):
         try:
             self._backend.set(False)
             self._backend.close()
-        except Exception:
-            pass
+        except Exception as exc:            # noqa: BLE001
+            # Swallowed so shutdown always completes, but said out loud: this
+            # is the path where the siren stays asserted after the node is
+            # gone, and a bare `pass` left no evidence it had happened.
+            self.get_logger().error(
+                "payload backend did not shut down cleanly — the siren may "
+                "still be energised: %s" % exc)
         super().destroy_node()
 
 

@@ -80,6 +80,12 @@ SENSOR_QOS = QoSProfile(
     depth=5,
 )
 
+# evasion.yaml's shipped dodge_speed_mps. Used ONLY to turn tca into an
+# illustrative travel distance in the report -- the battery never commands it,
+# and a sweep row may have run at something else, so every figure derived from
+# it is printed with the assumption spelled out beside it.
+NOMINAL_DODGE_SPEED_MPS = 1.5
+
 ODOM_WAIT_TIMEOUT_WALL_S = 60.0   # bring-up bound (wall clock; generous, exits early)
 POSE_STREAM_TIMEOUT_WALL_S = 30.0
 
@@ -1251,12 +1257,19 @@ class DodgeBatteryNode(Node):
                     f"false-positive stream is saturating the associator")
             tcas = [r["tca_s"] for r in sub if r.get("tca_s") is not None]
             if tcas:
-                reach = np.array(tcas) * 1.5   # nominal dodge_speed_mps
+                # The speed is an ASSUMPTION, not a measurement, and it now says
+                # so. dodge_speed_mps is swept, so a 4.0 m/s row used to print
+                # its reach "at 1.5 m/s" and understate it 2.7x. Travel scales
+                # linearly, so a reader can rescale -- but only if the number
+                # the figure was computed at appears on the page.
+                reach = np.array(tcas) * NOMINAL_DODGE_SPEED_MPS
                 lines.append(
                     f"    tca at dodge commit: mean {np.mean(tcas):.3f} s, "
                     f"range {np.min(tcas):.3f}-{np.max(tcas):.3f} s "
-                    f"=> {reach.min():.2f}-{reach.max():.2f} m of travel at "
-                    f"1.5 m/s vs {self._hit_radius} m hit radius")
+                    f"=> {reach.min():.2f}-{reach.max():.2f} m of travel "
+                    f"ASSUMING dodge_speed_mps={NOMINAL_DODGE_SPEED_MPS} "
+                    f"(not read back; scales linearly for a swept row) "
+                    f"vs {self._hit_radius} m hit radius")
             if lats:
                 lines.append(
                     f"    latency: mean {np.mean(lats):.0f} ms, "
