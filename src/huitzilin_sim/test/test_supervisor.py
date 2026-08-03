@@ -21,12 +21,24 @@ from huitzilin_sim.supervisor import (
     edge_only,
     fault_response,
     next_state,
+    watched_topics,
 )
 
-LIM = Limits()
+# The test bench arms EVERY watch, including cmd_vel, which the shipped
+# supervisor.yaml disables. Without this the SETPOINT_STALL branch would be
+# unreachable and test_the_fixture_really_induces_each_fault -- the guard that
+# keeps the safety sweep from passing vacuously -- would itself go vacuous.
+LIM = Limits(cmd_vel_timeout_s=1.0)
+
+# What the shipped yaml actually produces: cmd_vel not watched.
+SHIPPED = Limits()
 
 # Every watched topic reporting fresh. Faults are opt-in from here.
 FRESH = {"odom": 0.0, "patrol_state": 0.0, "cloud": 0.0, "cmd_vel": 0.0}
+
+# What the running stack really looks like in position mode: nothing has ever
+# published /huitzilin/cmd_vel, so the key is absent rather than stale.
+SHIPPED_AGES = {"odom": 0.0, "patrol_state": 0.0, "cloud": 0.0}
 
 
 def flying(**kw):
@@ -129,13 +141,105 @@ def test_the_fixture_really_induces_each_fault():
         assert detect_faults(with_fault(fault), LIM) == [fault]
 
 
+# ── the watch gate ───────────────────────────────────────────────────────────
+# A watch on a topic the running configuration never publishes is
+# indistinguishable from a dead publisher, because _age reads a never-seen
+# topic as infinitely stale. That is not hypothetical: the shipped stack runs
+# patrol in "position" mode, where patrol_node talks to ArduPilot over MAVLink
+# and never creates the /huitzilin/cmd_vel publisher, so SETPOINT_STALL fired
+# one second after every arm and drove FAILSAFE -> LOITER -> RTL_LAND.
+
+def test_the_shipped_config_does_not_fault_a_healthy_aircraft():
+    """The regression. cmd_vel is never published and must not be a fault."""
+    obs = Observation(armed=True, alt_m=2.0, radius_m=1.0, batt_v=24.0,
+                      fc_failsafe=False, ages=dict(SHIPPED_AGES))
+    assert detect_faults(obs, SHIPPED) == []
+    assert next_state(State.PATROL, obs, SHIPPED).state is State.PATROL
+
+
+def test_shipped_config_leaves_cmd_vel_unwatched():
+    assert SHIPPED.cmd_vel_timeout_s == 0.0
+    assert "cmd_vel" not in watched_topics(SHIPPED)
+    assert set(watched_topics(SHIPPED)) == {"odom", "patrol_state", "cloud"}
+
+
+def test_a_zero_timeout_disables_its_fault():
+    """Even an infinitely stale topic is silent when its watch is off."""
+    dead = {"odom": 0.0, "patrol_state": 0.0, "cloud": 0.0, "cmd_vel": 99.0}
+    obs = Observation(armed=True, alt_m=2.0, radius_m=1.0, batt_v=24.0,
+                      fc_failsafe=False, ages=dead)
+    assert Fault.SETPOINT_STALL not in detect_faults(obs, SHIPPED)
+    # ...and the same observation still faults when the watch is armed, so the
+    # disable is what silenced it rather than the fixture being broken.
+    assert detect_faults(obs, LIM) == [Fault.SETPOINT_STALL]
+
+
+def test_disabling_one_watch_does_not_disable_the_others():
+    """SHIPPED still has to catch a genuinely dead camera and a dead link."""
+    for fault, key in ((Fault.SENSOR_DROPOUT, "cloud"),
+                       (Fault.LINK_LOSS, "odom"),
+                       (Fault.COMPANION_LOSS, "patrol_state")):
+        ages = dict(SHIPPED_AGES)
+        ages[key] = 99.0
+        obs = Observation(armed=True, alt_m=2.0, radius_m=1.0, batt_v=24.0,
+                          fc_failsafe=False, ages=ages)
+        assert detect_faults(obs, SHIPPED) == [fault]
+
+
+def test_a_never_seen_topic_still_faults_when_its_watch_is_armed():
+    """The disable is the only way to say "not published".
+
+    _age must keep reporting a missing topic as infinitely stale, or a node
+    that dies before its first message would read as healthy forever.
+    """
+    obs = Observation(armed=True, alt_m=2.0, radius_m=1.0, batt_v=24.0,
+                      fc_failsafe=False, ages={"odom": 0.0, "cloud": 0.0})
+    assert Fault.COMPANION_LOSS in detect_faults(obs, SHIPPED)
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0])
+def test_non_positive_timeouts_are_all_treated_as_off(timeout):
+    ages = {"odom": 0.0, "patrol_state": 0.0, "cloud": 99.0, "cmd_vel": 0.0}
+    obs = Observation(armed=True, alt_m=2.0, radius_m=1.0, batt_v=24.0,
+                      fc_failsafe=False, ages=ages)
+    assert detect_faults(obs, Limits(sensor_timeout_s=timeout)) == []
+
+
 def test_no_fault_path_can_reach_evade():
-    """Every state crossed with every inducible fault. None of them may dodge."""
+    """Every state crossed with every inducible fault. None of them may dodge.
+
+    Swept over `armed` too. detect_faults returns [] while disarmed, so pinning
+    armed=True proved the property only on the half where faults exist at all.
+    The assertion is deliberately conditioned on a fault actually being present:
+    while disarmed there is no fault, so "no FAULT path reaches EVADE" is
+    vacuous there rather than false. What the disarmed half really guarantees is
+    pinned by test_disarmed_threat_reaches_evade_but_commands_nothing below.
+    """
     for state in State:
         for fault in INDUCIBLE_FAULTS:
-            obs = with_fault(fault, alarm_on=True)
-            assert next_state(state, obs, LIM).state is not State.EVADE, (
-                "%s + %s reached EVADE" % (state, fault))
+            for armed in (True, False):
+                obs = with_fault(fault, alarm_on=True, armed=armed)
+                if not detect_faults(obs, LIM):
+                    continue          # disarmed: nothing to answer, see above
+                assert next_state(state, obs, LIM).state is not State.EVADE, (
+                    "%s + %s (armed=%s) reached EVADE" % (state, fault, armed))
+
+
+def test_disarmed_threat_reaches_evade_but_commands_nothing():
+    """Documents the one way EVADE is reachable with every topic dead.
+
+    Faults are gated on `armed` (bench topics are legitimately silent), so a
+    disarmed PATROL + alarm_on takes the threat edge with no fault to pre-empt
+    it. That is bookkeeping only: evasion_node owns /cmd/evade, the supervisor
+    never commands a dodge, and the EVADE state is timeout-bounded. Pinned here
+    so a future change to the fault gate cannot turn it into a real dodge.
+    """
+    obs = Observation(armed=False, alarm_on=True, ages={})
+    assert detect_faults(obs, LIM) == []
+    d = next_state(State.PATROL, obs, LIM)
+    assert d.state is State.EVADE
+    assert d.set_mode is None
+    assert d.fault is None
 
 
 def test_every_fault_including_future_ones_has_a_safe_response():

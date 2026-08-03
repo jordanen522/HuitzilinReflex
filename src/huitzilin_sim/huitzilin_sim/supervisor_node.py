@@ -31,6 +31,7 @@ from huitzilin_sim.supervisor import (
     State,
     edge_only,
     next_state,
+    watched_topics,
 )
 
 RELIABLE = QoSProfile(reliability=QoSReliabilityPolicy.RELIABLE,
@@ -89,7 +90,19 @@ class SupervisorNode(Node):
             SetParameters, "/%s/set_parameters" % p("bridge_node"))
 
         self.create_timer(1.0 / float(p("tick_hz")), self._tick)
-        self.get_logger().info("supervisor up in %s" % self._state.value)
+
+        # Which faults are actually live. A watch whose timeout is 0 is off, and
+        # that has to be visible here rather than inferred from the yaml -- an
+        # operator reading "watching: odom cloud" immediately knows cmd_vel is
+        # not being monitored, instead of discovering it during a failure.
+        armed = watched_topics(self._limits)
+        off = [k for k in ("odom", "patrol_state", "cloud", "cmd_vel")
+               if k not in armed]
+        self.get_logger().info(
+            "supervisor up in %s | watching: %s | disabled: %s"
+            % (self._state.value,
+               " ".join("%s(%.1fs)" % (k, v) for k, v in armed.items()) or "none",
+               " ".join(off) or "none"))
 
     # -- plumbing ------------------------------------------------------------
 

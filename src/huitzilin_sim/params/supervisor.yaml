@@ -14,11 +14,22 @@ supervisor:
     tick_hz: 1.0                  # architecture.md specifies 1 Hz
 
     # Topic staleness. Each is well above one publish period: depth cloud
-    # 15 Hz, odom 30 Hz (stream_rate_hz), patrol state 10 Hz, cmd_vel 10 Hz.
+    # 15 Hz, odom 30 Hz (stream_rate_hz), patrol state 10 Hz.
+    #
+    # 0 disables a watch. Only arm a timeout for a topic the configuration you
+    # are launching actually publishes: a never-seen topic reads as infinitely
+    # stale, so an unpublished topic faults exactly like a dead one.
     sensor_timeout_s: 1.0
     odom_timeout_s: 1.0
     patrol_state_timeout_s: 2.0
-    cmd_vel_timeout_s: 1.0
+
+    # DISABLED, deliberately. patrol.yaml ships mode: "position", where
+    # patrol_node sends SET_POSITION_TARGET_LOCAL_NED over its own MAVLink
+    # connection and never creates the /huitzilin/cmd_vel publisher -- so there
+    # is no ROS setpoint stream to watch, and SETPOINT_STALL cannot be observed
+    # from ROS at all. Watching it anyway drove FAILSAFE -> RTL one second
+    # after every arm. Set to 1.0 only alongside patrol.yaml mode: "velocity".
+    cmd_vel_timeout_s: 0.0
 
     batt_low_v: 21.0              # 6S at ~3.5 V/cell
 

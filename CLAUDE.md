@@ -59,9 +59,19 @@ ros2 service call /huitzilin/start_patrol std_srvs/srv/SetBool '{data: true}'
 
 Optional Week 5 nodes (neither runs by default):
 ```bash
-ros2 launch huitzilin_sim week2_sitl.launch.py with_supervisor:=true
+# The supervisor needs perception: it watches /oak/points, which week2_sitl
+# does not publish. Started from a bare week2_sitl it sits in permanent
+# SENSOR_DROPOUT. Use a Week 3/4 entry point — both forward the argument:
+ros2 launch huitzilin_perception week4_evasion.launch.py \
+  with_patrol:=true with_supervisor:=true
+
 ros2 run huitzilin_perception payload --ros-args   --params-file src/huitzilin_perception/params/payload.yaml
 ```
+The supervisor logs which watches are armed at startup
+(`watching: odom(1.0s) patrol_state(2.0s) cloud(1.0s) | disabled: cmd_vel`).
+A timeout of `0.0` in `supervisor.yaml` disables that watch; `cmd_vel` ships
+disabled because position-mode patrol publishes no ROS setpoint stream to
+watch. See the sharp edge below.
 
 Preflight: `./scripts/preflight_check.sh` (SITL) · `./scripts/preflight_hw.sh` (hardware;
 warns rather than fails, always exits 0).
@@ -101,7 +111,8 @@ Full frame table and TF tree: `docs/frames.md`.
 - **`set -u` breaks `/opt/ros/jazzy/setup.bash`.** Source ROS first, then enable it (`run_regression.sh`), or leave it off (`preflight_hw.sh`). A script that sources ROS under `-u` exits at that line.
 - **Hardware config lives in `hw_*` files, never as edits.** `params/hw_bridge.yaml`, `hw_frame.parm`, `hw_detector.yaml`, `hw_evasion.yaml` are overlays; the sim files stay the regression path. `test_hw_config.py` asserts each overlay's node name and keys exist in the file it overlays — in ROS 2 a mistyped node name silently loads *nothing*.
 - **`RTL_ALT` is centimetres; `FENCE_ALT_MAX` is metres.** `hw_frame.parm` pins `RTL_ALT 400` (4 m) under the 5 m ceiling, because ArduPilot's 15 m default would make a fence-breach RTL climb through the fence it is answering.
-- **`supervisor_node` reports no faults while disarmed.** Half the watched topics are legitimately silent on the bench. Faults are gated on `armed`, and no fault path can reach EVADE — that is asserted over all states × faults, not by inspection.
+- **`supervisor_node` reports no faults while disarmed.** Half the watched topics are legitimately silent on the bench. Faults are gated on `armed`, and no fault path can reach EVADE — that is asserted over all states × faults × `armed`, not by inspection. (EVADE *is* reachable disarmed via the threat edge, but commands nothing; pinned by `test_disarmed_threat_reaches_evade_but_commands_nothing`.)
+- **A supervisor watch on a topic nothing publishes is a permanent fault.** `_age` reads a never-seen topic as infinitely stale — correctly, since that is how a publisher which died before its first message is caught — so an *unpublished* topic is indistinguishable from a dead one. A timeout of `0.0` in `supervisor.yaml` is the only way to say "this configuration does not produce that topic". `cmd_vel_timeout_s` ships `0.0`: `patrol.yaml` runs `mode: "position"`, where `patrol_node` sends setpoints over its own MAVLink connection and never creates the `/huitzilin/cmd_vel` publisher. Watching it drove `SETPOINT_STALL → FAILSAFE → LOITER → RTL_LAND` one second after every arm. Set it to `1.0` only alongside `mode: "velocity"`.
 - **`ECC/` at repo root** is an unrelated plugin marketplace (untracked). Ignore it.
 
 ## Measured nulls — do not re-run

@@ -96,17 +96,43 @@ class MavBridge:
                 return True
         raise TimeoutError(f"mode {mode_name} not confirmed")
 
+    def _wait_armed_state(self, want_armed, timeout):
+        """Poll heartbeats until the arm state matches, or the deadline passes.
+
+        pymavlink's motors_armed_wait() / motors_disarmed_wait() loop on
+        wait_heartbeat() with no bound, so a refused arm blocks forever. That
+        matters here because _srv_arm calls this from a service callback on a
+        single-threaded executor: an unbounded wait stops odom, /huitzilin/state
+        and the setpoint stream for the life of the process, which reads as "the
+        bridge died" rather than "arming was refused".
+
+        WALL-clock, like set_mode and takeoff above -- this runs before there is
+        any flight to time, and a sim-time bound would itself stall if /clock
+        never advanced.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            self.master.wait_heartbeat(timeout=1)
+            if bool(self.master.motors_armed()) == want_armed:
+                return True
+        return False
+
     def arm(self, arm=True, timeout=10):
+        # param2=0. NOT a force-arm: ArduPilot's force-arm magic value is 21196,
+        # and forcing is forbidden here anyway (it hides the frame/EKF fault you
+        # actually need to see). This field previously read 21, which is not a
+        # recognised value -- it was ignored, so the "force arm" comment beside
+        # it described behaviour the code never had.
         self.master.mav.command_long_send(
             self.target_system, self.target_component,
             mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0,
-            1 if arm else 0, 21, 0, 0, 0, 0, 0)  # param2=21 = force arm (SITL)
-        if arm:
-            self.master.motors_armed_wait()
-            print("[bridge] ARMED")
-        else:
-            self.master.motors_disarmed_wait()
-            print("[bridge] disarmed")
+            1 if arm else 0, 0, 0, 0, 0, 0, 0)
+        if not self._wait_armed_state(arm, timeout):
+            raise TimeoutError(
+                "%s not confirmed within %.0f s -- check PreArm messages "
+                "(FRAME_CLASS/FRAME_TYPE, EKF)"
+                % ("arm" if arm else "disarm", timeout))
+        print("[bridge] ARMED" if arm else "[bridge] disarmed")
         return True
 
     def takeoff(self, alt_m, timeout=90):

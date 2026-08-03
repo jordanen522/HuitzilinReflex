@@ -48,10 +48,16 @@ ATC_ANG_PIT_P,6.0
 ATC_ANG_YAW_P,4.5
 
 # --- Waypoint navigation speeds (keep the patrol loop calm) ------------------
-WP_SPD,1.5
-WP_SPD_UP,1.0
-WP_SPD_DN,0.8
-WP_ACC,1.0
+# UNITS ARE cm/s AND cm/s/s, not m/s. These were written as WP_SPD / WP_SPD_UP /
+# WP_SPD_DN / WP_ACC with metres-per-second values, and both halves were wrong:
+# those are Rover names, absent from Copter, so MAVProxy skipped all four
+# silently and this section never applied at all. Under the correct Copter names
+# the old values would have meant 1.5 cm/s.
+# 1.5 m/s cruise, 1.0 m/s climb, 0.8 m/s descent, 1.0 m/s/s.
+WPNAV_SPEED,150
+WPNAV_SPEED_UP,100
+WPNAV_SPEED_DN,80
+WPNAV_ACCEL,100
 
 # --- Position controller (param names vary by ArduPilot version) --------------
 # PSC_* not present in this build — position tuning via WPNAV_* above
@@ -59,7 +65,12 @@ WP_ACC,1.0
 # --- Geofence / RTL failsafe (match the safety case) ------------------------
 FS_THR_ENABLE,1
 FS_GCS_ENABLE,1
-RTL_ALT,500
+# Centimetres. 400 = 4 m, deliberately BELOW the 5 m FENCE_ALT_MAX in
+# params/hw_frame.parm. This read 500 — exactly the fence ceiling — so loading
+# this file after hw_frame.parm would have re-created the bug commit 5d9f9b5
+# exists to prevent: an RTL that climbs through the fence it is answering.
+# Keep it strictly under FENCE_ALT_MAX; test_hw_config.py asserts this.
+RTL_ALT,400
 
 # --- Logging (keep defaults; rosbag handles our capture) ---------------------
 LOG_BITMASK,176126

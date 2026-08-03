@@ -78,6 +78,13 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             "patrol_params",
             default_value=os.path.join(pkg_sim, "params", "patrol.yaml")),
+        # Forwarded to week2_sitl. The supervisor watches /oak/points, which
+        # only this launch file publishes -- starting it from a bare week2_sitl
+        # gives a permanent SENSOR_DROPOUT. Needs with_patrol:=true, because
+        # the supervisor node lives inside the week2_sitl include.
+        DeclareLaunchArgument("with_supervisor", default_value="false",
+                              description="run supervisor_node (requires "
+                                          "with_patrol:=true)"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
 
         # Camera mount offset (provisional; update when physically measured)
@@ -224,6 +231,7 @@ def generate_launch_description() -> LaunchDescription:
         ),
         launch_arguments={
             "patrol_params": LaunchConfiguration("patrol_params"),
+            "with_supervisor": LaunchConfiguration("with_supervisor"),
             # Must be forwarded explicitly. Without it the Week 2 flight nodes
             # fell back to their own default and ran on the wall clock while
             # everything else here ran on sim time, so stamps could not be

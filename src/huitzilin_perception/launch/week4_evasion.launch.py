@@ -38,6 +38,14 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("with_patrol", default_value="false",
                               description="Also launch the Week 2 flight stack"),
+        # This is the launch file the supervisor is meant to run under: the only
+        # one that starts both the flight stack and the depth cloud it watches.
+        # Off by default because every recorded battery ran without it, and a
+        # fault monitor commanding modes mid-battery would change what those
+        # numbers mean.
+        DeclareLaunchArgument("with_supervisor", default_value="false",
+                              description="run supervisor_node (requires "
+                                          "with_patrol:=true)"),
         DeclareLaunchArgument("world_name", default_value="huitzilin_runway"),
         DeclareLaunchArgument("gz_pose_bridge", default_value="true",
                               description="Bridge Gazebo dynamic poses (battery ground truth)"),
@@ -74,6 +82,7 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "mode": "live",
             "with_patrol": LaunchConfiguration("with_patrol"),
+            "with_supervisor": LaunchConfiguration("with_supervisor"),
             "patrol_params": LaunchConfiguration("patrol_params"),
             "detector_params": LaunchConfiguration("detector_params"),
             "use_sim_time": LaunchConfiguration("use_sim_time"),

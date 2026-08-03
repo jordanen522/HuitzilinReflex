@@ -40,10 +40,20 @@ def generate_launch_description():
         # battery ran without a supervisor, and a fault monitor that starts
         # commanding modes mid-battery would change what those numbers mean.
         # Opt in explicitly for HITL and flight work.
+        #
+        # NOTE: supervisor.yaml watches /oak/points, which THIS launch file
+        # never publishes -- nothing here starts perception. Enabling the
+        # supervisor from a bare week2_sitl therefore gives a permanent
+        # SENSOR_DROPOUT the moment the aircraft arms. Launch it through
+        # week3_perception / week4_evasion instead (with_patrol:=true
+        # with_supervisor:=true); both forward this argument and do publish the
+        # cloud. Bare week2_sitl + supervisor is only valid with
+        # sensor_timeout_s: 0.0.
         DeclareLaunchArgument("with_supervisor",
                               default_value="false",
                               description="run supervisor_node (state machine "
-                                          "+ fault monitor)"),
+                                          "+ fault monitor; needs perception "
+                                          "for /oak/points)"),
         DeclareLaunchArgument("use_sim_time",
                               default_value="true",
                               description="follow Gazebo /clock; set false only "

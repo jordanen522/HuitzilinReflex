@@ -27,10 +27,48 @@ def params(doc, node):
 
 # ── .parm files ──────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("name", ["hw_frame.parm", "sitl_frame.parm"])
-def test_parm_files_parse_clean(name):
+# Every .parm in the package, discovered rather than listed. The hardcoded
+# ["hw_frame.parm", "sitl_frame.parm"] looked exhaustive but only covered
+# params/, so config/huitzilin_3p5_6s.parm -- the largest of the three, and the
+# one that actually had bad content -- was never parsed. A new .parm must not be
+# able to join the tree unchecked.
+ALL_PARM_FILES = sorted(SIM.glob("params/*.parm")) + sorted(SIM.glob("config/*.parm"))
+
+
+def test_the_parm_glob_finds_every_shipped_file():
+    """Guards the parametrize below: an empty or short glob would make
+    test_parm_files_parse_clean pass by testing nothing."""
+    found = {p.name for p in ALL_PARM_FILES}
+    assert {"hw_frame.parm", "sitl_frame.parm",
+            "huitzilin_3p5_6s.parm"} <= found
+    assert len(ALL_PARM_FILES) == len(found)      # no duplicate basenames
+
+
+@pytest.mark.parametrize("path", ALL_PARM_FILES, ids=lambda p: p.name)
+def test_parm_files_parse_clean(path):
     """No inline comments, no duplicate keys, every value numeric."""
-    parse_parm((SIM / "params" / name).read_text())
+    parse_parm(path.read_text())
+
+
+@pytest.mark.parametrize("path", ALL_PARM_FILES, ids=lambda p: p.name)
+def test_no_parm_file_sets_rtl_above_the_hardware_fence(path):
+    """RTL_ALT is centimetres; FENCE_ALT_MAX is metres.
+
+    Checked across every file, not only the one that declares a fence. A .parm
+    with no FENCE_* lines still sets RTL_ALT on the same vehicle, so loading it
+    after hw_frame.parm silently overwrites the deliberate 400 cm. That is how
+    config/huitzilin_3p5_6s.parm carried RTL_ALT,500 -- equal to the 5 m ceiling
+    -- while every fence-consistency check passed, because it had no fence of
+    its own to be inconsistent with.
+    """
+    parms = parse_parm(path.read_text())
+    if "RTL_ALT" not in parms:
+        pytest.skip("no RTL_ALT in %s" % path.name)
+    ceiling_m = parse_parm(
+        (SIM / "params" / "hw_frame.parm").read_text())["FENCE_ALT_MAX"]
+    assert parms["RTL_ALT"] / 100.0 < ceiling_m, (
+        "%s sets RTL_ALT %s cm, not below the %s m hardware fence"
+        % (path.name, parms["RTL_ALT"], ceiling_m))
 
 
 def test_hw_frame_geofence_is_self_consistent():

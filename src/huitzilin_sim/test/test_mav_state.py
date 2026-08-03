@@ -6,6 +6,8 @@ sentinel handling, because ArduPilot reports "no reading" as an in-band value
 that looks like a plausible measurement.
 """
 
+import time
+
 import pytest
 
 from huitzilin_sim.mav_bridge import MavBridge
@@ -44,6 +46,41 @@ class _FakeMaster:
 
     def recv_match(self, blocking=False, **_):
         return self._msgs.pop(0) if self._msgs else None
+
+
+class _ArmFakeMaster:
+    """A link whose vehicle never arms -- i.e. a refused arm.
+
+    Models the case that actually mattered: ArduPilot answers heartbeats
+    normally, so the link is plainly alive, while never setting the armed bit
+    because a pre-arm check is failing. pymavlink's motors_armed_wait() loops
+    on exactly that forever.
+    """
+
+    def __init__(self, armed=False):
+        self._armed = armed
+        self.heartbeats = 0
+        self.sent = []
+        self.mav = self
+
+    def command_long_send(self, *args):
+        self.sent.append(args)
+
+    def wait_heartbeat(self, timeout=None):
+        self.heartbeats += 1
+        return object()
+
+    def motors_armed(self):
+        return 128 if self._armed else 0
+
+
+def _arm_bridge(armed=False):
+    b = object.__new__(MavBridge)
+    b._state = {}
+    b.master = _ArmFakeMaster(armed=armed)
+    b.target_system = AUTOPILOT_SYS
+    b.target_component = 1
+    return b
 
 
 def _bridge(msgs, target_system=AUTOPILOT_SYS):
@@ -164,3 +201,43 @@ def test_absent_telemetry_stays_absent():
                       vx=0, vy=0, vz=0)]).get_state()
     for key in ("armed", "mode", "batt_v", "batt_pct", "fc_failsafe"):
         assert key not in s
+
+
+# ── arm(): the bound, and the command it actually sends ──────────────────────
+
+def test_a_refused_arm_times_out_instead_of_blocking_forever():
+    """The whole point of T3.
+
+    _srv_arm calls this from a service callback on a single-threaded executor,
+    so an unbounded wait does not just fail to arm -- it stops odom,
+    /huitzilin/state and the setpoint stream for the life of the process.
+    """
+    b = _arm_bridge(armed=False)
+    t0 = time.monotonic()
+    with pytest.raises(TimeoutError):
+        b.arm(True, timeout=0.3)
+    assert time.monotonic() - t0 < 5.0, "arm() did not honour its timeout"
+    assert b.master.heartbeats > 0, "never polled; the bound is vacuous"
+
+
+def test_arm_returns_as_soon_as_the_vehicle_reports_armed():
+    b = _arm_bridge(armed=True)
+    assert b.arm(True, timeout=5) is True
+
+
+def test_disarm_is_bounded_too():
+    b = _arm_bridge(armed=True)          # stays armed, so disarm never confirms
+    with pytest.raises(TimeoutError):
+        b.arm(False, timeout=0.3)
+
+
+def test_arm_never_sends_the_force_arm_magic_value():
+    """param2 must be 0. 21196 is ArduPilot's force-arm, which CLAUDE.md
+    forbids because it hides the frame/EKF fault you need to see; the field
+    previously held 21, which is not a recognised value at all."""
+    b = _arm_bridge(armed=True)
+    b.arm(True, timeout=5)
+    (args,) = b.master.sent
+    param2 = args[5]          # target_sys, target_comp, cmd, confirmation, p1, p2
+    assert param2 == 0
+    assert param2 != 21196

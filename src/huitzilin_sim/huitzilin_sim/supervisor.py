@@ -76,10 +76,17 @@ class Limits:
     # Topic staleness. Each is generous against its publisher rate: the depth
     # cloud runs at 15 Hz, odom at stream_rate_hz (30), patrol state at 10 Hz,
     # cmd_vel at cmd_rate_hz (10).
+    #
+    # A timeout of 0 (or negative) DISABLES that watch entirely. This is not a
+    # convenience: a watch on a topic the running configuration never publishes
+    # is indistinguishable from a dead publisher, because _age() reads a
+    # never-seen topic as infinitely stale. cmd_vel_timeout_s defaults to 0
+    # because position-mode patrol drives ArduPilot over MAVLink directly and
+    # publishes no ROS setpoint stream -- see the comment in supervisor.yaml.
     sensor_timeout_s: float = 1.0
     odom_timeout_s: float = 1.0
     patrol_state_timeout_s: float = 2.0
-    cmd_vel_timeout_s: float = 1.0
+    cmd_vel_timeout_s: float = 0.0
 
     batt_low_v: float = 21.0          # 6S at ~3.5 V/cell
 
@@ -136,6 +143,32 @@ def _age(obs: Observation, key: str) -> float:
     return float("inf") if v is None else float(v)
 
 
+def _stale(obs: Observation, key: str, timeout_s: float) -> bool:
+    """Is `key` overdue, given that a non-positive timeout means "not watched"?
+
+    The disable check comes first so a topic nothing publishes cannot fault.
+    _age deliberately still reports a never-seen topic as infinitely stale --
+    that is what catches a publisher which died before its first message -- so
+    the only way to express "this configuration does not produce that topic" is
+    to turn the watch off, not to soften the age.
+    """
+    return timeout_s > 0.0 and _age(obs, key) > timeout_s
+
+
+def watched_topics(limits: Limits) -> dict:
+    """Topic key -> timeout, for the watches that are armed. Used for logging.
+
+    supervisor_node prints this at startup so an operator can see which faults
+    are live without reverse-engineering it from the yaml.
+    """
+    return {key: timeout for key, timeout in (
+        ("odom", limits.odom_timeout_s),
+        ("patrol_state", limits.patrol_state_timeout_s),
+        ("cloud", limits.sensor_timeout_s),
+        ("cmd_vel", limits.cmd_vel_timeout_s),
+    ) if timeout > 0.0}
+
+
 def fault_response(fault: Fault) -> State:
     """Where a fault sends the machine. Anything unlisted goes to FAILSAFE."""
     return FAULT_RESPONSE.get(fault, State.FAILSAFE)
@@ -147,6 +180,12 @@ def detect_faults(obs: Observation, limits: Limits) -> list:
     Returns nothing while disarmed. On the bench with props off most of these
     topics are legitimately quiet, and a supervisor that declared FAILSAFE
     before the aircraft ever armed would be switched off by the second day.
+
+    Each staleness watch is skipped when its timeout is non-positive. Without
+    that, the supervisor faults on any topic the launched configuration does
+    not publish -- which is how a healthy aircraft used to get sent home one
+    second after arming, because nothing publishes /huitzilin/cmd_vel in
+    position mode.
     """
     if not obs.armed:
         return []
@@ -155,13 +194,13 @@ def detect_faults(obs: Observation, limits: Limits) -> list:
 
     if obs.fc_failsafe:
         found.add(Fault.FC_FAILSAFE)
-    if _age(obs, "odom") > limits.odom_timeout_s:
+    if _stale(obs, "odom", limits.odom_timeout_s):
         found.add(Fault.LINK_LOSS)
-    if _age(obs, "patrol_state") > limits.patrol_state_timeout_s:
+    if _stale(obs, "patrol_state", limits.patrol_state_timeout_s):
         found.add(Fault.COMPANION_LOSS)
-    if _age(obs, "cloud") > limits.sensor_timeout_s:
+    if _stale(obs, "cloud", limits.sensor_timeout_s):
         found.add(Fault.SENSOR_DROPOUT)
-    if _age(obs, "cmd_vel") > limits.cmd_vel_timeout_s:
+    if _stale(obs, "cmd_vel", limits.cmd_vel_timeout_s):
         found.add(Fault.SETPOINT_STALL)
     if obs.batt_v is not None and obs.batt_v < limits.batt_low_v:
         found.add(Fault.LOW_BATTERY)
