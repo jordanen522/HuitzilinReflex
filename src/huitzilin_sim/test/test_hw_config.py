@@ -9,7 +9,12 @@ import pathlib
 import pytest
 import yaml
 
-from huitzilin_sim.param_audit import check_fence_consistency, check_overlay
+from huitzilin_sim.param_audit import (
+    check_fence_consistency,
+    check_node_names,
+    check_overlay,
+    declared_node_names,
+)
 from huitzilin_sim.parm_file import parse_parm
 
 SIM = pathlib.Path(__file__).resolve().parents[1]          # src/huitzilin_sim
@@ -128,6 +133,43 @@ def test_overlay_check_catches_a_typoed_node_name():
     base = {"mav_bridge": {"ros__parameters": {"cmd_rate_hz": 10.0}}}
     typo = {"mav_brige": {"ros__parameters": {"cmd_rate_hz": 10.0}}}
     assert check_overlay(base, typo) != []
+
+
+# ── yaml node keys vs the names nodes actually declare ───────────────────────
+
+ALL_PARAMS_YAML = (sorted((SIM / "params").glob("*.yaml"))
+                   + sorted((PERCEPTION / "params").glob("*.yaml")))
+
+
+def declared_names():
+    """Every node name declared anywhere in either package's Python."""
+    names = set()
+    for pkg in (SIM, PERCEPTION):
+        for path in sorted((pkg / pkg.name).glob("*.py")):
+            names |= declared_node_names(path.read_text())
+    return names
+
+
+def test_the_declared_name_scan_finds_the_known_nodes():
+    """Guards the check below: an empty scan would make every yaml look wrong,
+    and a scan that silently matched everything would make it pass vacuously."""
+    assert {"mav_bridge", "patrol", "supervisor", "detector", "evasion",
+            "payload"} <= declared_names()
+
+
+@pytest.mark.parametrize("path", ALL_PARAMS_YAML, ids=lambda p: p.name)
+def test_every_params_yaml_addresses_a_node_that_exists(path):
+    """check_overlay only compares an overlay to its base, so a node name
+    typoed in BOTH files passes. In ROS 2 a params file addressed to a name no
+    node uses loads nothing at all, with no error -- the parameters simply keep
+    their declared defaults and every value in the file is inert."""
+    assert check_node_names(load_yaml(path), declared_names()) == []
+
+
+def test_the_node_name_check_catches_a_name_no_node_declares():
+    """Guards the check itself."""
+    doc = {"detectr": {"ros__parameters": {"roi_max_range_m": 5.0}}}
+    assert check_node_names(doc, {"detector"}) != []
 
 
 def test_no_params_yaml_bakes_in_use_sim_time():

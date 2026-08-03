@@ -141,15 +141,6 @@ def test_silence_clears_before_the_dead_man_does():
     assert latch.on_tick(3.0) is False
 
 
-def test_silence_clears_the_alarm():
-    """No messages at all means the publisher is gone. Silence is not consent
-    to keep the siren running."""
-    latch = AlarmLatch(POLICY)
-    latch.on_message(True, 0.0)
-    assert latch.on_tick(2.9) is None
-    assert latch.on_tick(3.0) is False
-
-
 def test_a_refreshed_alarm_is_not_treated_as_stale():
     latch = AlarmLatch(POLICY)
     latch.on_message(True, 0.0)

@@ -13,11 +13,18 @@
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>visualization_msgs</depend>
+  <!-- supervisor_node: PointCloud2 (sensor_msgs) and the SetParameters client
+       it uses to retarget the bridge (rcl_interfaces). Both were imported
+       without being declared, so rosdep fetched neither and the supervisor
+       ImportErrored on a clean machine. -->
+  <depend>sensor_msgs</depend>
+  <depend>rcl_interfaces</depend>
+  <!-- mav_bridge.py and patrol_node.py talk MAVLink directly. -->
+  <exec_depend>python3-pymavlink</exec_depend>
 
-  <test_depend>ament_copyright</test_depend>
-  <test_depend>ament_flake8</test_depend>
-  <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
+  <test_depend>python3-yaml</test_depend>
+  <test_depend>python3-numpy</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

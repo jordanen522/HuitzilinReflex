@@ -1,0 +1,54 @@
+name: tests
+
+# The ROS-free half of the suite. Everything here imports only numpy, scipy,
+# yaml or pymavlink, so it runs on a stock ubuntu runner with no ROS 2 and no
+# colcon build.
+#
+# NOT run here, and not an oversight:
+#   test_evasion_params  - imports evasion_node, which imports rclpy.
+# test_clock_guard IS run: clock_guard imports rclpy.clock only inside
+# install_clock_guard, and those tests skip themselves without it.
+#
+# Run the whole suite, that module included, on the Dell:
+#   ./scripts/run_tests.sh
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"      # matches Ubuntu 24.04 / ROS 2 Jazzy
+
+      - name: Install the non-ROS dependencies
+        run: pip install pytest numpy scipy pyyaml pymavlink
+
+      - name: Run the ROS-free modules
+        env:
+          # The tests import huitzilin_sim / huitzilin_perception by package
+          # name, which colcon normally arranges.
+          PYTHONPATH: src/huitzilin_sim:src/huitzilin_perception
+        run: |
+          python -m pytest -q \
+            src/huitzilin_sim/test/test_supervisor.py \
+            src/huitzilin_sim/test/test_clock_guard.py \
+            src/huitzilin_sim/test/test_parm_file.py \
+            src/huitzilin_sim/test/test_hw_config.py \
+            src/huitzilin_sim/test/test_frames.py \
+            src/huitzilin_sim/test/test_mav_state.py \
+            src/huitzilin_perception/test/test_kalman.py \
+            src/huitzilin_perception/test/test_ballistics.py \
+            src/huitzilin_perception/test/test_cloud_geometry.py \
+            src/huitzilin_perception/test/test_background_map.py \
+            src/huitzilin_perception/test/test_throw_window.py \
+            src/huitzilin_perception/test/test_stage_profiler.py \
+            src/huitzilin_perception/test/test_payload.py \
+            src/huitzilin_perception/test/test_hw_params.py

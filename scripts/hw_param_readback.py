@@ -21,15 +21,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 from huitzilin_sim.parm_file import diff_params, parse_parm  # noqa: E402
 
+DEFAULT_BAUD = 115200          # matches preflight_hw.sh's heartbeat check
+
 DEFAULT_EXPECTED = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..", "src", "huitzilin_sim", "params", "hw_frame.parm")
 
 
-def fetch(connection, timeout_s):
+def fetch(connection, timeout_s, baud=DEFAULT_BAUD):
     from pymavlink import mavutil
 
-    master = mavutil.mavlink_connection(connection)
+    # baud is explicit: mavutil defaults to 57600, while preflight_hw.sh's own
+    # heartbeat check uses 115200. Mismatched, this reported a dead FC on a
+    # perfectly good link. Ignored for udp:/tcp: connection strings.
+    master = mavutil.mavlink_connection(connection, baud=baud)
     # finally, because all three exits mattered: the timeout raise, the early
     # break, and the normal return each left a serial port claimed. On
     # /dev/ttyACM0 that makes the *next* tool report a dead flight controller.
@@ -60,13 +65,14 @@ def main():
     ap.add_argument("--connection", default="/dev/ttyACM0")
     ap.add_argument("--expected", default=DEFAULT_EXPECTED)
     ap.add_argument("--timeout", type=float, default=30.0)
+    ap.add_argument("--baud", type=int, default=DEFAULT_BAUD)
     args = ap.parse_args()
 
     with open(args.expected) as fh:
         expected = parse_parm(fh.read())
 
     try:
-        live = fetch(args.connection, args.timeout)
+        live = fetch(args.connection, args.timeout, args.baud)
     except Exception as e:
         print("ERROR: could not read parameters: %s" % e)
         return 2

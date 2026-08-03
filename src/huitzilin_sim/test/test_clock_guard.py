@@ -9,8 +9,10 @@ import pytest
 
 from huitzilin_sim.clock_guard import (
     ClockCheck,
+    ClockGuardError,
     Verdict,
     evaluate_clock,
+    install_clock_guard,
 )
 
 GRACE = 5.0
@@ -93,3 +95,130 @@ def test_failure_messages_name_the_escape_hatch():
 def test_default_grace_is_used_when_omitted():
     assert evaluate_clock(True, 0, 0, 0.0).verdict is Verdict.WAIT
     assert evaluate_clock(True, 0, 0, 60.0).verdict is Verdict.FAIL
+
+
+# ── install_clock_guard ──────────────────────────────────────────────────────
+#
+# evaluate_clock is pure and was already covered. install_clock_guard is the
+# half that has effects -- it is what stops the timer and what actually kills
+# the node -- and it had no test at all. It imports rclpy.clock internally, so
+# these skip on a machine without ROS rather than failing there.
+
+
+class _Logger:
+    def __init__(self):
+        self.calls = []
+
+    def _record(self, level):
+        return lambda msg: self.calls.append((level, msg))
+
+    def __getattr__(self, level):
+        return self._record(level)
+
+
+class _Clock:
+    def __init__(self, ns):
+        self.nanoseconds = ns
+
+    def now(self):
+        return self
+
+
+class _Param:
+    def __init__(self, value):
+        self.value = value
+
+
+class _Node:
+    """The narrowest node install_clock_guard actually uses."""
+
+    def __init__(self, use_sim_time, publishers, ros_time_ns):
+        self._use_sim_time = use_sim_time
+        self._publishers = publishers
+        self._ros_time_ns = ros_time_ns
+        self._logger = _Logger()
+        self.timers = []
+        self.destroyed = []
+
+    def get_parameter(self, name):
+        assert name == "use_sim_time"
+        return _Param(self._use_sim_time)
+
+    def count_publishers(self, topic):
+        assert topic == "/clock"
+        return self._publishers
+
+    def get_clock(self):
+        return _Clock(self._ros_time_ns)
+
+    def get_logger(self):
+        return self._logger
+
+    def create_timer(self, period_s, callback, clock=None):
+        timer = ("timer", period_s, callback, clock)
+        self.timers.append(timer)
+        return timer
+
+    def destroy_timer(self, timer):
+        self.destroyed.append(timer)
+
+
+def _install(use_sim_time, publishers, ros_time_ns, grace_s):
+    pytest.importorskip("rclpy.clock")
+    node = _Node(use_sim_time, publishers, ros_time_ns)
+    install_clock_guard(node, grace_s=grace_s)
+    assert len(node.timers) == 1
+    return node, node.timers[0][2]          # the _poll callback
+
+
+def test_the_guard_timer_runs_on_a_steady_clock():
+    """Scheduled on the node's own clock, the timer would never fire under the
+    exact failure being detected: use_sim_time with no /clock."""
+    rclpy_clock = pytest.importorskip("rclpy.clock")
+    node, _ = _install(True, 0, 0, grace_s=60.0)
+    clock = node.timers[0][3]
+    assert clock is not None
+    assert clock.clock_type is rclpy_clock.ClockType.STEADY_TIME
+
+
+def test_a_missing_clock_kills_the_node():
+    node, poll = _install(True, 0, 0, grace_s=0.0)
+    with pytest.raises(ClockGuardError):
+        poll()
+    assert [lvl for lvl, _ in node._logger.calls] == ["fatal"]
+
+
+def test_waiting_leaves_the_timer_running():
+    """WAIT is the one verdict that must NOT stop the poll -- a sim stack is
+    allowed a few seconds to produce its first /clock."""
+    node, poll = _install(True, 0, 0, grace_s=60.0)
+    assert poll() is None
+    assert node.destroyed == []
+    assert node._logger.calls == []
+
+
+def test_success_stops_the_timer():
+    node, poll = _install(True, 1, 42, grace_s=5.0)
+    poll()
+    assert node.destroyed == node.timers
+    assert [lvl for lvl, _ in node._logger.calls] == ["info"]
+
+
+def test_warn_stops_the_timer_too():
+    """The Week 7 HITL shape, and the case that runs longest. WARN used to log
+    once and return with the 0.5 s timer still live, polling for the life of
+    the process."""
+    node, poll = _install(False, 1, 0, grace_s=5.0)
+    poll()
+    assert node.destroyed == node.timers
+    assert [lvl for lvl, _ in node._logger.calls] == ["warning"]
+
+
+def test_a_stopped_guard_does_not_destroy_its_timer_twice():
+    """destroy_timer is idempotent-by-guard, not by rclpy: a second call on a
+    destroyed timer is an error. Only reachable if a poll is already queued
+    when the first one resolves."""
+    node, poll = _install(False, 1, 0, grace_s=5.0)
+    poll()
+    poll()
+    assert len(node.destroyed) == 1

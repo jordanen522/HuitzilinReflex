@@ -10,7 +10,8 @@
 # raises on them so the test suite catches it before the board does.
 #
 # Every value below is asserted by test_hw_config.py. Change one and the test
-# tells you which invariant you broke.
+# tells you which invariant you broke. Run it with ./scripts/run_tests.sh;
+# .github/workflows/tests.yml also runs it on every push.
 
 # Frame. FRAME_CLASS 0 is the silent no-lift trap: a fresh EEPROM arms and
 # accepts takeoff, then maxes throttle with zero lift.

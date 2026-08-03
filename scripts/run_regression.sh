@@ -72,7 +72,12 @@ trap cleanup EXIT
 
 sleep 2  # give detector + TF publishers time to start
 
-# Run scorer (replays bags, scores, exits with code)
+# Run scorer (replays bags, scores, exits with code).
+# '|| SCORE_EXIT=$?' is required: under 'set -e' a failing score_bags ends the
+# script here, so the assignment below it only ever ran on the pass path and
+# SCORE_EXIT was always 0 — and the report path never printed for the run you
+# actually need it for.
+SCORE_EXIT=0
 ros2 run huitzilin_perception score_bags \
   --ros-args \
   -p bag_dir:="$BAG_DIR" \
@@ -80,9 +85,7 @@ ros2 run huitzilin_perception score_bags \
   -p split:="$SPLIT" \
   -p recall_floor:=0.95 \
   -p output_file:="$OUTPUT" \
-  -p use_sim_time:=true
-
-SCORE_EXIT=$?
+  -p use_sim_time:=true || SCORE_EXIT=$?
 echo ""
 echo "Report saved to: $OUTPUT"
 exit $SCORE_EXIT

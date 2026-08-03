@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>huitzilin_perception</name>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <description>HuitzilinReflex — Week 3: depth camera bridge, TF, projectile detection node, scenario tools.</description>
   <maintainer email="j602eng1z@gmail.com">Jordan</maintainer>
   <license>MIT</license>
@@ -13,10 +13,18 @@
   <depend>geometry_msgs</depend>
   <depend>visualization_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>std_srvs</depend>
+  <!-- detector/evasion parameter callbacks, and dodge_battery's Get/SetParameters
+       clients. -->
+  <depend>rcl_interfaces</depend>
 
   <!-- TF -->
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
+  <!-- gz_pose_bridge is a shipped entry point and publishes TFMessage directly,
+       so an undeclared tf2_msgs is a runtime break, not just a build one. -->
+  <depend>tf2_msgs</depend>
 
   <!-- Gazebo bridge (depth image + point cloud) -->
   <depend>ros_gz_image</depend>
@@ -27,12 +35,13 @@
 
   <!-- Point cloud processing (numpy-only path; open3d optional) -->
   <depend>sensor_msgs_py</depend>
+  <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>huitzilin_sim</exec_depend>
+  <!-- dodge_battery resolves params/ and config/ through the ament index. -->
+  <exec_depend>ament_index_python</exec_depend>
 
-  <test_depend>ament_copyright</test_depend>
-  <test_depend>ament_flake8</test_depend>
-  <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
 
   <export>

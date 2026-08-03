@@ -15,20 +15,28 @@ set -euo pipefail
 
 ID="${1:?usage: capture_scenario.sh <SCENARIO_ID>  (e.g. S02)}"
 BAG_DIR="/data/huitzilin_bags"
-MATRIX="$HOME/huitzilin_ws/src/huitzilin_perception/config/scenario_matrix.yaml"
+# Resolve through the ament index like every sibling script, rather than
+# assuming the workspace is ~/huitzilin_ws.
+MATRIX="$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/config/scenario_matrix.yaml"
 SPAWN_LEAD=3
 
 mkdir -p "$BAG_DIR"
 
-eval "$(python3 - "$MATRIX" "$ID" <<'PY'
-import sys, yaml
+# Capture first, then eval. 'eval "$(python3 ...)"' cannot fail the script:
+# a command substitution used as an argument is not checked by 'set -e', so an
+# unknown scenario id produced an empty eval and the script died 20 lines later
+# on '$OFFSET_V: unbound variable' instead of saying the id was wrong.
+if ! SCENARIO_ENV="$(python3 - "$MATRIX" "$ID" <<'PY'
+import shlex, sys, yaml
 d = yaml.safe_load(open(sys.argv[1])); sid = sys.argv[2]
 try:
     r = next(s for s in d["scenarios"] if s["id"] == sid)
 except StopIteration:
     sys.exit(f"scenario {sid} not in matrix")
 speed = float(r.get("speed_mps", 0) or 0)
-print(f'LABEL={r["label"]}')
+# shlex.quote: labels are free text, and an unquoted space or metacharacter
+# would be re-parsed by eval.
+print(f'LABEL={shlex.quote(str(r["label"]))}')
 print(f'SPEED={speed}')
 print(f'ANGLE={r.get("approach_angle_deg",0.0)}')
 print(f'MISS={r.get("miss_distance_m",0.0)}')
@@ -38,7 +46,10 @@ print(f'CLOSEST={r.get("closest_approach_m",0.0)}')
 print(f'TTC={r.get("time_to_closest_s",0.0)}')
 print(f'SPAWN={"yes" if speed > 0 else "no"}')
 PY
-)"
+)"; then
+  echo "[$ID] ERROR: could not read scenario $ID from $MATRIX"; exit 2
+fi
+eval "$SCENARIO_ENV"
 
 # Vertical-offset scenarios (N04): the spawn point must stay above ground,
 # so the drone has to be flying high enough BEFORE we start recording.

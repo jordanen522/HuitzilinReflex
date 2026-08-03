@@ -9,6 +9,14 @@ other.
 
 from __future__ import annotations
 
+import re
+
+# ROS 2 wildcard keys address whatever node loads the file, so there is no name
+# to bind them to.
+WILDCARD_NODE_KEYS = frozenset({"/**", "**", "*", "/*"})
+
+_NODE_NAME_RE = re.compile(r'super\(\)\.__init__\(\s*["\']([A-Za-z_][A-Za-z0-9_]*)["\']')
+
 # RTL_ALT is centimetres. FENCE_ALT_MAX is metres. Comparing them without this
 # conversion is the whole trap: a plausible-looking RTL_ALT of 4 means 4 cm.
 RTL_ALT_CM_PER_M = 100.0
@@ -47,6 +55,32 @@ def check_overlay(base_doc, overlay_doc) -> list:
             problems.append(
                 "node %r overlays parameters absent from the base: %s"
                 % (node, unknown))
+    return problems
+
+
+def declared_node_names(source: str) -> set:
+    """Node names a Python source file passes to `super().__init__("...")`."""
+    return set(_NODE_NAME_RE.findall(source))
+
+
+def check_node_names(doc, declared) -> list:
+    """Problems with a params yaml's node keys against the names nodes declare.
+
+    check_overlay only compares an overlay against its base file, so a typo
+    present in BOTH passes -- and in ROS 2 a params file addressed to a node
+    name that no node uses loads absolutely nothing, silently. This is the
+    check that binds the yaml to the Python.
+    """
+    declared = set(declared)
+    problems = []
+    for node in flatten_ros_params(doc):
+        if node in WILDCARD_NODE_KEYS:
+            continue
+        if node not in declared:
+            problems.append(
+                "node %r is not declared by any node (ROS 2 would load none of "
+                "its parameters); declared names are %s"
+                % (node, sorted(declared)))
     return problems
 
 

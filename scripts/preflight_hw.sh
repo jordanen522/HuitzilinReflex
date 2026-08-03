@@ -90,7 +90,17 @@ echo ""
 
 echo "[4/9] Parameter readback vs hw_frame.parm"
 if [ -e "$CONN" ]; then
-  python3 "$HERE/hw_param_readback.py" --connection "$CONN" || warn "parameter mismatch (see above)"
+  # Exit 1 and 2 mean different things (mismatch vs unreachable FC) and a bare
+  # '||' reported both as "parameter mismatch", which sends you tuning
+  # parameters when the real problem is a dead serial link.
+  RB=0
+  python3 "$HERE/hw_param_readback.py" --connection "$CONN" || RB=$?
+  case "$RB" in
+    0) ;;
+    1) warn "parameter mismatch (see above) - load $PARM" ;;
+    2) warn "could NOT reach the flight controller on $CONN - not a parameter problem" ;;
+    *) warn "hw_param_readback.py exited $RB" ;;
+  esac
 else
   warn "skipped - no serial device. Expected set: $(grep -cvE '^\s*(#|$)' "$PARM") parameters"
 fi

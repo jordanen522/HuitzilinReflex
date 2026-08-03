@@ -18,6 +18,11 @@ def hw():
     return doc["detector"]["ros__parameters"]
 
 
+def hw_evasion():
+    doc = yaml.safe_load((PERCEPTION / "params" / "hw_evasion.yaml").read_text())
+    return doc["evasion"]["ros__parameters"]
+
+
 def test_cloud_convention_is_optical():
     """DepthAI emits optical convention (x right, y down, z forward). Leaving
     gz_flu rotates every point 90 degrees and nothing clears the ROI gate."""
@@ -40,10 +45,19 @@ def test_no_diagnostic_flag_ships_in_the_hardware_config():
     assert p["profile_stages"] is False
 
 
-def test_the_overlay_does_not_re_open_a_measured_null():
-    """roi_max_range_m 5->8, min_track_updates 3->2 and cluster_min_points
-    5->3 were each measured over a full battery with the baseline best on
-    every column. They may only be re-opened once S6-4 has measured a
-    materially different range or frame rate, and then deliberately."""
-    for null in ("roi_max_range_m", "min_track_updates", "cluster_min_points"):
+def test_the_detector_overlay_does_not_re_open_a_measured_null():
+    """roi_max_range_m 5->8 and cluster_min_points 5->3 were each measured over
+    a full battery with the baseline best on every column. They may only be
+    re-opened once S6-4 has measured a materially different range or frame
+    rate, and then deliberately."""
+    for null in ("roi_max_range_m", "cluster_min_points"):
         assert null not in hw()
+
+
+def test_the_evasion_overlay_does_not_re_open_a_measured_null():
+    """min_track_updates 3->2 and dodge_speed_mps 1.5->4.0 are EVASION
+    parameters. Asserting them absent from hw_detector.yaml was vacuous -- they
+    could never appear there -- and left hw_evasion.yaml, the file that can
+    actually re-open them, unguarded. Its own header lists both as nulls."""
+    for null in ("min_track_updates", "dodge_speed_mps"):
+        assert null not in hw_evasion()

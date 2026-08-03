@@ -8,7 +8,12 @@ echo ""
 
 echo "[1/4] ROS 2 Jazzy..."
 source /opt/ros/jazzy/setup.bash
-ros2 --version
+# NOT 'ros2 --version' — that is not a flag in Jazzy, it exits non-zero, and
+# under 'set -e' it killed this script at step 1 so checks 2-4 never ran.
+echo "ROS_DISTRO=$(printenv ROS_DISTRO)"
+if [ "$(printenv ROS_DISTRO)" != "jazzy" ]; then
+    echo "WARNING: expected jazzy"
+fi
 echo ""
 
 echo "[2/4] Gazebo Harmonic..."
