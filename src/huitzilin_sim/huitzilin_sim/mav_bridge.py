@@ -18,9 +18,10 @@ from pymavlink import mavutil
 # --- type_mask bitfields for SET_POSITION_TARGET_LOCAL_NED ---------------------
 # Bit (0-indexed): 0..2 Pos x/y/z, 3..5 Vel x/y/z, 6..8 Acc x/y/z,
 #                  9 force, 10 yaw, 11 yaw_rate.  A SET bit = "ignore this field".
-MASK_VEL_ONLY = 0b0000111111000111   # use velocity x/y/z only            (4039)
-MASK_POS_ONLY = 0b0000111111111000   # use position x/y/z only            (4088)
-MASK_POS_YAW  = 0b0000101111111000   # use position x/y/z + yaw           (clears yaw bit)
+MASK_VEL_ONLY  = 0b0000111111000111  # use velocity x/y/z only            (4039)
+MASK_VEL_ACCEL = 0b0000111000000111  # use velocity AND acceleration      (3591)
+MASK_POS_ONLY  = 0b0000111111111000  # use position x/y/z only            (4088)
+MASK_POS_YAW   = 0b0000101111111000  # use position x/y/z + yaw           (clears yaw bit)
 
 # Max MAVLink messages get_state() drains per call. Comfortably above one
 # stream period's worth at 15 Hz telemetry, but bounded so a backlog cannot
@@ -169,6 +170,38 @@ class MavBridge:
             0, 0, 0,                  # x, y, z position (ignored)
             vx, vy, vz,               # velocity
             0, 0, 0,                  # acceleration (ignored)
+            0, yaw_rate)              # yaw, yaw_rate
+
+    def send_velocity_accel_body(self, vx, vy, vz, ax, ay, az, yaw_rate=0.0):
+        """Body-frame velocity + acceleration feedforward. x fwd, y right, z down.
+
+        Why this exists. A velocity-only setpoint asks the position controller
+        to discover the acceleration for itself, and it does so gently: escape
+        displacement was measured rising at ~2 m/s^2 while the tilt ceiling
+        permits g*tan(ATC_ANGLE_MAX) = 5.66 m/s^2. The controller was never
+        demanding what the airframe could already give. An acceleration term
+        states the demand directly instead of waiting for the velocity error
+        to build it.
+
+        Raising dodge_speed does NOT do this -- 1.5 -> 4.0 m/s was measured as
+        a null, escape identical to within a centimetre at every sample --
+        because a larger velocity error meets the same internal shaping.
+
+        Whether ArduPilot honours the acceleration fields in GUIDED must be
+        MEASURED, not assumed: an ignored field looks exactly like a lever
+        with no effect. If an A/B shows nothing, report "unsupported", not
+        "no effect".
+        """
+        mask = MASK_VEL_ACCEL
+        if yaw_rate != 0.0:
+            mask &= ~(1 << 11)        # un-ignore yaw_rate
+        self.master.mav.set_position_target_local_ned_send(
+            0, self.target_system, self.target_component,
+            mavutil.mavlink.MAV_FRAME_BODY_OFFSET_NED,
+            mask,
+            0, 0, 0,                  # x, y, z position (ignored)
+            vx, vy, vz,               # velocity
+            ax, ay, az,               # acceleration feedforward
             0, yaw_rate)              # yaw, yaw_rate
 
     def send_position_ned(self, north, east, down, yaw=None):

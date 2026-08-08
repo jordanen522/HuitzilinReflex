@@ -3,17 +3,19 @@
 import sys
 import json
 import threading
+from dataclasses import replace
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Accel, Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 
 from huitzilin_sim.mav_bridge import MavBridge
 from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
+from huitzilin_sim.cmd_router import Action, RouterState, route
 
 
 class MavBridgeNode(Node):
@@ -23,12 +25,14 @@ class MavBridgeNode(Node):
         # --- parameters (override via bridge.yaml) ---
         self.declare_parameter("connection", "udp:127.0.0.1:14550")
         self.declare_parameter("cmd_rate_hz", 10.0)
+        self.declare_parameter("evade_rate_hz", 50.0)
         self.declare_parameter("cmd_timeout_s", 0.7)   # if patrol goes quiet -> hold
         self.declare_parameter("takeoff_alt_m", 2.0)
         self.declare_parameter("stream_rate_hz", 10.0)
 
         conn = self.get_parameter("connection").value
         self.cmd_rate = float(self.get_parameter("cmd_rate_hz").value)
+        self.evade_rate = float(self.get_parameter("evade_rate_hz").value)
         self.cmd_timeout = float(self.get_parameter("cmd_timeout_s").value)
         self.takeoff_alt = float(self.get_parameter("takeoff_alt_m").value)
 
@@ -37,24 +41,22 @@ class MavBridgeNode(Node):
         self.bridge.connect()
         self.bridge.request_streams(int(self.get_parameter("stream_rate_hz").value))
 
-        # last commanded body velocity + when it arrived (watchdog state)
-        self._last_cmd = (0.0, 0.0, 0.0, 0.0)
-        self._last_cmd_t = self.get_clock().now()
+        # Latched commands, arbitrated by cmd_router.route(). /cmd/evade
+        # preempts /huitzilin/cmd_vel while fresh (Week 4); they are kept
+        # separate so a finished dodge hands control back cleanly instead of
+        # leaving a zero-velocity stream fighting patrol's position setpoints.
         self._lock = threading.Lock()
-        self._cmd_ever_received = False   # don't send setpoints until patrol starts
-
-        # evade override state: /cmd/evade preempts /huitzilin/cmd_vel while
-        # fresh (Week 4). Separate from cmd_vel so a finished dodge hands
-        # control back cleanly instead of leaving a zero-velocity stream
-        # fighting patrol's position setpoints.
-        self._last_evade = (0.0, 0.0, 0.0, 0.0)
-        self._last_evade_t = self.get_clock().now()
-        self._evade_ever_received = False
-        self._evade_active = False
+        self._router = RouterState()
 
         # --- ROS interfaces (contracts: see playbook §3) ---
         self.create_subscription(Twist, "/huitzilin/cmd_vel", self._on_cmd_vel, 10)
         self.create_subscription(Twist, "/cmd/evade", self._on_evade, 10)
+        # A parallel topic rather than a change to /cmd/evade: Twist has no
+        # acceleration field, and widening the evade contract would drag the
+        # patrol-handoff behaviour and hz_cmd_path_probe.py along with it. An
+        # absent publisher simply means velocity-only setpoints, which is the
+        # pre-existing behaviour.
+        self.create_subscription(Accel, "/cmd/evade_accel", self._on_evade_accel, 10)
         self.odom_pub = self.create_publisher(Odometry, "/huitzilin/odom", 10)
         self.state_pub = self.create_publisher(String, "/huitzilin/state", 10)
 
@@ -66,66 +68,94 @@ class MavBridgeNode(Node):
 
         # --- timers ---
         self.create_timer(1.0 / self.cmd_rate, self._tick_setpoint)   # watchdog/stream
+        # Dodges are retransmitted far faster than patrol. The watchdog rate is
+        # sized to keep ArduPilot's ~3 s setpoint timeout happy, which is the
+        # wrong scale entirely for a manoeuvre whose whole window is ~0.2 s.
+        if self.evade_rate > 0.0:
+            self.create_timer(1.0 / self.evade_rate, self._tick_evade)
         # Telemetry tick follows stream_rate_hz: odom must be >= the 15 Hz
         # depth-cloud rate or the detector's latest-TF fallback goes stale.
         self.create_timer(1.0 / float(self.get_parameter("stream_rate_hz").value),
                           self._tick_telemetry)
         self.get_logger().info("mav_bridge up: cmd_vel in, odom/state out")
 
-    # -- cmd_vel: ROS body FLU (x fwd, y left, z up) -> AP body NED (x fwd, y right, z down)
-    def _on_cmd_vel(self, msg: Twist):
-        vx = msg.linear.x
-        vy = -msg.linear.y                 # FLU y(left) -> NED y(right)
-        vz = -msg.linear.z                 # up -> down
-        yaw_rate = -msg.angular.z          # ENU yaw(ccw+) -> NED yaw(cw+)
-        with self._lock:
-            self._last_cmd = (vx, vy, vz, yaw_rate)
-            self._last_cmd_t = self.get_clock().now()
-            self._cmd_ever_received = True
+    @staticmethod
+    def _flu_to_ned(msg: Twist):
+        """ROS body FLU (x fwd, y left, z up) -> AP body NED (x fwd, y right, z down)."""
+        return (msg.linear.x,
+                -msg.linear.y,             # FLU y(left) -> NED y(right)
+                -msg.linear.z,             # up -> down
+                -msg.angular.z)            # ENU yaw(ccw+) -> NED yaw(cw+)
 
-    # -- /cmd/evade: same FLU->NED mapping as cmd_vel, but takes priority
-    def _on_evade(self, msg: Twist):
-        vx = msg.linear.x
-        vy = -msg.linear.y                 # FLU y(left) -> NED y(right)
-        vz = -msg.linear.z                 # up -> down
-        yaw_rate = -msg.angular.z          # ENU yaw(ccw+) -> NED yaw(cw+)
+    def _now_s(self):
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _on_cmd_vel(self, msg: Twist):
         with self._lock:
-            self._last_evade = (vx, vy, vz, yaw_rate)
-            self._last_evade_t = self.get_clock().now()
-            self._evade_ever_received = True
+            self._router = replace(self._router,
+                                   last_cmd=self._flu_to_ned(msg),
+                                   last_cmd_t=self._now_s())
+
+    def _on_evade(self, msg: Twist):
+        """Latch the dodge and send it immediately.
+
+        Waiting for the next watchdog tick cost up to a full cmd_rate period
+        (100 ms at 10 Hz) on a command whose entire useful window is the
+        0.18-0.29 s of tca measured at commit. rclpy's default executor is
+        single-threaded, so this cannot race a timer callback.
+        """
+        with self._lock:
+            self._router = replace(self._router,
+                                   last_evade=self._flu_to_ned(msg),
+                                   last_evade_t=self._now_s())
+        self._route_and_send(evade_only=False)
+
+    def _on_evade_accel(self, msg: Accel):
+        """Latch only. The velocity message is what decides that a dodge is
+        live, so an accel arriving on its own must not transmit anything."""
+        with self._lock:
+            self._router = replace(
+                self._router,
+                # Same FLU->NED mapping as the velocity path.
+                last_accel=(msg.linear.x, -msg.linear.y, -msg.linear.z),
+                last_accel_t=self._now_s())
+
+    def _tick_evade(self):
+        """Fast retransmit while a dodge is live; otherwise a no-op.
+
+        Deliberately refuses to act on anything but EVADE. If it handled the
+        handback edge it would also have to own cmd_vel, which would stream
+        patrol at the evade rate -- and the handback would land here rather
+        than on the watchdog tick without any benefit.
+        """
+        self._route_and_send(evade_only=True)
 
     def _tick_setpoint(self):
-        """Stream the freshest command at a fixed rate.
+        """Stream the freshest command at the watchdog rate.
 
         Priority: fresh /cmd/evade > /huitzilin/cmd_vel. When an evade goes
         stale, send ONE zero setpoint (so ArduPilot doesn't coast on the last
         dodge velocity), then fall back — to cmd_vel zero-hold if patrol ever
         commanded velocity, or to full silence (patrol position mode owns the
-        vehicle again)."""
-        now = self.get_clock().now()
+        vehicle again). The rules live in cmd_router.route().
+        """
+        self._route_and_send(evade_only=False)
+
+    def _route_and_send(self, evade_only: bool):
+        """Decide under the lock, transmit outside it."""
         with self._lock:
-            evade_fresh = False
-            if self._evade_ever_received:
-                e_age = (now - self._last_evade_t).nanoseconds * 1e-9
-                evade_fresh = e_age <= self.cmd_timeout
-            evx, evy, evz, eyr = self._last_evade
-            cmd_age = (now - self._last_cmd_t).nanoseconds * 1e-9
-            vx, vy, vz, yr = self._last_cmd
-            handback = (not evade_fresh) and self._evade_active
-            self._evade_active = evade_fresh
-
-        if evade_fresh:
-            self.bridge.send_velocity_body(evx, evy, evz, eyr)
+            r = route(self._router, self._now_s(), self.cmd_timeout)
+            if evade_only and r.action is not Action.EVADE:
+                return
+            self._router = replace(self._router, evade_active=r.evade_active)
+        if not r.sends:
             return
-        if handback:
-            self.bridge.send_velocity_body(0.0, 0.0, 0.0, 0.0)  # handback zero
-            return
-
-        if not self._cmd_ever_received:
-            return
-        if cmd_age > self.cmd_timeout:
-            vx = vy = vz = yr = 0.0        # dropout -> calm hold, never a coast/lunge
-        self.bridge.send_velocity_body(vx, vy, vz, yr)
+        if r.accel is None:
+            self.bridge.send_velocity_body(*r.velocity)
+        else:
+            vx, vy, vz, yaw_rate = r.velocity
+            self.bridge.send_velocity_accel_body(vx, vy, vz, *r.accel,
+                                                 yaw_rate=yaw_rate)
 
     def _tick_telemetry(self):
         s = self.bridge.get_state()

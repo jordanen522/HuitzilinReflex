@@ -2,6 +2,7 @@ mav_bridge:
   ros__parameters:
     connection: "udpin:0.0.0.0:14552"   # SITL must send --out udp:127.0.0.1:14552
     cmd_rate_hz: 10.0                    # >5 Hz so AP never hits the ~3 s timeout
+    evade_rate_hz: 50.0                  # dodge retransmit only; patrol stays at cmd_rate_hz. A dodge's whole window is the 0.18-0.29 s of tca measured at commit, so a 100 ms watchdog tick spent ~10% of the 150 ms budget waiting. 0 disables the fast timer.
     cmd_timeout_s: 0.7                   # cmd_vel silence longer than this -> zero-hold
     takeoff_alt_m: 2.0
     stream_rate_hz: 30.0   # odom must outpace the 15 Hz depth cloud: the detector's egomotion compensation uses latest-available odom TF (W3-13)
