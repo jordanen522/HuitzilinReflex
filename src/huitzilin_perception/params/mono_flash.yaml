@@ -1,0 +1,62 @@
+# mono_flash.yaml — high-rate ball detection from the OAK-D mono pair.
+#
+# HARDWARE LANE. Nothing in sim publishes mono image streams, so every value
+# here is a STARTING POINT for Week 6 bring-up, not a tuned setting. The
+# arithmetic underneath is unit-tested (test_mono_flash.py); the thresholds
+# are not, and cannot be until there are real frames to tune against.
+#
+# The two that decide whether this works at all:
+#   diff_threshold  — too low and every frame is full of sensor noise; too
+#                     high and the ball disappears at range as its contrast
+#                     against the background falls.
+#   max_area_px     — the real-world discriminator. A ball at range is a few
+#                     pixels; a person, a shadow, or the whole frame shifting
+#                     because the drone rolled are all large.
+#
+# CALIBRATION IS NOT OPTIONAL. fx_px/cx_px/cy_px/baseline_m below are nominal
+# values derived from a datasheet FOV. Read the device's own calibration
+# (depthai CalibrationHandler) at bring-up and put it here: a few percent of
+# focal-length error is a few percent of every range this node reports, and
+# range is the term the whole 20 m/s case rests on.
+
+mono_flash_detector:
+  ros__parameters:
+    left_topic: "/oak/left/image_raw"
+    right_topic: "/oak/right/image_raw"
+    centroid_topic: "/threat/centroid"
+    cov_topic: "/threat/centroid_cov"
+    cue_topic: "/threat/cue"
+    optical_frame: "camera_optical_frame"
+    target_frame: "base_link"
+
+    # A pair further apart than half a frame at 90 fps is a dropped frame,
+    # not a stereo pair. The Myriad X hardware-synchronises the sensors, so
+    # this is a sanity bound rather than an alignment mechanism.
+    pair_tolerance_s: 0.005
+
+    diff_threshold: 25.0       # intensity change that counts as motion
+    min_area_px: 3             # below this it is indistinguishable from noise
+    max_area_px: 400           # above this it is not a ball at range
+
+    max_dy_px: 2.0             # epipolar tolerance; catches an unrectified pair
+    min_disparity_px: 0.5      # a range ceiling in disguise (0 = infinity)
+    max_disparity_px: 300.0
+
+    # NOMINAL — replace with the device's own calibration.
+    fx_px: 441.7               # from ~71.9 deg HFOV at 640x480
+    cx_px: 320.0
+    cy_px: 240.0
+    baseline_m: 0.075
+    # Sub-pixel centroid accuracy. Range error is proportional to disparity
+    # error, so this is worth as much as the baseline: halving it buys the
+    # same depth accuracy as doubling the baseline. MEASURE it on real bags
+    # rather than trusting this guess.
+    centroid_std_px: 0.3
+
+    min_range_m: 0.30
+    max_range_m: 15.0
+
+    # Feeds evasion_node's ALERT state. Harmless while
+    # alert_min_track_updates equals min_track_updates, which is how
+    # evasion.yaml ships until the trade has been measured.
+    publish_cue: true

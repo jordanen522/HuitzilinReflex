@@ -117,6 +117,8 @@ OVERLAYS = [
      PERCEPTION / "params" / "hw_detector.yaml"),
     (PERCEPTION / "params" / "evasion.yaml",
      PERCEPTION / "params" / "hw_evasion.yaml"),
+    (PERCEPTION / "params" / "mono_flash.yaml",
+     PERCEPTION / "params" / "hw_mono_flash.yaml"),
 ]
 
 

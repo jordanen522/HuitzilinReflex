@@ -23,32 +23,49 @@
         </inertia>
       </inertial>
 
-      <collision name="collision">
-        <geometry>
-          <sphere><radius>0.040</radius></sphere>  <!-- 80 mm diameter -->
-        </geometry>
-        <surface>
-          <!-- collide_bitmask 0 = the ball collides with NOTHING: it flies its
-               parabola through the airframe and the runway alike.
-               This is a measurement decision, not a fidelity shortcut. A 150 g
-               ball at 8-14 m/s does tumble a 3.5" quad, and it did: 2026-07-26
-               the battery scored B03 r0 as dodged=True min=0.27 m (a real
-               miss-distance failure), then the contact flipped the vehicle,
-               ArduPilot crash-checked (AngErr=170>30) and disarmed, and every
-               remaining run aborted on MIN_SPAWN_Z with the wreck on the
-               ground. One marginal dodge destroyed the other ~50 runs, and a
-               flipped vehicle cannot be recovered in-harness because ArduPilot
-               refuses to arm inverted.
-               Nothing is lost: hits are scored from min_dist_m, computed
-               geometrically from /gz/dynamic_poses against hit_radius, so the
-               verdict is unchanged and better resolved than "did the physics
-               engine flip it". Restore contact only for a deliberate
-               impact-damage study, and expect one run per stack restart. -->
-          <collide_bitmask>0x00</collide_bitmask>
-          <contact><ode/></contact>
-          <friction><ode><mu>0.5</mu><mu2>0.5</mu2></ode></friction>
-        </surface>
-      </collision>
+      <!-- NO <collision> ELEMENT, DELIBERATELY. The ball must collide with
+           NOTHING: it flies its parabola through the airframe and the runway
+           alike. This is a measurement decision, not a fidelity shortcut. A
+           150 g ball at 8-14 m/s does tumble a 3.5" quad, and it did: 2026-07-26
+           the battery scored B03 r0 as dodged=True min=0.27 m (a real
+           miss-distance failure), then the contact flipped the vehicle,
+           ArduPilot crash-checked (AngErr=170>30) and disarmed, and every
+           remaining run aborted on MIN_SPAWN_Z with the wreck on the ground.
+           One marginal dodge destroyed the other ~50 runs, and a flipped
+           vehicle cannot be recovered in-harness because ArduPilot refuses to
+           arm inverted.
+
+           That was first "fixed" with <collide_bitmask>0x00</collide_bitmask>
+           written as a child of <surface>. It belongs to <surface><contact>, so
+           SDFormat DISCARDED it and the ball kept colliding. Gazebo said so on
+           every single spawn and nobody was reading:
+
+             Warning [Utils.cc:132] [.../surface/collide_bitmask:model.sdf:L47]:
+             XML Element[collide_bitmask], child of element[surface], not
+             defined in SDF. Copying[collide_bitmask] as children of [surface].
+
+           Measured cost (2026-08-07, cell r12.0 dataflash 00000008.BIN): six of
+           eight throws produced an UNCOMMANDED attitude excursion starting
+           0.27-0.47 s after the dodge (the tca window, i.e. ball arrival),
+           peaking at a roll of 33-48 deg, past ATC_ANGLE_MAX=30 and so not
+           commandable. Severity tracked ball speed: 8 m/s -> 17 deg, 14 m/s ->
+           20-38 deg, 20 m/s -> 48 deg, and the last rolled to 180 deg and
+           crashed. Every sweep cell died this way, which is why the S20N
+           false-dodge controls have no data at any detection range.
+
+           Removing the element outright, rather than moving the bitmask to its
+           correct parent, is the point: a link with no collision geometry
+           cannot collide under ANY physics engine, so this cannot regress into
+           a silently-ignored attribute a second time. Dynamics are unaffected:
+           the launch impulse and the gravity wrench act on <inertial>, and the
+           depth detector renders <visual>.
+
+           Nothing is lost: hits are scored from min_dist_m, computed
+           geometrically from /gz/dynamic_poses against hit_radius, so the
+           verdict is unchanged and better resolved than "did the physics engine
+           flip it". To restore contact for a deliberate impact-damage study,
+           re-add a <collision> with a sphere of radius 0.040, and expect one
+           scored run per stack restart. test_projectile_model.py pins this. -->
 
       <visual name="visual">
         <geometry>

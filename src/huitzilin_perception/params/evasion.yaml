@@ -63,3 +63,52 @@ evasion:
                                # handback fights patrol position setpoints
     evade_cmd_rate_hz: 20.0    # /cmd/evade stream rate while evading
     auto_resume_patrol: true   # call /huitzilin/start_patrol true after recovery
+
+    # ── acceleration feedforward ────────────────────────────────────────────
+    # A velocity-only setpoint makes the position controller discover the
+    # acceleration for itself, and it does so gently: escape displacement was
+    # measured rising at ~2 m/s^2 while the tilt ceiling permits
+    # g*tan(ATC_ANGLE_MAX) = 5.66. Raising dodge_speed does NOT fix this
+    # (1.5 -> 4.0 was a measured null, escape identical to the centimetre)
+    # because a bigger velocity error meets the same internal shaping. This
+    # states the demand instead of waiting for the error to build it.
+    #
+    # 0.0 = OFF = the velocity-only command every recorded result flew under.
+    # Whether ArduPilot honours the acceleration fields in GUIDED must be
+    # MEASURED: an ignored field is indistinguishable from a useless lever, so
+    # an A/B that shows nothing is reported as "unsupported", not "no effect".
+    evade_accel_ff_mps2: 0.0
+    evade_accel_topic: "/cmd/evade_accel"
+
+    # ── ALERT cue ───────────────────────────────────────────────────────────
+    # Confirmation is the most expensive term in the reaction budget: three
+    # updates at the measured 14.5 Hz cost 0.21 s, most of a 14 m/s ball's
+    # flight inside detection range.
+    #
+    # This does NOT re-open the measured null on min_track_updates 3 -> 2.
+    # That null weakened confirmation PERMANENTLY, against a false-positive
+    # stream running the whole time, and lost more than it bought (tca +0.044 s
+    # but dodge success 13/18 -> 11/16). Here the relaxed threshold applies
+    # only inside cue_timeout_s of an external cue that something fast is
+    # inbound, and reverts on its own. With nothing publishing cue_topic these
+    # values are inert and behaviour is identical to before.
+    cue_topic: "/threat/cue"
+    alert_min_track_updates: 2
+    cue_timeout_s: 2.0
+
+    # ── vertical escape ─────────────────────────────────────────────────────
+    # Vertical is the axis a quadrotor is fastest on: collective thrust needs
+    # no tilt, while a lateral escape must tilt before it translates. Off by
+    # default because the measured null (|u_z| vs min_dist, r = -0.077) says
+    # it bought nothing UNDER THE OLD AUTHORITY REGIME, where the controller
+    # never demanded near the tilt limit anyway. Re-open it only alongside the
+    # feedforward above, and say so in the commit.
+    #
+    # Gated on the threat not descending onto the drone (the FMEA rule, now a
+    # predicate rather than a blanket refusal) and on the ceiling below.
+    allow_upward_escape: false
+    # Matches FENCE_ALT_MAX in hw_frame.parm. FENCE_ACTION 1 turns a breach
+    # into an RTL, so a dodge that busts the fence has ended the flight even if
+    # it cleared the ball. Applied to upward escapes whether or not
+    # allow_upward_escape is set -- that path used to be unclamped entirely.
+    escape_ceiling_m: 5.0

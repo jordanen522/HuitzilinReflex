@@ -87,6 +87,10 @@ class ProjectileTracker:
         self._t_start = float("nan")
         self._n_updates = 0
         self._rejects = 0
+        # Per-track, unlike the reseed totals: the question these answer is
+        # "which sensor built THIS track", which a new track re-asks.
+        self._last_source: Optional[str] = None
+        self._source_counts: dict[str, int] = {}
 
     @property
     def has_track(self) -> bool:
@@ -128,6 +132,22 @@ class ProjectileTracker:
     def last_update_t(self) -> float:
         return self._t
 
+    @property
+    def last_source(self) -> Optional[str]:
+        """Tag of the most recent measurement folded in, or None if untagged."""
+        return self._last_source
+
+    @property
+    def source_counts(self) -> dict[str, int]:
+        """Updates on this track per source tag.
+
+        The diagnostic a fused pipeline needs: a track that fired on three
+        long-range triangulations is a different claim from one that fired on
+        three near-field depth centroids, and the dodge outcome cannot be
+        attributed without knowing which.
+        """
+        return dict(self._source_counts)
+
     def state(self) -> tuple[np.ndarray, np.ndarray]:
         """(position (3,), velocity (3,)) of the current track estimate."""
         if self._x is None:
@@ -136,14 +156,20 @@ class ProjectileTracker:
 
     # ── filtering ────────────────────────────────────────────────────────
 
-    def process(self, t: float, z) -> bool:
+    def process(self, t: float, z, R=None, source: Optional[str] = None) -> bool:
         """
         Feed one measurement. Returns True if it initialised or updated the
         track, False if rejected (gated outlier / out-of-order stamp).
         A stale track (> track_timeout_s since last stamp) resets first, so
         a second throw starts a fresh track instead of dragging the old one.
+
+        R, when given, is that measurement's own 3x3 covariance in odom ENU
+        and replaces the configured meas_std_m for this update only. Passing
+        None keeps the isotropic default, so every existing call site behaves
+        exactly as before.
         """
         z = np.asarray(z, dtype=np.float64).reshape(3)
+        R_eff = self._as_R(R)
 
         if self._x is not None and (t - self._t) > self._timeout:
             self._n_reseeds_timeout += 1
@@ -151,11 +177,18 @@ class ProjectileTracker:
 
         if self._x is None:
             self._x = np.concatenate([z, np.zeros(3)])
-            self._P = np.diag([self._R[0, 0]] * 3 + [self._init_vel_var] * 3)
+            # Seed position variance from the measurement that actually seeded
+            # the track, not from the configured scalar: a triangulated
+            # far-field detection is metres uncertain in depth and centimetres
+            # across, and starting it round would understate one and overstate
+            # the other. Identical to the old diagonal for an isotropic R.
+            self._P = np.diag(np.concatenate(
+                [np.diag(R_eff), np.full(3, self._init_vel_var)]))
             self._t = t
             self._t_start = t
             self._n_updates = 1
             self._rejects = 0
+            self._note_source(source)
             return True
 
         dt = t - self._t
@@ -163,24 +196,24 @@ class ProjectileTracker:
             return False  # out-of-order / duplicate stamp
 
         x_pred, P_pred = self._predict(dt)
-        nu, S, d2 = self._innovation(x_pred, P_pred, z)
+        nu, S, d2 = self._innovation(x_pred, P_pred, z, R_eff)
         if d2 > self._gate:
             self._rejects += 1
             if self._rejects >= self._max_rejects:
                 # Persistent disagreement -> different object; reseed from it.
                 self._n_reseeds_reject += 1
                 self.reset()
-                return self.process(t, z)
+                return self.process(t, z, R, source)
             # Keep the prediction, drop the outlier.
             self._x, self._P, self._t = x_pred, P_pred, t
             return False
 
-        self._apply(x_pred, P_pred, S, nu, t)
+        self._apply(x_pred, P_pred, S, nu, t, source)
         return True
 
     # ── association primitives (used by MultiHypothesisTracker) ──────────
 
-    def association_cost(self, t: float, z, *, cov_cap: float) -> float:
+    def association_cost(self, t: float, z, *, cov_cap: float, R=None) -> float:
         """How well this track explains z, as a negative log-likelihood.
         +inf means "not mine" — out of order, or outside the gate.
 
@@ -205,7 +238,7 @@ class ProjectileTracker:
         if dt <= 0.0:
             return float("inf")
         x_pred, P_pred = self._predict(dt)
-        nu, S, d2 = self._innovation(x_pred, P_pred, z)
+        nu, S, d2 = self._innovation(x_pred, P_pred, z, self._as_R(R))
 
         scale = float(np.max(np.diag(S)))
         if scale > cov_cap:
@@ -221,18 +254,18 @@ class ProjectileTracker:
         _, logdet = np.linalg.slogdet(S)
         return 0.5 * (d2 + float(logdet))
 
-    def associate(self, t: float, z) -> bool:
+    def associate(self, t: float, z, R=None, source: Optional[str] = None) -> bool:
         """Fold in a measurement already chosen for this track by the
         associator. No gate: association_cost() applied it."""
         z = np.asarray(z, dtype=np.float64).reshape(3)
         if self._x is None:
-            return self.process(t, z)
+            return self.process(t, z, R, source)
         dt = t - self._t
         if dt <= 0.0:
             return False
         x_pred, P_pred = self._predict(dt)
-        nu, S, _ = self._innovation(x_pred, P_pred, z)
-        self._apply(x_pred, P_pred, S, nu, t)
+        nu, S, _ = self._innovation(x_pred, P_pred, z, self._as_R(R))
+        self._apply(x_pred, P_pred, S, nu, t, source)
         return True
 
     def is_stale(self, t: float) -> bool:
@@ -240,19 +273,41 @@ class ProjectileTracker:
 
     # ── filter internals ─────────────────────────────────────────────────
 
-    def _innovation(self, x_pred, P_pred, z):
+    def _as_R(self, R) -> np.ndarray:
+        """This measurement's covariance, or the configured default.
+
+        Validated rather than trusted: a (3,) variance vector or a wrongly
+        shaped array would broadcast into S silently and produce a filter that
+        looks like it is working.
+        """
+        if R is None:
+            return self._R
+        R = np.asarray(R, dtype=np.float64)
+        if R.shape != (3, 3):
+            raise ValueError("measurement covariance must be 3x3, got %r"
+                             % (R.shape,))
+        return R
+
+    def _note_source(self, source: Optional[str]) -> None:
+        self._last_source = source
+        if source is not None:
+            self._source_counts[source] = self._source_counts.get(source, 0) + 1
+
+    def _innovation(self, x_pred, P_pred, z, R=None):
         nu = z - self._H @ x_pred
-        S = self._H @ P_pred @ self._H.T + self._R
+        S = self._H @ P_pred @ self._H.T + (self._R if R is None else R)
         d2 = float(nu @ np.linalg.solve(S, nu))
         return nu, S, d2
 
-    def _apply(self, x_pred, P_pred, S, nu, t: float) -> None:
+    def _apply(self, x_pred, P_pred, S, nu, t: float,
+               source: Optional[str] = None) -> None:
         K = P_pred @ self._H.T @ np.linalg.inv(S)
         self._x = x_pred + K @ nu
         self._P = (np.eye(6) - K @ self._H) @ P_pred
         self._t = t
         self._n_updates += 1
         self._rejects = 0
+        self._note_source(source)
 
     def _predict(self, dt: float) -> tuple[np.ndarray, np.ndarray]:
         F = np.eye(6)
@@ -339,21 +394,26 @@ class MultiHypothesisTracker:
 
     # ── association ──────────────────────────────────────────────────────
 
-    def process(self, t: float, z) -> bool:
+    def process(self, t: float, z, R=None, source: Optional[str] = None) -> bool:
         """Route one measurement. Always True: a centroid that no hypothesis
-        claims is not an outlier to be argued with, it is a new object."""
+        claims is not an outlier to be argued with, it is a new object.
+
+        R and source are forwarded untouched to whichever hypothesis wins, so
+        a fused stream can hand each measurement its own covariance without
+        the associator needing to know where it came from.
+        """
         z = np.asarray(z, dtype=np.float64).reshape(3)
         self._prune(t)
 
         best, best_cost = None, float("inf")
         for tr in self._tracks:
-            cost = tr.association_cost(t, z, cov_cap=self._cov_cap)
+            cost = tr.association_cost(t, z, cov_cap=self._cov_cap, R=R)
             if cost < best_cost:
                 best, best_cost = tr, cost
         if best is not None:
-            return best.associate(t, z)
+            return best.associate(t, z, R, source)
 
-        self._spawn(t, z)
+        self._spawn(t, z, R, source)
         return True
 
     def _prune(self, t: float) -> None:
@@ -361,9 +421,9 @@ class MultiHypothesisTracker:
         self._n_pruned += len(self._tracks) - len(keep)
         self._tracks = keep
 
-    def _spawn(self, t: float, z) -> None:
+    def _spawn(self, t: float, z, R=None, source: Optional[str] = None) -> None:
         tr = ProjectileTracker(**self._kw)
-        tr.process(t, z)
+        tr.process(t, z, R, source)
         self._tracks.append(tr)
         self._n_spawned += 1
         while len(self._tracks) > self._max_tracks:
@@ -404,6 +464,41 @@ def predict_closest_approach(
     return float(ts[i]), float(d[i]), rel[i]
 
 
+def effective_min_updates(
+    now_s: float,
+    last_cue_s: Optional[float],
+    *,
+    cue_timeout_s: float,
+    patrol_updates: int,
+    alert_updates: int,
+) -> int:
+    """How many track updates a dodge needs right now.
+
+    Confirmation is the single most expensive term in the reaction budget:
+    three updates at the measured 14.5 Hz cost 0.21 s, which at 14 m/s is
+    most of the ball's time of flight inside detection range. Dropping to two
+    unconditionally was MEASURED as a bad trade -- it bought 0.044 s of tca
+    and lost more in dodge success than it gained (13/18 -> 11/16).
+
+    This is a different proposition, and the difference is the reason the
+    earlier null does not settle it: the relaxed threshold applies ONLY while
+    an external cue says a fast object is probably inbound, and reverts by
+    itself when the cue goes stale. The null measured a permanently weaker
+    filter against a false-positive stream running the whole time; this
+    weakens it for a bounded window that something else has already vouched
+    for. Whether that trade is good is an open measurement, not a settled one.
+
+    No cue ever published => patrol_updates forever, i.e. today's behaviour.
+    """
+    if last_cue_s is None or cue_timeout_s <= 0.0:
+        return int(patrol_updates)
+    if not (0.0 <= now_s - last_cue_s <= cue_timeout_s):
+        # Also catches a cue from the future (a sim-time rewind), which would
+        # otherwise hold the machine in ALERT indefinitely.
+        return int(patrol_updates)
+    return int(alert_updates)
+
+
 def dodge_direction(miss_vec, approach_vel, *, min_offset_m: float = 0.05) -> np.ndarray:
     """
     Unit ENU dodge direction: perpendicular to the approach axis, pointing
@@ -435,6 +530,11 @@ def clamp_dodge_to_clearance(
     *,
     floor_m: float,
     descent_len_m: float,
+    allow_upward: bool = False,
+    threat_descending: bool = True,
+    ceiling_m: Optional[float] = None,
+    climb_len_m: Optional[float] = None,
+    away_hint=None,
 ) -> np.ndarray:
     """
     Re-aim a dodge that would fly the drone into the ground. Returns a unit
@@ -460,33 +560,163 @@ def clamp_dodge_to_clearance(
     horizontal escape bearing, so escape speed is preserved and the drone
     still leaves the projectile's pass side.
 
-    Escape is never flipped upward. The ball is descending through that
-    space; climbing into it trades a ground strike for a hit.
+    By default escape is never flipped upward. The ball is usually descending
+    through that space, and climbing into it trades a ground strike for a hit.
+
+    allow_upward opts into the exception, and it is an exception worth having
+    because vertical is the axis a quadrotor is FASTEST on. A lateral escape
+    has to tilt before it can translate -- that is the ~2 m/s^2 deviation rise
+    measured over 14 dodges, against a tilt ceiling that would permit 5.66.
+    Collective thrust needs no tilt at all and a 2:1 thrust-to-weight airframe
+    has most of g in hand. That matters only at the speeds where the budget is
+    tightest, which is exactly where the envelope currently closes.
+
+    It is gated on two conditions, both of which must hold:
+      * threat_descending is False -- the FMEA rule survives as a predicate
+        rather than as a blanket refusal. A ball coming down on top of the
+        drone is still answered horizontally.
+      * ceiling_m leaves room to climb -- SAFETY_CASE.md sets a 5 m ceiling
+        and FENCE_ACTION 1 turns a breach into an RTL, so a dodge that busts
+        the fence has ended the flight even if it cleared the ball.
+
+    Note that passing ceiling_m ALSO clamps an escape that already pointed
+    upward on its own. That path was previously unclamped in every direction,
+    which was survivable only because the geometric escape never reached the
+    fence from 2 m AGL; it is not survivable with more vertical authority.
+
+    away_hint is a horizontal ENU bearing known to point AWAY from the threat,
+    supplied by plan_dodge from the approach geometry. It is used only where a
+    re-aim has no horizontal bearing of its own to keep -- a straight-down or
+    straight-up escape. Those branches used to invent a hardcoded [1, 0, 0],
+    which is a fixed compass direction with no relation to where the ball is:
+    roughly half such dodges would fly TOWARD it. This function is otherwise
+    threat-blind by construction -- it receives a direction, not a geometry --
+    so the hint is the only way it can pick a defensible fallback.
+
+    Passing no hint keeps the old deterministic [1, 0, 0], so nothing that
+    called this before changes behaviour.
     """
     d = np.asarray(direction, dtype=np.float64)
     n = np.linalg.norm(d)
+    fallback = _unit_horizontal(away_hint)
     if n < 1e-9:
-        return np.array([1.0, 0.0, 0.0])
+        return fallback
     d = d / n
+
+    climb_len = descent_len_m if climb_len_m is None else float(climb_len_m)
+    max_up = _vertical_budget(
+        headroom_m=(None if ceiling_m is None
+                    else max(float(ceiling_m) - float(altitude_m), 0.0)),
+        travel_len_m=climb_len)
+
     if d[2] >= 0.0:
-        return d
+        # Already climbing. Only a stated ceiling can constrain it.
+        if max_up is None or d[2] <= max_up:
+            return d
+        return _reaim(d, max_up, fallback)
 
     headroom_m = max(float(altitude_m) - float(floor_m), 0.0)
-    max_down = (min(1.0, headroom_m / descent_len_m)
-                if descent_len_m > 1e-9 else 0.0)
+    max_down = _vertical_budget(headroom_m=headroom_m,
+                                travel_len_m=descent_len_m) or 0.0
     if -d[2] <= max_down:
         return d
+
+    if allow_upward and not threat_descending:
+        # The ball is not coming down on us and the floor will not let us go
+        # under it, so go over it instead of settling for horizontal-only.
+        up = 1.0 if max_up is None else max_up
+        if up > 0.0:
+            return _reaim(d, up, fallback)
 
     horiz = np.array([d[0], d[1], 0.0])
     h_norm = np.linalg.norm(horiz)
     if h_norm < 1e-6:
-        # Straight down with no headroom: any horizontal beats descending.
-        # Deterministic pick so battery runs stay repeatable.
-        return np.array([1.0, 0.0, 0.0])
+        # Straight down with no headroom: any horizontal beats descending, but
+        # not ANY horizontal will do -- see away_hint. Without a hint this is
+        # still the old deterministic pick, so battery runs stay repeatable.
+        return fallback
     h_keep = math.sqrt(max(1.0 - max_down ** 2, 0.0))
     return np.array([horiz[0] / h_norm * h_keep,
                      horiz[1] / h_norm * h_keep,
                      -max_down])
+
+
+def _vertical_budget(*, headroom_m: Optional[float],
+                     travel_len_m: float) -> Optional[float]:
+    """Fraction of a unit escape that may point vertically, or None for
+    'unconstrained' when no limit was stated."""
+    if headroom_m is None:
+        return None
+    if travel_len_m <= 1e-9:
+        return 0.0
+    return min(1.0, headroom_m / travel_len_m)
+
+
+def _unit_horizontal(hint) -> np.ndarray:
+    """A unit horizontal ENU bearing from a hint, or the legacy [1, 0, 0].
+
+    Kept deliberately forgiving: callers pass whatever the geometry gave them,
+    including a vertical or zero vector when the geometry was degenerate, and
+    a fallback that itself needs a fallback helps nobody.
+    """
+    if hint is None:
+        return np.array([1.0, 0.0, 0.0])
+    h = np.asarray(hint, dtype=np.float64)
+    h = np.array([h[0], h[1], 0.0])
+    n = np.linalg.norm(h)
+    if n < 1e-9:
+        return np.array([1.0, 0.0, 0.0])
+    return h / n
+
+
+def horizontal_away_bearing(miss_vec, approach_vel) -> np.ndarray:
+    """Unit horizontal ENU bearing that leaves the projectile's pass side.
+
+    Used as clamp_dodge_to_clearance's away_hint. Preference order:
+
+      1. the horizontal part of -miss_vec, i.e. straight away from where the
+         ball will pass. Correct whenever the pass is offset horizontally;
+      2. failing that (a dead-overhead or dead-under pass, where the horizontal
+         offset is nil), the horizontal perpendicular to the approach axis --
+         the same construction dodge_direction falls back to, and the fastest
+         way off a line you cannot get off sideways.
+
+    Both are derived from the threat. That is the entire point: the branch this
+    feeds used to answer "which way is away?" with a hardcoded compass bearing.
+    """
+    m = np.asarray(miss_vec, dtype=np.float64)
+    away = np.array([-m[0], -m[1], 0.0])
+    if np.linalg.norm(away) >= 1e-6:
+        return away / np.linalg.norm(away)
+
+    a = np.asarray(approach_vel, dtype=np.float64)
+    a_norm = np.linalg.norm(a)
+    a_hat = a / a_norm if a_norm > 1e-9 else np.array([1.0, 0.0, 0.0])
+    lateral = np.cross(a_hat, np.array([0.0, 0.0, 1.0]))
+    lat_norm = np.linalg.norm(lateral)
+    if lat_norm < 1e-6:            # vertical approach: no lateral is preferred
+        return np.array([1.0, 0.0, 0.0])
+    return lateral / lat_norm
+
+
+def _reaim(d: np.ndarray, vertical: float, fallback=None) -> np.ndarray:
+    """Rebuild a unit vector with a given vertical component, keeping the
+    horizontal bearing and re-spending the freed budget along it.
+
+    A purely vertical input has no bearing to keep, so one is supplied -- the
+    caller's threat-derived fallback where there is one, else the legacy
+    deterministic [1, 0, 0], so battery runs stay repeatable. Returning the
+    input unchanged instead would silently ignore the cap, which is the whole
+    reason this function is called.
+    """
+    horiz = np.array([d[0], d[1], 0.0])
+    h_norm = np.linalg.norm(horiz)
+    if h_norm < 1e-6:
+        horiz, h_norm = _unit_horizontal(fallback), 1.0
+    h_keep = math.sqrt(max(1.0 - vertical ** 2, 0.0))
+    return np.array([horiz[0] / h_norm * h_keep,
+                     horiz[1] / h_norm * h_keep,
+                     vertical])
 
 
 def dodge_velocity_command(
@@ -584,6 +814,8 @@ def plan_dodge(
     altitude_m: Optional[float] = None,
     floor_m: float = 1.0,
     descent_len_m: float = 0.0,
+    allow_upward: bool = False,
+    ceiling_m: Optional[float] = None,
 ) -> DodgePlan:
     """Convenience wrapper: absolute states in odom ENU -> full dodge plan.
 
@@ -599,5 +831,16 @@ def plan_dodge(
     direction = dodge_direction(miss_vec, approach_vel)
     if altitude_m is not None:
         direction = clamp_dodge_to_clearance(
-            direction, altitude_m, floor_m=floor_m, descent_len_m=descent_len_m)
+            direction, altitude_m, floor_m=floor_m,
+            descent_len_m=descent_len_m,
+            allow_upward=allow_upward,
+            # The ball's own vertical motion at closest approach. Climbing is
+            # refused when it is coming down onto us -- that is the FMEA rule,
+            # evaluated rather than assumed.
+            threat_descending=bool(approach_vel[2] < 0.0),
+            ceiling_m=ceiling_m,
+            # The clamp only ever sees a direction, so it cannot work out for
+            # itself which way is away from the ball. Where it has to invent a
+            # horizontal bearing, this is the one it should invent.
+            away_hint=horizontal_away_bearing(miss_vec, approach_vel))
     return DodgePlan(tca, miss, miss_vec, direction)

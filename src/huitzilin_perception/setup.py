@@ -30,6 +30,9 @@ setup(
     entry_points={
         "console_scripts": [
             "detector = huitzilin_perception.detector_node:main",
+            "oracle_detector = huitzilin_perception.oracle_detector_node:main",
+            "mono_flash_detector = "
+            "huitzilin_perception.mono_flash_detector_node:main",
             "spawn_projectile = huitzilin_perception.spawn_projectile:main",
             "score_bags = huitzilin_perception.score_bags:main",
             "evasion = huitzilin_perception.evasion_node:main",

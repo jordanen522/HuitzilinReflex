@@ -1,0 +1,65 @@
+# oracle_detector.yaml — synthetic detections from Gazebo truth.
+#
+# NOT A DETECTOR. This node answers "what would the rest of the chain do IF
+# the sensor could see R metres", so detection_range_m is an INPUT and never a
+# result. Any figure produced under it must be quoted with the range it ran
+# at. What range the real OAK-D mono pair delivers is a Week 6 hardware
+# measurement, and nothing here predicts it.
+#
+# Sim-only by construction (it reads /gz/dynamic_poses), so there is no hw_
+# overlay and there must never be one.
+#
+# Never run alongside the real detector: both publish /threat/centroid, and
+# the tracker would receive two uncorrelated views of the same ball.
+
+oracle_detector:
+  ros__parameters:
+    poses_topic: "/gz/dynamic_poses"
+    odom_topic: "/huitzilin/odom"
+    centroid_topic: "/threat/centroid"
+
+    drone_model: "iris_depth"
+    # BOTH conventions, because this repo has two spawners and they disagree:
+    # spawn_projectile names its ball projectile_<scenario>_<epoch> while
+    # dodge_battery — the harness that actually scores anything — names its
+    # own ball_<run>_r<rep>_<epoch>. This read "projectile_" alone, so under
+    # the battery the oracle matched nothing, published zero centroids, and a
+    # whole sweep came back 0/8 NO-FIRE while the node logged no complaint. It
+    # DOES need coordination with the battery; that is what this list is. A
+    # third spawner means a third prefix here.
+    #
+    # Must stay a non-empty list of strings: `[]` carries no element type, so
+    # ROS 2 leaves the parameter uninitialized and the node dies reading it.
+    ball_name_prefixes: ["ball_", "projectile_"]
+
+    # 12 m: at 20 m/s that is 0.60 s of flight inside range, against ~0.08 s
+    # of pipeline plus confirmation plus the ~0.40 s the airframe needs to
+    # clear the 0.30 m hit radius. Chosen to sit just above the requirement so
+    # the harness measures a margin rather than hiding one.
+    detection_range_m: 12.0
+    min_range_m: 0.30          # mirrors detector.yaml roi_min_range_m
+    # Mirrors detector.yaml roi_half_angle_deg. A real camera cannot see
+    # behind itself, and warning from outside the frustum is warning no sensor
+    # could have given.
+    fov_half_angle_deg: 45.0
+
+    # 14.5 Hz reproduces the depth pipeline's MEASURED accepted-detection rate
+    # (not the nominal 15), so a run at this rate isolates range from rate.
+    # Raise it to model the mono pair's 60-120 fps.
+    rate_hz: 14.5
+
+    # Matches evasion.yaml meas_std_m, so the filter's assumed R and the
+    # oracle's actual noise agree. noise_std_xyz_m overrides it with
+    # (forward, left, up) in base_link when a stereo-shaped error is wanted:
+    # depth error grows as z^2, lateral as z.
+    #
+    # All-zero means "unspecified, use noise_std_m". It must stay a 3-element
+    # list of floats: `[]` carries no element type, so ROS 2 leaves the
+    # parameter uninitialized and the node dies reading it.
+    noise_std_m: 0.15
+    noise_std_xyz_m: [0.0, 0.0, 0.0]
+
+    dropout_prob: 0.0          # uniform; deliberately not range-dependent
+    seed: 0                    # 0 = entropy; set non-zero to replay a battery
+
+    stamp_offset_warn_s: 0.05

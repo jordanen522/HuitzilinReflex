@@ -32,7 +32,7 @@ from enum import Enum
 
 import numpy as np
 import rclpy
-from geometry_msgs.msg import PointStamped, Twist
+from geometry_msgs.msg import Accel, PointStamped, Twist
 from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.duration import Duration
@@ -53,6 +53,7 @@ from huitzilin_perception.kalman import (
     GRAVITY_ENU,
     MultiHypothesisTracker,
     dodge_velocity_command,
+    effective_min_updates,
     plan_dodge,
     should_dodge,
 )
@@ -72,6 +73,7 @@ FIXED_AT_START = {
     "intercept_topic", "event_topic", "marker_topic", "patrol_service",
     "process_accel_std", "meas_std_m", "init_vel_std", "track_timeout_s",
     "max_tracks", "max_assoc_sigma_m", "evade_cmd_rate_hz",
+    "evade_accel_topic", "cue_topic",
 }
 
 
@@ -116,6 +118,16 @@ class EvasionNode(Node):
         self.declare_parameter("patrol_handoff_s", 0.8)
         self.declare_parameter("evade_cmd_rate_hz", 20.0)
         self.declare_parameter("auto_resume_patrol", True)
+        # ── Phase 5: acceleration feedforward (default off = old behaviour) ──
+        self.declare_parameter("evade_accel_topic", "/cmd/evade_accel")
+        self.declare_parameter("evade_accel_ff_mps2", 0.0)
+        # ── Phase 6: cue-gated confirmation (inert with no cue publisher) ───
+        self.declare_parameter("cue_topic", "/threat/cue")
+        self.declare_parameter("alert_min_track_updates", 2)
+        self.declare_parameter("cue_timeout_s", 2.0)
+        # ── Phase 7: vertical escape (default off = old behaviour) ──────────
+        self.declare_parameter("allow_upward_escape", False)
+        self.declare_parameter("escape_ceiling_m", 5.0)
 
         self._p = {
             name: self.get_parameter(name).value
@@ -130,6 +142,9 @@ class EvasionNode(Node):
                 "dodge_floor_m", "dodge_max_speed_mps",
                 "recover_hold_s", "patrol_handoff_s", "evade_cmd_rate_hz",
                 "auto_resume_patrol",
+                "evade_accel_topic", "evade_accel_ff_mps2",
+                "cue_topic", "alert_min_track_updates", "cue_timeout_s",
+                "allow_upward_escape", "escape_ceiling_m",
             )
         }
         self.add_on_set_parameters_callback(self._on_param_set)
@@ -146,6 +161,8 @@ class EvasionNode(Node):
         self._state = EvadeState.TRACKING
         self._phase_end = None            # rclpy Time when current phase ends
         self._dodge_cmd_body = np.zeros(3)
+        self._dodge_accel_body = np.zeros(3)
+        self._last_cue_s = None           # sim seconds of the last ALERT cue
         self._last_odom = None
         self._warned_no_odom = False
         self._warned_bad_quat = False
@@ -155,8 +172,12 @@ class EvasionNode(Node):
                                  self._centroid_cb, RELIABLE_QOS)
         self.create_subscription(Odometry, self._p["odom_topic"],
                                  self._odom_cb, RELIABLE_QOS)
+        self.create_subscription(Bool, self._p["cue_topic"],
+                                 self._cue_cb, RELIABLE_QOS)
         self._evade_pub = self.create_publisher(
             Twist, self._p["evade_topic"], RELIABLE_QOS)
+        self._evade_accel_pub = self.create_publisher(
+            Accel, self._p["evade_accel_topic"], RELIABLE_QOS)
         self._alarm_pub = self.create_publisher(
             Bool, self._p["alarm_topic"], RELIABLE_QOS)
         self._intercept_pub = self.create_publisher(
@@ -214,6 +235,40 @@ class EvasionNode(Node):
     def _odom_cb(self, msg: Odometry) -> None:
         self._last_odom = msg
 
+    def _cue_cb(self, msg: Bool) -> None:
+        """External ALERT cue: something fast is probably incoming.
+
+        Only a True latches. A False is not "stand down" -- it would let a
+        stale or mistaken publisher cancel an alert the moment before it
+        mattered -- so the alert always expires by its own timeout instead.
+        """
+        if msg.data:
+            self._last_cue_s = self.get_clock().now().nanoseconds * 1e-9
+
+    def _publish_evade(self, vel_body, accel_body) -> None:
+        """One evade command. The acceleration goes out FIRST, and always.
+
+        First, because the bridge only attaches a fresh acceleration to a
+        velocity setpoint -- publishing it after would leave the current
+        command carrying the previous tick's feedforward.
+
+        Always, including the zeros during RECOVERING: the settle zeros are
+        still fresh /cmd/evade messages, so an accel left un-updated would be
+        attached to them and shove the aircraft while it was meant to be
+        settling.
+        """
+        acc = Accel()
+        acc.linear.x = float(accel_body[0])
+        acc.linear.y = float(accel_body[1])
+        acc.linear.z = float(accel_body[2])
+        self._evade_accel_pub.publish(acc)
+
+        cmd = Twist()
+        cmd.linear.x = float(vel_body[0])
+        cmd.linear.y = float(vel_body[1])
+        cmd.linear.z = float(vel_body[2])
+        self._evade_pub.publish(cmd)
+
     @staticmethod
     def _stamp_to_sec(stamp) -> float:
         return stamp.sec + stamp.nanosec * 1e-9
@@ -245,7 +300,11 @@ class EvasionNode(Node):
 
         self._tracker.process(self._stamp_to_sec(msg.header.stamp), z_odom)
 
-        min_updates = int(self._p["min_track_updates"])
+        min_updates = effective_min_updates(
+            self.get_clock().now().nanoseconds * 1e-9, self._last_cue_s,
+            cue_timeout_s=float(self._p["cue_timeout_s"]),
+            patrol_updates=int(self._p["min_track_updates"]),
+            alert_updates=int(self._p["alert_min_track_updates"]))
         confirmed = self._tracker.confirmed(min_updates=min_updates)
         if not confirmed:
             return
@@ -274,6 +333,12 @@ class EvasionNode(Node):
                 floor_m=float(self._p["dodge_floor_m"]),
                 descent_len_m=(float(self._p["dodge_speed_mps"])
                                * float(self._p["dodge_duration_s"])),
+                allow_upward=bool(self._p["allow_upward_escape"]),
+                # Always passed, even with upward escape off: an escape that
+                # already pointed up was previously unclamped, which only ever
+                # stayed inside the fence because the geometric escape could
+                # not reach it from 2 m AGL.
+                ceiling_m=float(self._p["escape_ceiling_m"]),
             )
             fires = should_dodge(
                 track.n_updates, plan.miss_m, plan.tca_s,
@@ -289,11 +354,13 @@ class EvasionNode(Node):
         self._publish_intercept(plan, pos_proj, vel_proj, T_odom_bl,
                                 msg.header.stamp)
         if fires:
-            self._start_dodge(plan, track, q, msg.header.stamp, v_drone)
+            self._start_dodge(plan, track, q, msg.header.stamp, v_drone,
+                              min_updates)
 
     # ── Dodge lifecycle ──────────────────────────────────────────────────
 
-    def _start_dodge(self, plan, track, q, stamp, v_drone) -> None:
+    def _start_dodge(self, plan, track, q, stamp, v_drone,
+                     min_updates_used) -> None:
         R = quat_to_rot(q.x, q.y, q.z, q.w)          # base_link -> odom
         dir_body = R.T @ plan.direction               # odom -> body FLU
         # Escape is measured against the drone's OWN extrapolated track,
@@ -306,6 +373,11 @@ class EvasionNode(Node):
             dodge_speed_mps=float(self._p["dodge_speed_mps"]),
             max_speed_mps=float(self._p["dodge_max_speed_mps"]))
         self._dodge_cmd_body = R.T @ cmd_enu
+        # Feedforward along the escape direction only -- never along the cruise
+        # term, which the vehicle is already flying and does not need to be
+        # pushed into. Zero ff reproduces the velocity-only command exactly.
+        accel_ff = float(self._p["evade_accel_ff_mps2"])
+        self._dodge_accel_body = dir_body * accel_ff
 
         now = self.get_clock().now()
         latency = now.nanoseconds * 1e-9 - self._stamp_to_sec(stamp)
@@ -344,6 +416,14 @@ class EvasionNode(Node):
             "cruise_speed_mps": float(np.linalg.norm(v_drone)),
             "cmd_enu": [float(v) for v in cmd_enu],
             "over_budget": over,
+            # So a battery row can be attributed to the command FORM it flew
+            # under. 0.0 is a velocity-only setpoint, i.e. every result
+            # recorded before this existed.
+            "accel_ff_mps2": accel_ff,
+            "accel_body": [float(v) for v in self._dodge_accel_body],
+            # Which confirmation threshold this dodge actually fired on --
+            # the patrol value, or the relaxed one an ALERT cue bought.
+            "min_track_updates_used": int(min_updates_used),
         })
         self._event_pub.publish(event)
         self._alarm_pub.publish(Bool(data=True))
@@ -354,11 +434,7 @@ class EvasionNode(Node):
 
         # Publish the first evade command immediately so the command path
         # doesn't wait up to one 20 Hz tick for _evade_tick to fire it.
-        cmd = Twist()
-        cmd.linear.x = float(self._dodge_cmd_body[0])
-        cmd.linear.y = float(self._dodge_cmd_body[1])
-        cmd.linear.z = float(self._dodge_cmd_body[2])
-        self._evade_pub.publish(cmd)
+        self._publish_evade(self._dodge_cmd_body, self._dodge_accel_body)
 
     def _evade_tick(self) -> None:
         if self._state is EvadeState.TRACKING:
@@ -367,19 +443,19 @@ class EvasionNode(Node):
 
         if self._state is EvadeState.EVADING:
             if now < self._phase_end:
-                cmd = Twist()
-                cmd.linear.x = float(self._dodge_cmd_body[0])
-                cmd.linear.y = float(self._dodge_cmd_body[1])
-                cmd.linear.z = float(self._dodge_cmd_body[2])
-                self._evade_pub.publish(cmd)
+                self._publish_evade(self._dodge_cmd_body,
+                                    self._dodge_accel_body)
             else:
                 self._alarm_pub.publish(Bool(data=False))
-                self._evade_pub.publish(Twist())  # zero: begin settle
+                # Zero BOTH: begin settle. The acceleration has to be cleared
+                # explicitly or the bridge would keep attaching the dodge's
+                # feedforward to these zero-velocity setpoints.
+                self._publish_evade(np.zeros(3), np.zeros(3))
                 self._state = EvadeState.RECOVERING
                 self._phase_end = now + Duration(
                     seconds=float(self._p["recover_hold_s"]))
         elif self._state is EvadeState.RECOVERING:
-            self._evade_pub.publish(Twist())      # hold zero while settling
+            self._publish_evade(np.zeros(3), np.zeros(3))   # hold zero
             if now >= self._phase_end:
                 # Don't resume patrol yet: the bridge treats /cmd/evade as
                 # fresh for cmd_timeout_s after our last zero publish and

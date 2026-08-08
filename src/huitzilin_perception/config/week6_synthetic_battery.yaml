@@ -1,0 +1,120 @@
+# Synthetic-oracle battery — the 20 m/s question, asked in sim.
+#
+# RUN THIS ONLY UNDER week6_oracle.launch.py. Every row here assumes
+# /threat/centroid comes from oracle_detector (Gazebo truth at a configured
+# range), NOT from the depth detector. Under the real detector the 20 m/s rows
+# are a foregone 0/N: the ball is first seen at ~3.2-3.6 m, which is 0.17 s of
+# warning at 20 m/s -- less than confirmation plus pipeline.
+#
+# WHAT A RESULT FROM THIS FILE MEANS. It is conditional on the oracle's
+# detection_range_m, which is an INPUT. "12/12 at 20 m/s" is a claim about the
+# tracker, trigger and airframe GIVEN a 12 m sensor -- never a claim that the
+# hardware can see 12 m. Quote the range beside every number.
+#
+# week4_battery.yaml is untouched and stays the regression path: its counts are
+# measured provenance (78/78 at <=8 m/s, 0/17 at 14 m/s over five batteries).
+#
+# ORDER OF OPERATIONS (do not skip):
+#   1. Fidelity gate. Run with the oracle pinned to the depth detector's real
+#      reach, `-p detection_range_m:=3.4`, and confirm B11 reproduces the
+#      measured 0/17 shape at 14 m/s and B12 the 78/78 shape at 8 m/s. If the
+#      harness cannot reproduce what is already known, nothing it says about
+#      20 m/s is worth reading.
+#   2. Only then run at the full range and read B08-B10.
+#   3. Check `first_det_range_m` in the CSV against the detection_range_m you
+#      launched with. They must agree to ~0.2 m. If delivered reach is short,
+#      the row measured a SHORTER sensor than it claims and the offset rule
+#      below was violated -- fix the offset and re-fly, do not report the row.
+#
+# THE OFFSET RULE (measured 2026-08-08 over 13 flown cells). offset_forward_m
+# must clear the oracle gate by a margin, or the ball is already inside the
+# gate when the oracle unmutes and the cell silently delivers less reach than
+# it configures. Three things eat the margin between spawn and first report:
+#   ball travel during spawn_dead_s (~0.27 s)      = 0.27 * speed_mps
+#   drone closure over dead time + one frame       ~ 4.2 * (0.27 + 1/rate_hz)
+#   one frame of ball travel                       = speed_mps / rate_hz
+# At 20 m/s and 14.5 Hz that is ~8.5 m, so:
+#
+#     offset_forward_m  >=  detection_range_m + 8.5 m     (at 20 m/s)
+#
+# This was NOT respected by the original 15.0: against a 12 m gate it leaves
+# 3 m of margin, and the flown 12 m cells delivered 9.89-11.34 m (0.66-2.11 m
+# short) while every cell at 3.4-9 m -- where 15.0 leaves 6-11.6 m of margin --
+# was faithful to 0.13-0.20 m. A 20 m gate at offset 15.0 would have measured a
+# 15 m sensor and reported it as 20.
+#
+# THE COST, which is why the rule is not just "make it huge". dodge_battery.py
+# sets t_flight = offset_forward_m / speed_mps and gates the throw on a
+# straight patrol leg of t_flight + throw_window_margin_s. Offset 22.0 at
+# 20 m/s needs a 1.40 s leg against the ~1.05 s the 12 m loop supplies
+# routinely. A leg the loop cannot supply returns "SKIPPED, not thrown" -- no
+# data, not a failed dodge. If B08-B10 come back mostly skipped, that is the
+# throw window, not the tracker.
+#
+# Report split by ball speed -- 8, 14 and 20 never blended (CLAUDE.md).
+
+defaults:
+  # Sized for a 12 m gate at 20 m/s: 12 + 8.5, rounded up. B11/B12 override it
+  # downward because they run against the 3.4 m gate, where 6.0 already leaves
+  # 2.6 m of margin against a measured 0.15 m shortfall -- and because their
+  # whole purpose is to be geometrically identical to the flown B02/B03.
+  # RAISE THIS WITH THE GATE: a 20 m gate needs 30.0, not 22.0.
+  offset_forward_m: 22.0
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 3
+
+runs:
+  # ── the question ───────────────────────────────────────────────────────
+  - id: B08
+    description: "Head-on 20 m/s, true hit — the target case"
+    speed_mps: 20.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+    # The ball must SPAWN OUTSIDE the oracle range and fly into it. Spawning
+    # inside the range would hand the tracker a detection it never had to
+    # acquire, which is the easiest way to accidentally prove the thing you set
+    # out to test. "Outside" is not enough on its own, though: the oracle stays
+    # muted for spawn_dead_s (~0.27 s) after spawn, during which the ball flies
+    # 5.4 m and the drone closes another ~1.4 m, so a ball spawned 3 m outside
+    # a 12 m gate is already 2 m INSIDE it before the oracle may speak. Hence
+    # the offset rule in the header and offset_forward_m 22.0 from `defaults`.
+
+  - id: B09
+    description: "20 m/s near miss 0.5 m — inside threat radius, must dodge"
+    speed_mps: 20.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.5
+    expect_dodge: true
+
+  - id: B10
+    description: "20 m/s wide miss 1.5 m — outside threat radius, must NOT dodge"
+    speed_mps: 20.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 1.5
+    expect_dodge: false
+    repeats: 2
+    # The false-dodge check has only ever been run at 8 m/s (B07, 0/12). A
+    # faster ball crosses the frame sooner and its early track is worse
+    # conditioned, so a longer-ranged sensor buying more warning could also buy
+    # more opportunity to fire wrongly. Anything other than 0 here is a
+    # regression that no 20 m/s success rate compensates for.
+
+  # ── continuity: the same harness against results we already have ───────
+  - id: B11
+    description: "14 m/s dead-centre — B03 geometry; fidelity gate at range 3.4"
+    speed_mps: 14.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+    offset_forward_m: 6.0     # exactly B03, so the two are comparable
+
+  - id: B12
+    description: "8 m/s dead-centre — B02 geometry; the working case must stay working"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+    offset_forward_m: 6.0     # exactly B02

@@ -1,0 +1,43 @@
+# hw_mono_flash.yaml - mono_flash_detector against the real OAK-D Lite.
+#
+# A NEW FILE, never an edit to mono_flash.yaml: --symlink-install makes the
+# installed copy a symlink into src/, so editing the "build" copy edits the
+# real config (CLAUDE.md sharp edge). mono_flash.yaml stays the reference.
+#
+# Usage:
+#   ros2 run huitzilin_perception mono_flash_detector --ros-args \
+#     --params-file .../params/mono_flash.yaml \
+#     --params-file .../params/hw_mono_flash.yaml -p use_sim_time:=false
+#
+# Only keys that DIFFER from the base belong here (test_hw_config.py asserts
+# every key in this file exists in the file it overlays; one that does not is
+# silently ignored by ROS 2 at runtime).
+#
+# THE VALUES BELOW ARE PLACEHOLDERS AND MUST BE REPLACED AT BRING-UP (S6-3).
+# They are written as an overlay now so that step is "paste the calibration"
+# rather than "work out where it goes".
+
+mono_flash_detector:
+  ros__parameters:
+    # depthai-ros topic names. Confirm against `ros2 topic list` with the
+    # camera attached -- the namespace depends on how the driver is launched,
+    # and a wrong name is silent: the node starts and simply never fires.
+    left_topic: "/oak/left/image_raw"
+    right_topic: "/oak/right/image_raw"
+
+    # READ FROM THE DEVICE. depthai's CalibrationHandler reports the real
+    # focal length, principal point and baseline for the actual unit; the base
+    # file's values come from a datasheet FOV and are nominal.
+    fx_px: 441.7
+    cx_px: 320.0
+    cy_px: 240.0
+    baseline_m: 0.075
+
+    # Measure on real bags: fit the spread of centroids for a stationary
+    # high-contrast target. The base value is a guess, and it propagates
+    # straight into the covariance the tracker will believe.
+    centroid_std_px: 0.3
+
+    # Tune against a real background, indoors and out. Sensor noise, rolling
+    # shutter and prop shadow all push this up; range pushes it down.
+    diff_threshold: 25.0

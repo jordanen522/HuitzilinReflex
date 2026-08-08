@@ -10,6 +10,7 @@ from huitzilin_perception.kalman import (
     GRAVITY_ENU,
     MultiHypothesisTracker,
     ProjectileTracker,
+    effective_min_updates,
 )
 
 RATE_HZ = 15.0  # detector centroid rate in sim
@@ -280,6 +281,108 @@ def test_clearance_straight_down_escape_becomes_horizontal():
                                  floor_m=1.0, descent_len_m=1.5)
     assert np.linalg.norm(d) == pytest.approx(1.0)
     assert d[2] == pytest.approx(0.0)
+
+
+# ── Escape BEARING, not just escape magnitude (2026-08-07) ────────────────
+# clamp_dodge_to_clearance is threat-blind by construction: it is handed a
+# direction, never a geometry. Where a re-aim had no horizontal bearing of its
+# own to keep -- a straight-down or straight-up escape -- it used to invent a
+# hardcoded [1, 0, 0]. That is a fixed compass bearing, so for a ball arriving
+# from the +x side the "escape" pointed straight INTO it. plan_dodge now passes
+# away_hint so the invented bearing is derived from the threat.
+
+from huitzilin_perception.kalman import (  # noqa: E402
+    horizontal_away_bearing,
+)
+
+# (name, projectile approach velocity ENU) -- descending, level and climbing
+# arrivals, from each of four compass bearings.
+_APPROACHES = [
+    (f"{name}_{tag}", np.array([vx, vy, vz]))
+    for name, vx, vy in (("from_+x", -12.0, 0.0), ("from_-x", 12.0, 0.0),
+                         ("from_+y", 0.0, -12.0), ("from_-y", 0.0, 12.0))
+    for tag, vz in (("descending", -4.0), ("level", 0.0), ("climbing", 3.0))
+]
+
+
+@pytest.mark.parametrize("name,approach", _APPROACHES)
+@pytest.mark.parametrize("h_scale", [1.0, 1e-3, 1e-7, 0.0])
+def test_reaimed_bearing_never_points_back_at_the_threat(name, approach,
+                                                         h_scale):
+    """The re-aimed escape must keep a component AWAY from the ball.
+
+    h_scale sweeps the horizontal part of the geometric escape down through the
+    1e-6 degeneracy branch to exactly zero, which is the case that used to
+    return [1, 0, 0]. The ball passes 0.4 m to one side, so "away" is a real
+    direction at every scale and the assertion has teeth.
+    """
+    # miss_vec is drone -> projectile at closest approach. Put the pass on the
+    # side the approach came from, so away_hint has an unambiguous answer.
+    unit_h = approach[:2] / np.linalg.norm(approach[:2])
+    miss_vec = np.array([-0.4 * unit_h[0], -0.4 * unit_h[1], -0.2])
+    hint = horizontal_away_bearing(miss_vec, approach)
+
+    # A steeply descending escape at the floor: no headroom, so the clamp must
+    # re-aim horizontally. h_scale controls how much bearing it has to keep.
+    direction = np.array([hint[0] * h_scale, hint[1] * h_scale, -1.0])
+    d = clamp_dodge_to_clearance(direction, altitude_m=1.0, floor_m=1.0,
+                                 descent_len_m=1.5, away_hint=hint)
+
+    assert np.linalg.norm(d) == pytest.approx(1.0)
+    assert d[2] >= -1e-9, "re-aim descended below the floor"
+    # The escape's horizontal component must oppose the ball's horizontal
+    # offset: miss_vec points drone -> ball, so a positive dot with -miss_vec
+    # is motion away from the pass side.
+    away = np.array([-miss_vec[0], -miss_vec[1]])
+    assert float(d[:2] @ away) > 0.0, (
+        f"{name} h_scale={h_scale}: escape {d} has no component away from a "
+        f"ball passing at {miss_vec}"
+    )
+
+
+@pytest.mark.parametrize("name,approach", _APPROACHES)
+def test_ceiling_reaim_of_a_vertical_escape_uses_the_threat_bearing(name,
+                                                                    approach):
+    """The other degenerate branch: escape straight UP, clamped by the fence.
+
+    _reaim had the same hardcoded bearing, and this path is reachable whenever
+    the ball passes below the drone -- which is half of all lofted throws.
+    """
+    unit_h = approach[:2] / np.linalg.norm(approach[:2])
+    miss_vec = np.array([-0.4 * unit_h[0], -0.4 * unit_h[1], -0.2])
+    hint = horizontal_away_bearing(miss_vec, approach)
+
+    # 4.5 m up against a 5 m ceiling: 0.5 m of headroom over a 1.5 m maneuver,
+    # so at most 1/3 of the escape may point up and the rest must be re-spent
+    # horizontally -- on a bearing this function has to invent.
+    d = clamp_dodge_to_clearance([0.0, 0.0, 1.0], altitude_m=4.5, floor_m=1.0,
+                                 descent_len_m=1.5, ceiling_m=5.0,
+                                 away_hint=hint)
+    assert np.linalg.norm(d) == pytest.approx(1.0)
+    assert d[2] == pytest.approx(0.5 / 1.5)
+    away = np.array([-miss_vec[0], -miss_vec[1]])
+    assert float(d[:2] @ away) > 0.0, (
+        f"{name}: ceiling re-aim {d} points back at a ball passing at {miss_vec}"
+    )
+
+
+def test_away_hint_defaults_to_the_legacy_bearing():
+    # Every result recorded before away_hint existed flew the hardcoded pick.
+    # Omitting the hint must reproduce it exactly, or the sweep is not a
+    # baseline any more.
+    d = clamp_dodge_to_clearance([0.0, 0.0, -1.0], altitude_m=1.0,
+                                 floor_m=1.0, descent_len_m=1.5)
+    np.testing.assert_allclose(d, [1.0, 0.0, 0.0], atol=1e-12)
+
+
+def test_away_bearing_falls_back_to_lateral_for_a_dead_overhead_pass():
+    # Ball passes exactly overhead: no horizontal offset to flee, so the
+    # bearing must come from the approach axis instead of collapsing to [1,0,0]
+    # by accident. Approach along -x => lateral is +/-y.
+    b = horizontal_away_bearing([0.0, 0.0, 0.35], [-12.0, 0.0, -4.0])
+    assert b[2] == pytest.approx(0.0)
+    assert np.linalg.norm(b) == pytest.approx(1.0)
+    assert abs(b[1]) == pytest.approx(1.0)
 
 
 def test_plan_dodge_applies_clearance_when_altitude_given():
@@ -588,3 +691,268 @@ def test_reset_drops_every_hypothesis():
     mht.reset()
     assert mht.n_tracks == 0
     assert mht.confirmed(min_updates=1) == []
+
+
+# ── per-measurement covariance ───────────────────────────────────────────────
+#
+# The fusion hook. A depth centroid is roughly round; a measurement
+# triangulated from a stereo pair is not -- its depth error grows as z^2 while
+# its lateral error grows as z, so at 10 m the same detection is centimetres
+# across and metres deep. Feeding that through an isotropic R either throws
+# away the good axis or trusts the bad one.
+
+
+def _R(sx, sy, sz):
+    return np.diag([sx ** 2, sy ** 2, sz ** 2])
+
+
+def test_default_path_is_unchanged_by_the_new_argument():
+    """The acceptance criterion for this change: R=None must reproduce the
+    old filter exactly, not merely closely."""
+    p0, v0 = [6.0, 0.0, 2.0], [-8.0, 0.0, 2.9]
+    a = ProjectileTracker(meas_std_m=0.15)
+    b = ProjectileTracker(meas_std_m=0.15)
+
+    ts = np.arange(6) / RATE_HZ
+    pts = ballistic_positions(p0, v0, ts)
+    for t, z in zip(ts, pts):
+        a.process(float(t), z)
+        b.process(float(t), z, None, None)
+
+    np.testing.assert_array_equal(a.state()[0], b.state()[0])
+    np.testing.assert_array_equal(a.state()[1], b.state()[1])
+
+
+def test_explicit_isotropic_covariance_matches_the_configured_one():
+    """Passing the same R the filter was built with must change nothing."""
+    p0, v0 = [6.0, 0.0, 2.0], [-8.0, 0.0, 2.9]
+    a = ProjectileTracker(meas_std_m=0.15)
+    b = ProjectileTracker(meas_std_m=0.15)
+
+    ts = np.arange(6) / RATE_HZ
+    pts = ballistic_positions(p0, v0, ts)
+    for t, z in zip(ts, pts):
+        a.process(float(t), z)
+        b.process(float(t), z, _R(0.15, 0.15, 0.15))
+
+    np.testing.assert_allclose(a.state()[0], b.state()[0], rtol=0, atol=1e-12)
+
+
+def test_seed_covariance_follows_the_seeding_measurement():
+    """A track seeded by a bearing-tight, range-loose detection must not start
+    out believing it is equally sure in all three axes."""
+    tr = ProjectileTracker()
+    tr.process(0.0, [10.0, 0.0, 2.0], _R(0.05, 0.05, 2.0))
+    P = tr._P
+    assert P[0, 0] == pytest.approx(0.05 ** 2)
+    assert P[2, 2] == pytest.approx(2.0 ** 2)
+
+
+def test_a_loose_axis_is_corrected_more_slowly_than_a_tight_one():
+    """The property that makes anisotropic fusion worth having: the filter
+    should move a long way on the axis it trusts and barely at all on the one
+    it does not."""
+    truth = np.array([10.0, 0.0, 2.0])
+    offset = np.array([1.0, 0.0, 1.0])       # same error in x and z
+
+    tr = ProjectileTracker()
+    tr.process(0.0, truth)
+    # x measured tightly, z measured loosely, same 1 m disagreement in each
+    tr.process(1.0 / RATE_HZ, truth + offset, _R(0.02, 0.15, 5.0))
+
+    pos, _ = tr.state()
+    moved_x = abs(pos[0] - truth[0])
+    moved_z = abs(pos[2] - truth[2])
+    assert moved_x > moved_z * 5.0, (
+        "tight axis moved %.4f, loose axis %.4f" % (moved_x, moved_z))
+
+
+def test_a_wrongly_shaped_covariance_is_refused():
+    """A (3,) variance vector broadcasts into S without complaint and yields a
+    filter that looks like it works. Fail loudly instead."""
+    tr = ProjectileTracker()
+    with pytest.raises(ValueError):
+        tr.process(0.0, [1.0, 2.0, 3.0], np.array([0.1, 0.1, 0.1]))
+
+
+def test_covariance_reaches_the_gate_through_the_associator():
+    """association_cost must use the measurement's own R, or the multi-
+    hypothesis gate would judge a fused measurement by the wrong window."""
+    tr = ProjectileTracker(meas_std_m=0.05)
+    stream = _ball_stream(5)
+    for t, z in stream[:4]:
+        tr.process(t, z)
+    t_next, z_next = stream[4]
+    far = np.asarray(z_next) + np.array([1.5, 0.0, 0.0])
+
+    tight = tr.association_cost(t_next, far, cov_cap=0.5625)
+    loose = tr.association_cost(t_next, far, cov_cap=0.5625, R=_R(3.0, 3.0, 3.0))
+    assert math.isinf(tight)          # 1.5 m off is not ours at 5 cm sigma
+    assert not math.isinf(loose)      # ... but it is, if the sensor is that bad
+
+
+# ── source tagging ───────────────────────────────────────────────────────────
+
+def test_source_tag_is_recorded_per_track():
+    tr = ProjectileTracker()
+    tr.process(0.0, [6.0, 0.0, 2.0], None, "mono")
+    tr.process(1.0 / RATE_HZ, [5.5, 0.0, 2.1], None, "depth")
+    assert tr.last_source == "depth"
+    assert tr.source_counts == {"mono": 1, "depth": 1}
+
+
+def test_untagged_measurements_leave_the_counts_empty():
+    """Every existing call site passes no tag; none of them should start
+    appearing in a fusion diagnostic as a phantom source."""
+    tr = ProjectileTracker()
+    for t, z in _ball_stream(3):
+        tr.process(t, z)
+    assert tr.source_counts == {}
+    assert tr.last_source is None
+
+
+def test_a_new_track_re_asks_which_sensor_built_it():
+    """Unlike the reseed totals, source counts are per-track: a reseeded track
+    built by a different sensor must not inherit the old tally."""
+    tr = ProjectileTracker(track_timeout_s=0.2)
+    tr.process(0.0, [6.0, 0.0, 2.0], None, "mono")
+    tr.process(5.0, [1.0, 0.0, 2.0], None, "depth")     # past the timeout
+    assert tr.source_counts == {"depth": 1}
+    assert tr.n_reseeds_timeout == 1                    # the reseed still counts
+
+
+def test_the_multi_hypothesis_tracker_forwards_covariance_and_source():
+    mht = MultiHypothesisTracker()
+    for t, z in _ball_stream(3):
+        mht.process(t, z, _R(0.05, 0.05, 1.0), "mono")
+    (track,) = mht.tracks
+    assert track.source_counts == {"mono": 3}
+    assert track._P[2, 2] > track._P[0, 0]   # the loose axis stayed loose
+
+
+# ── cue-gated confirmation ───────────────────────────────────────────────────
+
+def test_no_cue_ever_published_means_the_patrol_threshold():
+    """The inertness guarantee. Nothing publishes /threat/cue today, and until
+    something does this feature must be invisible."""
+    assert effective_min_updates(100.0, None, cue_timeout_s=2.0,
+                                 patrol_updates=3, alert_updates=2) == 3
+
+
+def test_a_fresh_cue_relaxes_confirmation():
+    assert effective_min_updates(10.5, 10.0, cue_timeout_s=2.0,
+                                 patrol_updates=3, alert_updates=2) == 2
+
+
+def test_the_alert_expires_on_its_own():
+    """A cue is not a mode switch. If the alert did not expire, one spurious
+    cue would leave the aircraft permanently easier to trigger."""
+    assert effective_min_updates(13.0, 10.0, cue_timeout_s=2.0,
+                                 patrol_updates=3, alert_updates=2) == 3
+
+
+def test_a_cue_from_the_future_does_not_wedge_the_alert():
+    """Sim time can rewind between launches; a negative age must read as
+    'no alert', not as 'inside the window forever'."""
+    assert effective_min_updates(5.0, 10.0, cue_timeout_s=2.0,
+                                 patrol_updates=3, alert_updates=2) == 3
+
+
+def test_a_zero_timeout_disables_the_alert_entirely():
+    assert effective_min_updates(10.0, 10.0, cue_timeout_s=0.0,
+                                 patrol_updates=3, alert_updates=2) == 3
+
+
+# ── vertical escape ──────────────────────────────────────────────────────────
+
+def _clamp(direction, alt, **kw):
+    kw.setdefault("floor_m", 1.0)
+    kw.setdefault("descent_len_m", 1.5)
+    return clamp_dodge_to_clearance(direction, alt, **kw)
+
+
+def test_default_still_refuses_to_flip_a_dodge_upward():
+    """The pre-existing contract. At 2 m AGL with a 1.0 m floor the downward
+    budget is 0.667, so a steeper descent is re-aimed horizontally -- and with
+    upward escape off it must NOT become a climb."""
+    out = _clamp([0.0, 0.3, -0.95], 2.0)
+    assert out[2] < 0.0
+    assert out[2] == pytest.approx(-0.667, abs=0.01)
+
+
+def test_upward_escape_is_refused_against_a_descending_threat():
+    """The FMEA rule, now evaluated rather than assumed: climbing into a ball
+    that is coming down on us trades a ground strike for a hit."""
+    out = _clamp([0.0, 0.3, -0.95], 1.2, allow_upward=True,
+                 threat_descending=True, ceiling_m=5.0)
+    assert out[2] <= 0.0
+
+
+def test_upward_escape_is_taken_when_the_floor_blocks_the_dodge():
+    """The case it exists for: no room underneath, and the ball is not coming
+    down on us, so go over it instead of settling for horizontal-only."""
+    out = _clamp([0.0, 0.3, -0.95], 1.2, allow_upward=True,
+                 threat_descending=False, ceiling_m=5.0)
+    assert out[2] > 0.0
+    assert np.linalg.norm(out) == pytest.approx(1.0)
+
+
+def test_a_climb_is_clamped_by_the_fence_ceiling():
+    """FENCE_ACTION 1 turns a breach into an RTL, so a dodge that busts the
+    fence has ended the flight even if it cleared the ball. At 4.5 m under a
+    5 m ceiling only 0.5 m of the 1.5 m maneuver may point up."""
+    out = _clamp([0.0, 0.0, 1.0], 4.5, allow_upward=True,
+                 threat_descending=False, ceiling_m=5.0)
+    assert out[2] == pytest.approx(0.5 / 1.5, abs=0.01)
+    assert np.linalg.norm(out) == pytest.approx(1.0)
+
+
+def test_an_upward_escape_is_unclamped_when_no_ceiling_is_stated():
+    """Backwards compatibility: every recorded battery ran with no ceiling
+    argument at all, and those runs must be reproducible."""
+    out = _clamp([0.0, 0.0, 1.0], 4.9)
+    np.testing.assert_allclose(out, [0.0, 0.0, 1.0])
+
+
+def test_no_ceiling_headroom_means_no_climb_not_a_fence_breach():
+    """Squeezed from both sides: 0.2 m of floor headroom below, none at all
+    above. It must not climb, and must not spend more than the 0.2 m it has
+    -- but it should still use that 0.2 m rather than flattening out, since
+    every centimetre off the ball's line counts."""
+    out = _clamp([0.0, 0.3, -0.95], 1.2, allow_upward=True,
+                 threat_descending=False, ceiling_m=1.2)
+    assert out[2] <= 0.0                                   # never up
+    assert out[2] == pytest.approx(-0.2 / 1.5, abs=0.01)   # exactly the budget
+    assert np.linalg.norm(out) == pytest.approx(1.0)
+
+
+def test_plenty_of_floor_headroom_still_descends():
+    """The clamp only fires when it must. High above the floor, a downward
+    escape is the fastest-opening one and must survive untouched even with
+    upward escape enabled."""
+    out = _clamp([0.0, 0.3, -0.95], 5.0, allow_upward=True,
+                 threat_descending=False, ceiling_m=5.0)
+    assert out[2] < 0.0
+
+
+def test_plan_dodge_reads_the_descending_test_off_the_geometry():
+    """A ball thrown level from ahead is still falling under gravity by the
+    time it arrives, so plan_dodge must work that out itself rather than
+    trusting a caller-supplied flag."""
+    p_proj, v_proj = [6.0, 0.0, 2.0], [-14.0, 0.0, 0.0]
+    p_drone, v_drone = [0.0, 0.0, 2.0], [0.0, 0.0, 0.0]
+    plan = plan_dodge(p_proj, v_proj, p_drone, v_drone,
+                      altitude_m=2.0, floor_m=1.0, descent_len_m=1.5,
+                      allow_upward=True, ceiling_m=5.0)
+    assert np.linalg.norm(plan.direction) == pytest.approx(1.0)
+
+
+def test_plan_dodge_defaults_leave_the_direction_exactly_as_before():
+    p_proj, v_proj = [6.0, 0.3, 2.4], [-14.0, 0.0, -1.0]
+    p_drone, v_drone = [0.0, 0.0, 2.0], [1.0, 0.0, 0.0]
+    old = plan_dodge(p_proj, v_proj, p_drone, v_drone,
+                     altitude_m=2.0, floor_m=1.0, descent_len_m=1.5)
+    new = plan_dodge(p_proj, v_proj, p_drone, v_drone,
+                     altitude_m=2.0, floor_m=1.0, descent_len_m=1.5,
+                     allow_upward=False, ceiling_m=None)
+    np.testing.assert_array_equal(old.direction, new.direction)
