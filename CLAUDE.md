@@ -77,6 +77,26 @@ A timeout of `0.0` in `supervisor.yaml` disables that watch; `cmd_vel` ships
 disabled because position-mode patrol publishes no ROS setpoint stream to
 watch. See the sharp edge below.
 
+Week 6 lane — the 20 m/s push (all default-off or sim-only; the ≤8 m/s path is unchanged):
+```bash
+# Synthetic far-range sensor. detector is REPLACED, never run alongside it.
+ros2 launch huitzilin_perception week6_oracle.launch.py \
+  with_patrol:=true detection_range_m:=12.0
+./scripts/run_dodge_battery.sh week6      # B08-B10 at 20 m/s, B11/B12 continuity
+```
+**`detection_range_m` is an INPUT, not a result.** A dodge scored under the oracle is a
+claim about the tracker, trigger and airframe *given* a sensor with that reach — never
+evidence such a sensor exists. Quote the range beside every number, and run the fidelity
+gate first (`detection_range_m:=3.4` must reproduce the measured 0/17 at 14 m/s and the
+78/78 shape at 8 m/s) before believing anything it says about 20 m/s.
+
+New levers, all shipping OFF so every recorded result stays reproducible:
+`evade_accel_ff_mps2` (0.0 = today's velocity-only setpoint; >0 adds an acceleration
+feedforward on `/cmd/evade_accel`), `allow_upward_escape` (false), `alert_min_track_updates`
+(inert until something publishes `/threat/cue`). `evade_rate_hz` in `bridge.yaml` is the
+one change that is on by default: the bridge now sends a dodge on receipt instead of
+waiting up to 100 ms for its 10 Hz watchdog tick.
+
 Unit tests: `./scripts/run_tests.sh` (both packages; forwards pytest args).
 `.github/workflows/tests.yml` runs the ROS-free subset on every push.
 Preflight: `./scripts/preflight_check.sh` (SITL) · `./scripts/preflight_hw.sh` (hardware;
@@ -120,6 +140,11 @@ Full frame table and TF tree: `docs/frames.md`.
 - **`RTL_ALT` is centimetres; `FENCE_ALT_MAX` is metres.** `hw_frame.parm` pins `RTL_ALT 400` (4 m) under the 5 m ceiling, because ArduPilot's 15 m default would make a fence-breach RTL climb through the fence it is answering.
 - **`supervisor_node` reports no faults while disarmed.** Half the watched topics are legitimately silent on the bench. Faults are gated on `armed`, and no fault path can reach EVADE — that is asserted over all states × faults × `armed`, not by inspection. (EVADE *is* reachable disarmed via the threat edge, but commands nothing; pinned by `test_disarmed_threat_reaches_evade_but_commands_nothing`.)
 - **A supervisor watch on a topic nothing publishes is a permanent fault.** `_age` reads a never-seen topic as infinitely stale — correctly, since that is how a publisher which died before its first message is caught — so an *unpublished* topic is indistinguishable from a dead one. A timeout of `0.0` in `supervisor.yaml` is the only way to say "this configuration does not produce that topic". `cmd_vel_timeout_s` ships `0.0`: `patrol.yaml` runs `mode: "position"`, where `patrol_node` sends setpoints over its own MAVLink connection and never creates the `/huitzilin/cmd_vel` publisher. Watching it drove `SETPOINT_STALL → FAILSAFE → LOITER → RTL_LAND` one second after every arm. Set it to `1.0` only alongside `mode: "velocity"`.
+- **`oracle_detector` and `detector` must never run together.** Both publish
+  `/threat/centroid`, so the tracker would get two uncorrelated views of one ball.
+  `week6_oracle.launch.py` never includes `week3_perception`, so there is no detector to
+  forget to disable; it also pins `with_supervisor:=false`, because it publishes no
+  `/oak/points` for `supervisor.yaml` to watch.
 - **`ECC/` at repo root** is an unrelated plugin marketplace (untracked). Ignore it.
 
 ## Measured nulls — do not re-run
@@ -138,7 +163,26 @@ cloud mis-registration, and "2 m/s² is a hard limit" (the airframe does ~3 m/s�
 
 **Never cite the PSC_ACC_XY / WPNAV_ACCEL / ANGLE_MAX experiment** — it is invalid.
 `--defaults` does not override `eeprom.bin`, and those parameter names do not exist in
-this build (it is `ATC_ANGLE_MAX`).
+this build.
+
+**The real parameter table, fetched 2026-08-06** (read-only inventory of all 1382 params
+from a throwaway SITL in its own directory; nothing was set, no `eeprom.bin` was touched).
+This replaces guesswork about what the shaping limits are actually called:
+
+| Name | Value | Note |
+|---|---|---|
+| `ATC_ANGLE_MAX` | **30** | **DEGREES in this build, not centidegrees.** `param set ATC_ANGLE_MAX 45`, never 4500. Permits g·tan(30°) = 5.66 m/s². |
+| `PSC_ANGLE_MAX` | 0 | 0 = "use ATC_ANGLE_MAX", so the position controller has the full 30°. |
+| `PSC_JERK_NE` | **5** | m/s³, horizontal. The XY→NE rename is why `PSC_JERK_XY` "does not exist". |
+| `PSC_JERK_D` | 5 | m/s³, vertical — bounds a thrust-pop escape the same way. |
+| `PSC_ACC_XY`, `WPNAV_ACCEL`, `ANGLE_MAX`, `PSC_VELXY_P` | ABSENT | confirmed against the full table |
+
+**`PSC_JERK_NE` is the strongest untested candidate for the dodge-authority limit.** At
+5 m/s³ the controller needs 5.66/5 = **1.13 s** to reach the acceleration the tilt ceiling
+already permits — four times the whole 0.18–0.29 s tca window. That is the shape the
+measurements show: escape displacement fitting a *ramp* at ~2 m/s² average, and unchanged
+when `dodge_speed_mps` went 1.5→4.0 (a bigger velocity error meets the same shaping). It
+was never tested because the name was wrong, not because it was refuted.
 
 Why range levers keep failing: tca is bounded by *sensing*, not by thresholds or by
 dodge authority. Only a real camera with more range or frame rate moves it.
