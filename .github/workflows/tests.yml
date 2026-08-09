@@ -4,6 +4,15 @@ name: tests
 # yaml or pymavlink, so it runs on a stock ubuntu runner with no ROS 2 and no
 # colcon build.
 #
+# THIS IS A DENY-LIST ON PURPOSE -- collect both test/ directories, then
+# subtract. It used to name all 14 ROS-free modules explicitly, and five new
+# ones (test_oracle, test_mono_flash, test_cmd_router, test_setpoint_masks,
+# test_projectile_model) were added to the tree without being added here, so
+# they ran only on the Dell and never on push. An allow-list fails SILENTLY --
+# a module nobody lists simply never runs, and CI stays green while covering
+# less than you think. A deny-list fails LOUDLY: a new module that needs ROS
+# breaks the run until it is named below, which is the error you want.
+#
 # NOT run here, and not an oversight:
 #   test_evasion_params  - imports evasion_node, which imports rclpy.
 # test_clock_guard IS run: clock_guard imports rclpy.clock only inside
@@ -38,17 +47,6 @@ jobs:
           PYTHONPATH: src/huitzilin_sim:src/huitzilin_perception
         run: |
           python -m pytest -q \
-            src/huitzilin_sim/test/test_supervisor.py \
-            src/huitzilin_sim/test/test_clock_guard.py \
-            src/huitzilin_sim/test/test_parm_file.py \
-            src/huitzilin_sim/test/test_hw_config.py \
-            src/huitzilin_sim/test/test_frames.py \
-            src/huitzilin_sim/test/test_mav_state.py \
-            src/huitzilin_perception/test/test_kalman.py \
-            src/huitzilin_perception/test/test_ballistics.py \
-            src/huitzilin_perception/test/test_cloud_geometry.py \
-            src/huitzilin_perception/test/test_background_map.py \
-            src/huitzilin_perception/test/test_throw_window.py \
-            src/huitzilin_perception/test/test_stage_profiler.py \
-            src/huitzilin_perception/test/test_payload.py \
-            src/huitzilin_perception/test/test_hw_params.py
+            src/huitzilin_sim/test \
+            src/huitzilin_perception/test \
+            --ignore=src/huitzilin_perception/test/test_evasion_params.py
