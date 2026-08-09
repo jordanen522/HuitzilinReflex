@@ -1,0 +1,64 @@
+# hz20_r26.0.yaml - HOVER, 20 m/s, at the reach the NAMED HARDWARE actually buys.
+#
+# 26 m is not a wish. It is the derived reach of the sensor docs/week6_result.md
+# already selects as the fix: AR0234 global-shutter mono + 10 mm M12
+# (e-con See3CAM_24CUG), 0.300 mrad/px, 11.1 px on the ball at 21 m.
+#
+# WHY THIS CELL EXISTS, AND WHY IT IS NOT A REPEAT OF hz20_r21.0
+#
+# Every oracle cell flown before 2026-08-09 ran at oracle_rate_hz 14.5 - the
+# OAK-D Lite's frame rate. So the whole 20 m/s campaign asked the NEW sensor's
+# range question while wearing the OLD sensor's frame rate. The AR0234 runs
+# 60 fps. Range and rate are separate axes and only one had ever been varied.
+#
+# Frame rate is not cosmetic here, it is the dominant term in the dead time.
+# The oracle's limiter emits only on a Gazebo pose tick, and SceneBroadcaster
+# runs a 60 Hz grid, so delivered = 60 / ceil(60 / requested):
+#     requested 14.5 Hz  ->  60/ceil(4.14) = 60/5 = 12.0 Hz delivered
+# That matches the 12.05 Hz measured from track_age_s at 3 updates across 90
+# flown hover throws (0.165-0.169 s for two intervals). The "29% of frames
+# produce no accepted update" was never a dropped detection - it is the
+# limiter rounding onto the pose grid. rate_hz 0.0 disables the limiter and
+# delivers the full 60 Hz, which is exactly the AR0234's frame rate.
+#
+# THE COMMIT COSTS (updates x frame interval), AND ONLY THE SECOND FACTOR HAS
+# EVER BEEN TOUCHED. In hz20_r21.0 every save came from a 3-update commit and
+# all six 4-or-more-update commits failed - the extra updates cost 0.24-0.41 s
+# of track age and ate the tca that the range had bought. At 60 Hz a 6-update
+# commit costs 0.083 s, less than a 3-update commit costs today.
+#
+# SCORE ON THE COUNTERFACTUAL, never on `dodged` or `success`.
+# saved = counterfactual_min_m <= 0.30 m AND actual_min_m > 0.30 m.
+# A cell with no on-course throws measured NOTHING - never report it as 0/N.
+#
+# detection_range_m is an INPUT. This cell is a claim about the tracker,
+# trigger and airframe GIVEN a 26 m / 60 fps sensor. It is not evidence that
+# such a sensor exists - it is evidence about a sensor already costed at
+# $99 and 26 g, lighter than the 61 g OAK-D Lite it replaces.
+#
+# RUN IT AS (hover is mandatory - patrol cannot deliver a hit at range):
+#   export ORACLE_RATE=0.0 TAG=hw26 RANGE=26.0 DODGE_SPEED=3.0 RESP_OUT=1
+#   export CONFIG=$HOME/huitzilin_ws/lab/config/hz20_r26.0.yaml
+#   export BATTERY_ARGS="-p hover_mode:=true"
+#   bash lab/bin/lab_cell.sh
+#
+# VERIFY BEFORE BELIEVING: first_det_range_m in the CSV must match 26.0 to
+# ~0.2 m. offset_forward_m 34.0 keeps the ball outside the gate at spawn
+# (21.0 m used 28.0 and delivered an honest 20.67-20.91 m). If throws come
+# back SKIPPED, suspect the throw window, never the tracker - a skip is
+# absence of data, never a failed dodge.
+
+defaults:
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 10
+
+runs:
+  - id: H26
+    description: "20 m/s head-on dead-centre, HOVER, oracle range 26.0 m at 60 Hz, dodge_speed_mps 3.0"
+    speed_mps: 20.0
+    offset_forward_m: 34.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
