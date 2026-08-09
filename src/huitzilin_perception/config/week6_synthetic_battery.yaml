@@ -45,11 +45,19 @@
 #
 # THE COST, which is why the rule is not just "make it huge". dodge_battery.py
 # sets t_flight = offset_forward_m / speed_mps and gates the throw on a
-# straight patrol leg of t_flight + throw_window_margin_s. Offset 22.0 at
-# 20 m/s needs a 1.40 s leg against the ~1.05 s the 12 m loop supplies
-# routinely. A leg the loop cannot supply returns "SKIPPED, not thrown" -- no
-# data, not a failed dodge. If B08-B10 come back mostly skipped, that is the
-# throw window, not the tracker.
+# straight patrol leg of t_flight + throw_window_margin_s, so offset 22.0 at
+# 20 m/s needs a 1.40 s leg. That is affordable on this loop but not free:
+# cruise is ESTIMATED FROM ODOM, not taken from patrol_state's nominal
+# cruise_speed_ms (patrol flies position mode, so WPNAV_SPEED governs --
+# dodge_battery.py measured 3.49 m/s max, 2.09 m/s median). Over ~12 m
+# waypoint spacing a full leg is therefore ~3.4 s, and the gate waits up to
+# throw_window_timeout_s (40 s) for a phase with enough left, so 1.40 s
+# should pass routinely.
+#
+# A leg the loop cannot supply returns "SKIPPED, not thrown" -- no data, not a
+# failed dodge. If B08-B10 come back mostly skipped, suspect the throw window
+# and the waypoint spacing, never the tracker. Raising the offset raises this
+# cost linearly: a 20 m gate at offset 30.0 needs 1.80 s.
 #
 # Report split by ball speed -- 8, 14 and 20 never blended (CLAUDE.md).
 
