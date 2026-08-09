@@ -30,9 +30,32 @@ range and frame rate — not latency, not thresholds, not dodge authority. Laten
 averages 95–115 ms against a 150 ms budget, and the ~25% of dodges that exceed it
 cost no outcomes, because time-to-closest-approach at commit is 0.18–0.29 s.
 
-That distinction is the project's main result, and it names its own next
-experiment: bringing up the real OAK-D Lite in Week 6 is the measurement that
-settles whether the envelope moves.
+Those conditions matter and travel with the numbers: **patrol** flight, the real
+depth detector at its measured ~3.4 m reach, scored on `dodged`.
+
+## What Week 6 answered
+
+That distinction named its own next experiment, and the sim lane ran it ahead of the
+hardware — with a synthetic sensor whose reach was a settable *input*, not a result.
+The answer is a law, not a rate:
+
+**A save is a threshold in time-to-closest-approach at ~0.83 s, and the threshold
+does not depend on ball speed.** Only the range needed to buy that time does:
+
+    range = speed × (tca + 0.177)        # 0.177 s = pipeline + commit, hover
+
+Measured over 60 throws in hover at two ball speeds, the second pre-registered with
+its own negative control. Every maneuver-side lever is refuted — the vehicle already
+over-delivers on the velocity step it is commanded, and 4x the dodge command buys
+1.095x the escape.
+
+So the honest ceiling of the aircraft as built is **~3.5 m/s**, not 14. A 20 m/s ball
+needs ~21 m of reach on a 7 cm target, and the part that buys it is an **AR0234
+global-shutter mono with a 10 mm M12 lens** — $99, 26 g, *lighter* than the 61 g
+OAK-D Lite it replaces. The deficit was angular resolution, never headline range.
+
+Full derivation, every refuted lever, and the rejected alternatives:
+[`docs/week6_result.md`](docs/week6_result.md).
 
 ## Layout
 
@@ -90,6 +113,7 @@ aircraft arms, accepts takeoff, and produces no lift).
 | [`docs/state_machine.md`](docs/state_machine.md) | Supervisor states and transitions |
 | [`docs/requirements.md`](docs/requirements.md) | REQ-01 … REQ-16 and non-goals |
 | [`docs/SAFETY_CASE.md`](docs/SAFETY_CASE.md) | FMEA, geofence/RTL, kill-switch, operating rules |
+| [`docs/week6_result.md`](docs/week6_result.md) | **The 20 m/s answer**: the tca threshold law, every refuted lever, the sensor that closes the gap |
 | [`docs/weeks_5_9_plan.md`](docs/weeks_5_9_plan.md) | Weeks 5–9, hardware and software lanes |
 
 ## Safety

@@ -55,9 +55,14 @@ def test_the_detector_overlay_does_not_re_open_a_measured_null():
 
 
 def test_the_evasion_overlay_does_not_re_open_a_measured_null():
-    """min_track_updates 3->2 and dodge_speed_mps 1.5->4.0 are EVASION
-    parameters. Asserting them absent from hw_detector.yaml was vacuous -- they
-    could never appear there -- and left hw_evasion.yaml, the file that can
-    actually re-open them, unguarded. Its own header lists both as nulls."""
+    """min_track_updates and dodge_speed_mps are EVASION parameters. Asserting
+    them absent from hw_detector.yaml was vacuous -- they could never appear
+    there -- and left hw_evasion.yaml, the file that can actually re-open them,
+    unguarded. Its own header lists both as nulls.
+
+    dodge_speed_mps's null was re-established in Week 6 on better evidence: a
+    within-session hover A/B at 1.5 / 3.0 / 6.0 (4x the command buys 1.095x the
+    escape). The older 1.5->4.0 patrol sweep is superseded and should not be
+    cited, but the guard this test enforces is unchanged."""
     for null in ("min_track_updates", "dodge_speed_mps"):
         assert null not in hw_evasion()

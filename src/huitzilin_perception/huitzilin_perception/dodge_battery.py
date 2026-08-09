@@ -756,11 +756,15 @@ class DodgeBatteryNode(Node):
         dodged = len(events) > 0
         latency_ms = round(events[0]["latency_s"] * 1000.0, 1) if dodged else None
         # tca at the moment the dodge committed: how much time the manoeuvre
-        # actually had. This is the binding constraint on dodge authority, not
-        # dodge_speed_mps and not latency — measured across every dodge on
-        # record, tca is 0.07-0.28 s while latency spans 51-271 ms, and at
-        # 1.5 m/s that window buys 0.10-0.42 m against a 0.30 m hit radius.
-        # Recorded per run so a change meant to buy TIME can be judged on time.
+        # actually had. This is the binding constraint, not dodge_speed_mps and
+        # not latency — and Week 6 measured it as a THRESHOLD rather than a
+        # trend. In hover, on a true hit course, no throw below tca 0.79 s was
+        # ever saved and none above 0.83 s was ever lost, at 14 AND 20 m/s
+        # independently. Effective escape goes as 0.295*tca^3.15, so the old
+        # linear reading of this window ("at 1.5 m/s it buys 0.10-0.42 m") is
+        # wrong and must not be restored: escape collapses far faster than
+        # linearly as tca shrinks. Recorded per run so a change meant to buy
+        # TIME can be judged on time.
         tca_s = round(events[0]["tca_s"], 3) if dodged else None
         trigger_miss_m = (round(events[0]["miss_m"], 3)
                           if dodged and "miss_m" in events[0] else None)

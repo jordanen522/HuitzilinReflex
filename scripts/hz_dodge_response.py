@@ -1,8 +1,25 @@
 #!/usr/bin/env python3
 """
 hz_dodge_response.py — escape displacement vs. time since the dodge command,
-from Gazebo ground truth. Answers whether the airframe's rise time, rather than
-the trigger, is what a dodge is losing to.
+from Gazebo ground truth. Written to answer whether the airframe's rise time,
+rather than the trigger, is what a dodge is losing to.
+
+THAT QUESTION IS CLOSED, AND THE ANSWER IS NO (Week 6). Dataflash over a
+controlled WP_ACC sweep shows achieved velocity change EXCEEDING commanded in
+every arm (0.93 vs 0.81, 1.26 vs 1.17, 1.47 vs 0.97 m/s) — the vehicle
+over-delivers on what it is asked for. Rise time, tilt, jerk and WP_ACC are all
+retired together. The binding term is sensor reach. See docs/week6_result.md.
+
+TWO CAVEATS BEFORE TRUSTING A NUMBER FROM THIS SCRIPT:
+  * Run it in HOVER (-p hover_mode:=true on the battery). Under patrol the
+    baseline extrapolation below is a straight line through a vehicle that is
+    tracking waypoints, so the vehicle's own curvature lands in the escape term:
+    median fit residual 0.0112 m patrol vs 0.0011 m hover, and at matched tca
+    0.385 s the two disagree 19x. Patrol escape figures are inflated 3-20x.
+  * Escape displacement is not fit to referee a parameter on its own — two
+    IDENTICAL control arms once drifted 1.58x apart. A/B within one session, fly
+    the control twice, and prefer the dataflash velocity step (PSCN/PSCE DVN/DVE
+    vs VN/VE), which compares command against achievement inside a single dodge.
 
 Escape is measured against the drone's OWN pre-dodge motion, not a fixed point:
 patrol cruise (~5.25 m/s) otherwise dominates raw displacement. The baseline

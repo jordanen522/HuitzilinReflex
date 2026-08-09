@@ -2,14 +2,24 @@
 # the sweep format; procedure is docs/dodge_battery_runbook.md.
 #
 # BOTH AXES BELOW ARE MEASURED NULLS — do not re-run this grid expecting a
-# result. min_track_updates 3->2 and dodge_speed_mps 1.5->4.0 were each swept
-# over a full battery and the baseline won on every column (see CLAUDE.md).
-# tca is bounded by detection range and frame rate, not by these knobs.
+# result. min_track_updates 3->2 was swept over a full battery and the baseline
+# won on every column (see CLAUDE.md). tca is bounded by detection range and
+# frame rate, not by these knobs.
 #
-# Note the mismatch, which is deliberate: the recorded dodge_speed_mps null runs
-# to 4.0, while the grid below stops at 2.5. This file is the format example, not
+# dodge_speed_mps is also a null, but the EVIDENCE changed in Week 6 and the old
+# reason is no longer safe to cite. The original 1.5->4.0 sweep was scored on
+# PATROL escape displacement, which extrapolates a straight line through a
+# vehicle that is tracking waypoints — the vehicle's own curvature lands in the
+# escape term (median fit residual 0.0112 m patrol vs 0.0011 m hover). It is
+# superseded by a within-session HOVER A/B at 1.5 / 3.0 / 6.0: 4x the command
+# buys 1.095x the escape, saves flat at 6/10, 6/9, 6/10, escape ~ command^0.065.
+# The conclusion survives; quote the hover A/B for it, never the patrol sweep.
+#
+# Note the mismatch, which is deliberate: the values actually refuted are 3.0 and
+# 6.0, while the grid below stops at 2.5. This file is the format example, not
 # the experiment that produced the null. Do not "re-derive" the null from a run
-# of this grid — it does not contain the value that was refuted.
+# of this grid — it does not contain the values that were refuted, and running it
+# under patrol would re-derive it with the instrument that was the problem.
 parameters:
   min_track_updates: [2, 3]
   dodge_speed_mps: [1.5, 2.5]

@@ -277,6 +277,19 @@ envelope is bounded by *sensing* — detection range and frame rate — not by t
 dodge authority. Every range-side lever is a measured null. S6-4 is what moves the
 envelope, and it is a headline result, not a checkbox.
 
+> **The sim lane got there first (2026-08-08/09).** A synthetic far-range sensor
+> (`oracle_detector`, settable `detection_range_m`) let the envelope be measured *without*
+> waiting on the FC swap, and it came back as a law rather than a rate: a save is a
+> **threshold in tca at ~0.83 s**, independent of ball speed, and in hover
+> `range = speed × (tca + 0.177)`. Every maneuver-side lever is refuted — the vehicle
+> already over-delivers on the velocity step it is commanded. Full result and derivation:
+> `docs/week6_result.md`.
+>
+> That does **not** retire S6-4; it re-scopes it. What the real OAK-D still owes is the
+> measurement of its own reach and rate — the two inputs the law consumes. The sim lane
+> supplies the arithmetic those inputs feed, and a *prediction* to falsify: at the ~3.4 m
+> reach already measured, the maximum dodgeable ball speed in hover is **~3.5 m/s**.
+
 ## HW lane — Week 6
 
 - [ ] **H6-1 — Payload wiring.** `hardware_bringup.md` §7. *Blocked by: S6-1 (write the
@@ -340,11 +353,19 @@ envelope, and it is a headline result, not a checkbox.
             the ball is only actually detected across ~3 m. The real number that matters
             is where a ball-sized object stops producing a usable cluster, not where the
             gate sits.
-      - [ ] Recompute the reaction envelope from the measured pair. The Week 4 arithmetic
-            to redo: ball crosses ~3 m at 14 m/s in 0.22 s; three track updates at
-            ~14.5 Hz cost 0.21 s; pipeline 0.08 s; clearing the 0.30 m hit radius in the
-            remaining ~0.08 s needs 3.6 m/s of *instantaneous* escape. Substitute the
-            measured range and rate and state where the new speed ceiling lands.
+      - [ ] Recompute the reaction envelope from the measured pair. **The arithmetic is
+            no longer a sketch to redo — it is a measured law**, so substitute and read
+            off: in hover `tca = range / speed − 0.177`, a save needs **tca ≥ ~0.83 s**,
+            therefore `max ball speed = range / (0.83 + 0.177)`. State where the ceiling
+            lands and compare it against the sim lane's ~3.5 m/s prediction at 3.4 m.
+            Two corrections to carry in: the 0.177 s overhead is **hover only** (a
+            patrolling drone closes faster and needs ~1.7x the range), and the three-track
+            confirm inside it scales with frame rate, so a faster real camera shortens it
+            directly — re-derive 0.177 s rather than reusing it.
+            **The superseded Week 4 sketch — "clearing 0.30 m in the remaining ~0.08 s
+            needs 3.6 m/s of *instantaneous* escape" — must not be quoted again.** It
+            treated escape as linear in time; the measured curve is `0.295·tca^3.15`, and
+            escape is not the binding term at all.
       - [ ] Re-examine `min_track_updates: 3` **only in light of this measurement.**
             3→2 is a recorded measured null in sim — but it was null *at 15 Hz*. If the
             real rate differs materially, the null does not transfer, and this is the
@@ -473,6 +494,14 @@ Not covered by `hardware_bringup.md` — written here.
       - Recommendation: **(a) as the primary metric, (c) logged alongside as diagnostic,
         never as the headline.** Whatever is chosen, REQ-08 still binds: report split by
         ball speed, never blended.
+      - **The harder half of this decision, surfaced by Week 6: real throws have no
+        counterfactual.** Sim scores a save as `counterfactual_min_m ≤ 0.30 m AND
+        actual_min_m > 0.30 m` — a throw that was never on a hit course measured *nothing*
+        about dodging, and scoring it against a dead-centre worst case reads a working
+        system as broken. Outdoors there is no counterfactual to compute, so the
+        equivalent discipline has to be moved **into the throw**: aim on a verified hit
+        course and record the aim, or the real "save rate" is a fire rate wearing a save
+        rate's name. Budget for this — it is a rig problem, not a scoring-code problem.
       - [ ] Refactor `dodge_battery.py` so the scoring backend is swappable, rather than
             forking a second harness that will drift from the first.
 - [ ] **S7-5 — Set real-flight geometry parameters.** `dodge_floor_m` (sim 1.0),
@@ -526,7 +555,11 @@ autonomous patrol → evasion, and each stage is a gate, not a formality.
 - [ ] **S8-2 — Real throw campaign.** Scored by the S7-4 method.
       - [ ] Report **split by ball speed, never blended** (REQ-08, `CLAUDE.md`). The sim
             result is 78/78 at ≤ 8 m/s, 0/17 at 14 m/s, 0/12 false dodges — the real
-            report must be legible against that shape.
+            report must be legible against that shape. Quote its conditions with it:
+            **patrol** flight, the **real depth detector** at its measured ~3.4 m, scored
+            on `dodged`. The Week 6 oracle table in `docs/week6_result.md` is a *different
+            experiment* (hover, synthetic sensor, scored on the counterfactual) and the
+            two must never be merged or compared row-for-row.
       - [ ] Include a false-dodge battery. A dodge that fires at nothing is a failure
             mode with its own count, and sim scored it separately for that reason.
       - [ ] Sweep toward the speed ceiling S6-4 predicted, and record where it actually
@@ -547,13 +580,24 @@ autonomous patrol → evasion, and each stage is a gate, not a formality.
 - [ ] **S8-5 — Do not re-run the measured nulls.** `CLAUDE.md` lists them and calls
       re-running them "the most common way to lose a session here": `roi_max_range_m`
       5→8, `min_track_updates` 3→2, `cluster_min_points` 5→3, 320×240 @ 30 Hz,
-      `dodge_speed_mps` 1.5→4.0, the multi-hypothesis tracker, the command path,
-      vertical escape. **Exception:** any null whose sim derivation depended on the
+      the multi-hypothesis tracker, the command path, vertical escape — and, added by
+      Week 6, `evade_accel_ff_mps2`, the `WP_ACC` sweep, the `PSC_JERK_NE` sweep, and
+      `dodge_speed_mps` (within-session hover A/B at 1.5 / 3.0 / 6.0: **4x the command
+      buys 1.095x the escape**, saves flat at 6/10, 6/9, 6/10). That last one supersedes
+      the old "`dodge_speed_mps` 1.5→4.0" entry, which was scored on patrol escape
+      displacement and was never safe evidence; the conclusion survives, the evidence for
+      it changed. **Exception:** any null whose sim derivation depended on the
       15 Hz rate or the ~3 m range is re-openable *if and only if* S6-4 measured
       something materially different — and the commit must say which measurement
-      re-opened it. Never cite the PSC_ACC_XY / WPNAV_ACCEL / ANGLE_MAX experiment; it
-      is invalid (`--defaults` does not override `eeprom.bin`, and the real parameter is
-      `ATC_ANGLE_MAX`).
+      re-opened it. The maneuver-side nulls get **no** such exception: they are refuted
+      by achieved-vs-commanded velocity in the dataflash, which does not depend on the
+      sensor at all.
+      Never cite the PSC_ACC_XY / WPNAV_ACCEL / ANGLE_MAX experiment; it is invalid
+      (`--defaults` does not override `eeprom.bin`, and the real parameter is
+      `ATC_ANGLE_MAX`, in **degrees** in this build). But note the correction: of those
+      three, only `PSC_ACC_XY` and `ANGLE_MAX` are genuinely absent — **`WPNAV_ACCEL`
+      exists, renamed `WP_ACC`**, it bounds every GUIDED velocity setpoint, and it has
+      since been swept properly and refuted.
 
 ## Week 8 DoD
 
@@ -597,8 +641,12 @@ runs.
       order. The plan's own dependency map is the outline.
 - [ ] **S9-3 — Sim-vs-real post-mortem.** The intellectual payload of the project.
       - [ ] The headline comparison: sim said the envelope was bounded by sensing at
-            ~3 m and 15 Hz. State what the real sensor measured and whether the
-            prediction held.
+            ~3 m and 15 Hz, and Week 6 sharpened that into a falsifiable number —
+            **max dodgeable ball speed = range / 1.007 in hover**, giving ~3.5 m/s at the
+            3.4 m measured in sim. State what the real sensor measured, what speed that
+            predicts, and whether the prediction held. A miss is as publishable as a hit;
+            what is not acceptable is re-deriving the law from the real data to make it
+            agree.
       - [ ] Which measured nulls transferred to hardware and which did not, and why.
       - [ ] Which sim-only artefacts wasted time and would be caught earlier next time
             (the `ros_gz_bridge` 15 Hz ceiling, the saturated bag library, the
@@ -617,7 +665,13 @@ runs.
 - [ ] **S9-6 — Final vlog.** The project is vlogged weekly
       (`HuitzilinReflex_v2.md`). The strongest available story is not "the drone dodges"
       — it is that Week 4 predicted the envelope was bounded by sensing, named the
-      measurement that would settle it, and Week 6 went and made that measurement.
+      measurement that would settle it, and Week 6 went and made that measurement: in
+      sim, ahead of the hardware, with a synthetic sensor whose reach was an input. It
+      ends with a threshold law, a named part that closes the gap (`docs/week6_result.md`),
+      and a list of levers that were pulled and did nothing. **Say the negative results
+      out loud** — every maneuver-side parameter refuted, 4x the dodge command buying
+      1.095x the escape. A project that knows precisely why it cannot do the thing is a
+      better story than one that quietly reframes the thing.
 
 ## Week 9 DoD
 

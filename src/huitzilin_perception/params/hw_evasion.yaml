@@ -8,11 +8,21 @@
 # measured that later looks like one somebody did.
 #
 # Do not re-open any measured null here: roi_max_range_m 5->8,
-# min_track_updates 3->2, cluster_min_points 5->3, dodge_speed_mps 1.5->4.0,
+# min_track_updates 3->2, cluster_min_points 5->3, dodge_speed_mps,
 # the multi-hypothesis tracker, vertical escape. Each was measured over a full
 # battery with the baseline best on every column. The one exception is a null
 # whose sim derivation rested on the 15 Hz rate or the ~3 m range, and only
 # once S6-4 has measured something materially different.
+#
+# dodge_speed_mps gets NO such exception, and the reason is worth stating because
+# it is the one a hardware session is most tempted to re-open. Its null does not
+# rest on the sim's range or rate at all: a within-session hover A/B at
+# 1.5 / 3.0 / 6.0 found 4x the command buys 1.095x the escape (escape ~
+# command^0.065), and the dataflash shows achieved velocity change EXCEEDING
+# commanded in every arm of a separate WP_ACC sweep. The vehicle over-delivers on
+# what it is asked for, so asking louder is not the missing piece — on real
+# hardware either. Cite the hover A/B, never the older patrol 1.5->4.0 sweep,
+# which was scored on an instrument now known to inflate escape 3-20x.
 
 evasion:
   ros__parameters:

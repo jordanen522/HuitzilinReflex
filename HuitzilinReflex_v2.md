@@ -104,6 +104,14 @@ flight staged late. Each week has a Definition of Done.
 | 3 — Perception pipeline ✔ (2026-07-15) | Simulated OAK-D depth, synthetic scenarios, detection node, 17-bag labeled library + regression harness; held-out test recall 100% |
 | 4 — Evasion logic & KF in the loop ✔ (2026-07-27) | Predictive KF + multi-hypothesis tracker + dodge trigger; closed detection → intercept → velocity-spike → alarm (mocked GPIO) over a 7-scenario battery. All four DoD criteria met; result is a capability envelope bounded by sensing, so Week 6 is what moves it |
 
+The Week 6 **sim** lane has since answered the project's central question ahead of the
+hardware. A save is a **threshold in time-to-closest-approach at ~0.83 s**, independent of
+ball speed; in hover `range = speed × (tca + 0.177)`; every maneuver-side lever is
+refuted. As built, the maximum dodgeable ball speed is **~3.5 m/s**, and 20 m/s needs
+~21 m of reach on a 7 cm ball — which an **AR0234 global-shutter mono + 10 mm M12** buys
+for $99 and 26 g, *lighter* than the OAK-D Lite it replaces. The deficit was angular
+resolution, never headline range. Full derivation: `docs/week6_result.md`.
+
 **Remaining** — planned in detail, hardware lane vs software lane, in
 `docs/weeks_5_9_plan.md`:
 
@@ -115,7 +123,9 @@ flight staged late. Each week has a Definition of Done.
   GPIO; depthai-ros streaming over verified USB-3; characterize real stereo noise into
   the KF model; Remote ID / registration. *DoD:* live depth frames + payload triggers
   within latency budget. (The `payload_node` software landed early, in the Week 5 SW
-  lane — Week 6 is the hardware it drives.)
+  lane — Week 6 is the hardware it drives.) The Week 6 **sim** lane is separate and
+  already closed (`docs/week6_result.md`); what this bullet still owes is the real
+  sensor's own reach and rate, the two inputs that law consumes.
 - **Week 7 — HITL & tethered hover.** Real H743 + simulated world; tethered/netted hover.
   *DoD:* stable tethered hover with full stack running and logging.
 - **Week 8 — Incremental real flight.** Manual hover → autonomous patrol → evasion, only
