@@ -1,0 +1,56 @@
+
+════════════════════════════════════════════════════════════════════════
+  HuitzilinReflex Week 4 — Dodge Battery
+  Battery: week4_battery.yaml   Sweep: —   hit_radius: 0.3 m   window: 5.0 s
+  target: patrolling (aim error mixes lead error with geometry)
+  lead_target: True   spawn_latency_s: 0.216 s   odom_lag_s: 0.129 s   (total lead dead time 0.345 s)
+  throw window: enforced   margin: 0.3 s   wait: 40.0 s   cruise est: 5.26 m/s (floor 95%)
+════════════════════════════════════════════════════════════════════════
+
+  Combo                        ID Rep Dodge  MinDist  Lat ms  OK  Note
+  ────────────────────────────────────────────────────────────────────
+  baseline                    B01   0  True    0.997    74.0   ✓  clean dodge
+  baseline                    B01   1 False    0.992    None   ✗  no dodge fired | OFF-TARGET: spec miss 0.00 m, measured 0.99 m — aiming, not trigger
+  baseline                    B01   2  True    0.905   104.0   ✓  clean dodge
+  baseline                    B02   0  True    0.557   249.0   ✓  clean dodge
+  baseline                    B02   1  True    0.381    75.0   ✓  clean dodge
+  baseline                    B02   2  True    0.578   100.0   ✓  clean dodge
+  baseline                    B03   0  True    0.175   255.0   ✗  dodged but min_dist 0.18 <= hit_radius
+  baseline                    B03   1 False     0.13    None   ✗  no dodge fired
+  baseline                    B03   2  True    0.154   111.0   ✗  dodged but min_dist 0.15 <= hit_radius
+  baseline                    B04   0  True    0.815   143.0   ✓  clean dodge
+  baseline                    B04   1  True    0.351    56.0   ✓  clean dodge
+  baseline                    B04   2  True    0.382   150.0   ✓  clean dodge
+  baseline                    B05   0  True    0.509   175.0   ✓  clean dodge
+  baseline                    B05   1  True    0.553    67.0   ✓  clean dodge
+  baseline                    B05   2  True    0.503   132.0   ✓  clean dodge
+  baseline                    B06   0  True    0.449   121.0   ✓  clean dodge
+  baseline                    B06   1  True    0.476    94.0   ✓  clean dodge
+  baseline                    B06   2  True    0.435   187.0   ✓  clean dodge
+  baseline                    B07   0 False    1.362    None   ✓  correctly ignored
+  baseline                    B07   1 False    1.347    None   ✓  correctly ignored
+
+  [baseline]
+    dodge success: 14/18  (78%)
+    false dodges:  0/2
+    -- on-target runs only (valid dodge measurement) --
+    dodge success: 14/17  (82%)
+    false dodges:  0/2
+    off-target: 1/20 throws (> 0.5 m from spec)
+    aim error (no-dodge runs): mean 0.35 m, max 0.99 m
+    spawn dead time: mean 0.210 s, max 0.241 s (sim) — declared spawn_latency_s 0.216 s, undeclared -0.006 s = 0.03 m of aim error at 5.26 m/s
+    miss (no-dodge, signed mean): along -0.20 (max |0.64|), cross +0.57 (max |1.32|), vert -0.35 (max |0.71|)
+      miss: ball vs drone in the BALL's frame (+along = ball went past, +cross = ball passed left, +vert = above)
+    lead (no-dodge, signed mean): along +0.70 (max |1.15|), cross +0.12 (max |0.17|), vert -0.02 (max |0.04|)
+      lead: aim point vs drone in the DRONE's frame (+along = over-led, +cross = aimed left of its track)
+    ball speed (measured horiz): mean 8.43 m/s, range 4.02-14.27
+    flight launch->closest approach: mean 0.810 s vs assumed 0.739 s (excess +0.071 s)
+    first detection at: mean 3.65 m, range 0.95-6.70 m (roi_max_range_m bounds this; if the mean sits well inside the gate, the gate is not the limit)
+    track at commit: 3.3 updates (range 3-6), age 0.161 s (0.132-0.396) => 14.4 Hz of accepted ball detections
+    detection consistency gap: mean +0.81 m (-2.19 to +4.29) between first detection and the track that matured — should sit near zero now that the ball keeps its own hypothesis
+      live hypotheses at commit: 1.6 mean (max 3) — anything at max_tracks means the false-positive stream is saturating the associator
+    tca at dodge commit: mean 0.181 s, range 0.070-0.430 s => 0.11-0.65 m of travel ASSUMING dodge_speed_mps=1.5 (not read back; scales linearly for a swept row) vs 0.3 m hit radius
+    latency: mean 131 ms, max 255 ms (budget 150 ms)
+
+  COMPLETE (no hard gate; judge rates above)
+════════════════════════════════════════════════════════════════════════

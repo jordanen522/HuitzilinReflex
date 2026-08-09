@@ -1,0 +1,12 @@
+combo,id,rep,expect_dodge,dodged,latency_ms,min_dist_m,spec_miss_m,aim_err_m,off_target,steady,success,error,note,skipped,window_s,needed_window_s,spawn_dead_s,miss_along_m,miss_cross_m,miss_vert_m,lead_along_m,lead_cross_m,lead_vert_m,ball_speed_mps,t_flight_assumed_s,flight_to_ca_s,tca_s,trigger_miss_m,first_det_range_m,track_updates,track_age_s,n_hypotheses
+baseline,S08,0,True,True,20.0,0.251,0.0,0.251,False,True,False,False,dodged but min_dist 0.25 <= hit_radius,False,2.184,1.05,0.285,-0.012,-0.174,-0.181,0.339,0.142,-0.026,7.958,0.75,0.786,0.25,0.627,6.909,3,0.154,1
+baseline,S08,1,True,True,19.0,0.333,0.0,0.333,False,True,True,False,clean dodge,False,2.166,1.05,0.256,-0.113,-0.2,-0.242,0.537,0.15,-0.038,8.042,0.75,0.799,0.29,0.292,6.808,3,0.17,1
+baseline,S08,2,True,True,15.0,0.585,0.0,0.585,False,True,True,False,clean dodge,False,1.189,1.05,0.267,-0.295,-0.201,-0.463,1.186,0.123,0.005,8.0,0.75,0.854,0.31,0.618,6.867,3,0.169,1
+baseline,S14,0,True,False,,0.26,0.0,0.26,False,True,False,False,no dodge fired,False,2.168,1.014,0.278,-0.17,-0.157,-0.118,0.542,0.107,-0.021,14.074,0.714,0.738,,,6.686,,,
+baseline,S14,1,True,True,21.0,0.297,0.0,0.297,False,True,False,False,dodged but min_dist 0.30 <= hit_radius,False,2.039,1.014,0.239,-0.175,-0.176,-0.163,0.647,0.116,-0.04,14.15,0.714,0.746,0.18,0.629,6.974,4,0.237,1
+baseline,S14,2,True,True,19.0,0.233,0.0,0.233,False,True,False,False,dodged but min_dist 0.23 <= hit_radius,False,1.19,1.014,0.269,-0.104,-0.204,-0.044,0.187,0.189,-0.023,14.074,0.714,0.716,0.07,0.188,6.808,3,0.155,2
+baseline,S20,0,True,True,20.0,0.255,0.0,0.255,False,True,False,False,dodged but min_dist 0.25 <= hit_radius,False,2.172,1.05,0.264,-0.122,-0.188,-0.121,0.556,0.14,-0.038,19.894,0.75,0.77,0.13,0.454,6.707,3,0.138,1
+baseline,S20,1,True,True,18.0,0.282,0.0,0.282,False,True,False,False,dodged but min_dist 0.28 <= hit_radius,False,2.168,1.05,0.249,-0.208,-0.158,-0.105,0.64,0.099,-0.022,19.895,0.75,0.77,0.09,0.392,6.663,3,0.171,1
+baseline,S20,2,True,True,22.0,0.234,0.0,0.234,False,True,False,False,dodged but min_dist 0.23 <= hit_radius,False,2.166,1.05,0.232,-0.027,-0.189,-0.135,0.602,0.135,-0.025,19.894,0.75,0.777,0.11,0.2,6.816,3,0.159,1
+baseline,S20N,0,False,False,,1.339,1.5,0.161,False,True,True,False,correctly ignored,False,2.166,1.05,0.254,-0.061,1.329,-0.153,0.734,0.106,-0.023,20.0,0.75,0.783,,,6.734,,,
+baseline,S20N,1,False,False,,1.324,1.5,0.176,False,True,True,False,correctly ignored,False,2.034,1.05,0.248,-0.195,1.305,-0.116,0.69,0.134,-0.021,20.0,0.75,0.773,,,6.888,,,

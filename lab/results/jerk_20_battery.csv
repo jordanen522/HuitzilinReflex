@@ -1,0 +1,7 @@
+combo,id,rep,expect_dodge,dodged,latency_ms,min_dist_m,spec_miss_m,aim_err_m,off_target,steady,success,error,note,skipped,window_s,needed_window_s,spawn_dead_s,miss_along_m,miss_cross_m,miss_vert_m,lead_along_m,lead_cross_m,lead_vert_m,ball_speed_mps,t_flight_assumed_s,flight_to_ca_s,tca_s,trigger_miss_m,first_det_range_m,track_updates,track_age_s,n_hypotheses
+baseline,J01,0,True,False,,0.497,0.0,0.497,False,True,False,False,no dodge fired,False,10.98,1.05,0.186,-0.034,-0.397,0.298,-0.669,-0.499,-0.006,7.83,0.75,0.649,,,4.169,,,
+baseline,J01,1,True,True,100.0,0.314,0.0,0.314,False,True,True,False,clean dodge,False,2.179,1.05,0.199,-0.126,-0.183,-0.222,0.501,0.136,-0.043,7.892,0.75,0.789,0.19,0.524,1.188,3,0.132,1
+baseline,J01,2,True,True,86.0,0.507,0.0,0.507,False,True,True,False,clean dodge,False,2.046,1.05,0.195,-0.241,-0.143,-0.422,0.97,0.061,-0.047,8.381,0.75,0.835,0.45,0.477,0.578,3,0.132,1
+baseline,J01,3,True,True,115.0,0.834,0.0,0.834,False,True,True,False,clean dodge,False,2.051,1.05,0.207,-0.378,-0.181,-0.721,1.666,0.057,-0.002,7.942,0.75,0.916,0.25,0.141,2.263,3,0.132,1
+baseline,J01,4,True,True,115.0,0.469,0.0,0.469,False,True,True,False,clean dodge,False,2.056,1.05,0.237,-0.191,-0.155,-0.399,0.873,0.083,-0.052,8.213,0.75,0.836,0.19,0.103,,3,0.132,1
+baseline,J01,5,True,False,,0.601,0.0,0.601,True,True,False,False,"no dodge fired | OFF-TARGET: spec miss 0.00 m, measured 0.60 m — aiming, not trigger",False,2.046,1.05,0.219,-0.276,-0.202,-0.495,1.152,0.109,-0.036,8.054,0.75,0.852,,,4.202,,,

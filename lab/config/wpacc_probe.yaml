@@ -1,0 +1,30 @@
+# wpacc_probe.yaml — one scenario, repeated, as an instrument for dodge AUTHORITY.
+#
+# Identical geometry to jerk_probe.yaml (8 m/s head-on, B02, offset 6.0) so the
+# two sweeps are directly comparable. Only repeats differ: 8 rather than 6,
+# because the jerk sweep lost 3 of 12 curves to patrol-turn artifacts and was
+# left with n = 4/4/2, too few to separate arms.
+#
+# THE PARAMETER UNDER TEST: WP_ACC (m/s^2, range 0.50-5.00, default 2.5).
+# ModeGuided::pva_control_start() initialises the horizontal position
+# controller with wp_nav->get_wp_acceleration_mss(), so WP_ACC is the
+# acceleration limit on EVERY GUIDED velocity setpoint -- which is what a
+# dodge is. This is the renamed WPNAV_ACCEL; the old centimetre-era name is
+# why the parameter inventory recorded it ABSENT.
+#
+# Outcome is the wrong metric here (8 m/s is saturated at 78/78). The
+# measurement is the ESCAPE CURVE from hz_dodge_response.py.
+defaults:
+  offset_forward_m: 6.0
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 8
+
+runs:
+  - id: W01
+    description: "8 m/s head-on, B02 geometry — dodge fires reliably; the escape curve is the measurement"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true

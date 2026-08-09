@@ -1,0 +1,36 @@
+# accelfix_s08.yaml - ONE scenario, S08, many repeats.
+#
+# Purpose: A/B the cmd_router zero-accel fix in flight. Pre-fix, a fresh zero
+# Accel was latched on every dodge, selecting MASK_VEL_ACCEL on
+# MAV_FRAME_BODY_OFFSET_NED, which ArduCopter discards whole - so the vehicle
+# never moved (28/28 trials at 0.00 m in the bench probe).
+#
+# Run at RANGE=12.0, NOT the 3.4 m fidelity-gate range. At 3.4 m the S08 dodge
+# commits with tca 0.02-0.13 s, where even a perfectly working dodge buys
+# ~0.01-0.02 m and the fix cannot show itself. At 12.0 m S08 commits at
+# tca 0.26-0.48 s, where the measured response curve predicts 0.10-0.25 m.
+#
+# Pre-fix baseline at this range, same geometry, 6 throws:
+#   sweep_r12.0  min_dist 0.272 0.144 0.337   success 1/3
+#   postfix_r12.0 min_dist 0.235 0.568 0.287  success 1/3
+#
+# S20N is deliberately absent: the fix changes only whether a committed
+# setpoint lands, never when the trigger fires, so the false-dodge rate cannot
+# move by construction. Spending throws on it would prove nothing.
+#
+# detection_range_m is an INPUT. Nothing here is evidence such a sensor exists.
+
+defaults:
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 12
+
+runs:
+  - id: S08
+    description: "8 m/s head-on - B02 geometry; the case Week 4 measured 78/78"
+    speed_mps: 8.0
+    offset_forward_m: 6.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true

@@ -1,0 +1,33 @@
+# jerk_probe.yaml — one scenario, repeated, as an instrument for dodge AUTHORITY.
+#
+# NOT a capability battery. It exists to feed hz_dodge_response.py a steady
+# supply of fired dodges so escape displacement vs time can be compared across
+# PSC_JERK_NE settings.
+#
+# Why B02 geometry (8 m/s head-on) and not 14 or 20: the measurement is the
+# ESCAPE CURVE, not the outcome, so the scenario must reliably FIRE a dodge.
+# At 14 m/s under the real detector the dodge never fires (0/17), which would
+# yield an empty CSV and read as "jerk made no difference".
+#
+# Why outcome is the wrong metric here: at 8 m/s the baseline already dodges
+# 78/78, so success rate is saturated and cannot show an improvement. Escape
+# displacement is continuous and has no ceiling.
+#
+# Lives outside the repo (~/hz_lab/config) on purpose: --symlink-install makes
+# an installed config a symlink into src/, so a probe config shipped in the
+# tree would dirty the regression path (CLAUDE.md).
+
+defaults:
+  offset_forward_m: 6.0
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 6
+
+runs:
+  - id: J01
+    description: "8 m/s head-on, B02 geometry — dodge fires reliably; the escape curve is the measurement"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true

@@ -1,0 +1,50 @@
+
+════════════════════════════════════════════════════════════════════════
+  HuitzilinReflex Week 4 — Dodge Battery
+  Battery: week6_synthetic_battery.yaml   Sweep: —   hit_radius: 0.3 m   window: 5.0 s
+  target: patrolling (aim error mixes lead error with geometry)
+  lead_target: True   spawn_latency_s: 0.216 s   odom_lag_s: 0.129 s   (total lead dead time 0.345 s)
+  throw window: enforced   margin: 0.3 s   wait: 40.0 s   cruise est: 5.26 m/s (floor 95%)
+════════════════════════════════════════════════════════════════════════
+
+  Combo                        ID Rep Dodge  MinDist  Lat ms  OK  Note
+  ────────────────────────────────────────────────────────────────────
+  baseline                    B08   0 False    0.342    None   ✗  no dodge fired
+  baseline                    B08   1 False    0.491    None   ✗  no dodge fired
+  baseline                    B08   2 False    0.503    None   ✗  no dodge fired | OFF-TARGET: spec miss 0.00 m, measured 0.50 m — aiming, not trigger
+  baseline                    B09   0 False    0.404    None   ✗  no dodge fired
+  baseline                    B09   1 False    0.446    None   ✗  no dodge fired
+  baseline                    B09   2 False    0.426    None   ✗  no dodge fired
+  baseline                    B10   0 False    1.243    None   ✓  correctly ignored
+  baseline                    B10   1 False    1.263    None   ✓  correctly ignored
+  baseline                    B11   0  True    0.124    19.0   ✗  dodged but min_dist 0.12 <= hit_radius
+  baseline                    B11   1 False     0.14    None   ✗  no dodge fired
+  baseline                    B11   2  True    0.108    19.0   ✗  dodged but min_dist 0.11 <= hit_radius
+  baseline                    B12   0  True    0.515    19.0   ✓  clean dodge
+  baseline                    B12   1  True    0.251    16.0   ✗  dodged but min_dist 0.25 <= hit_radius
+  baseline                    B12   2 False    0.545    None   ✗  no dodge fired | OFF-TARGET: spec miss 0.00 m, measured 0.55 m — aiming, not trigger
+
+  [baseline]
+    dodge success: 1/12  (8%)
+    false dodges:  0/2
+    -- on-target runs only (valid dodge measurement) --
+    dodge success: 1/10  (10%)
+    false dodges:  0/2
+    off-target: 2/14 throws (> 0.5 m from spec)
+    aim error (no-dodge runs): mean 0.27 m, max 0.55 m
+    spawn dead time: mean 0.276 s, max 0.319 s (sim) — declared spawn_latency_s 0.216 s, undeclared +0.060 s = 0.31 m of aim error at 5.26 m/s
+    miss (no-dodge, signed mean): along -0.04 (max |0.29|), cross +0.19 (max |1.18|), vert -0.29 (max |0.45|)
+      miss: ball vs drone in the BALL's frame (+along = ball went past, +cross = ball passed left, +vert = above)
+    lead (no-dodge, signed mean): along +0.92 (max |1.46|), cross +0.18 (max |0.21|), vert -0.02 (max |0.04|)
+      lead: aim point vs drone in the DRONE's frame (+along = over-led, +cross = aimed left of its track)
+    ball speed (measured horiz): mean 16.10 m/s, range 8.00-20.21
+    flight launch->closest approach: mean 0.930 s vs assumed 0.881 s (excess +0.049 s)
+    first detection at: mean 3.22 m, range 3.06-3.39 m (roi_max_range_m bounds this; if the mean sits well inside the gate, the gate is not the limit)
+    track at commit: 3.0 updates (range 3-3), age 0.161 s (0.154-0.170) => 12.4 Hz of accepted ball detections
+    detection consistency gap: mean +1.05 m (+0.88 to +1.34) between first detection and the track that matured — should sit near zero now that the ball keeps its own hypothesis
+      live hypotheses at commit: 1.0 mean (max 1) — anything at max_tracks means the false-positive stream is saturating the associator
+    tca at dodge commit: mean 0.055 s, range 0.010-0.120 s => 0.01-0.18 m of travel ASSUMING dodge_speed_mps=1.5 (not read back; scales linearly for a swept row) vs 0.3 m hit radius
+    latency: mean 18 ms, max 19 ms (budget 150 ms)
+
+  COMPLETE (no hard gate; judge rates above)
+════════════════════════════════════════════════════════════════════════

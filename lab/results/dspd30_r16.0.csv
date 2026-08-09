@@ -1,0 +1,11 @@
+combo,id,rep,expect_dodge,dodged,latency_ms,min_dist_m,spec_miss_m,aim_err_m,off_target,steady,success,error,note,skipped,window_s,needed_window_s,spawn_dead_s,miss_along_m,miss_cross_m,miss_vert_m,lead_along_m,lead_cross_m,lead_vert_m,ball_speed_mps,t_flight_assumed_s,flight_to_ca_s,tca_s,trigger_miss_m,first_det_range_m,track_updates,track_age_s,n_hypotheses
+baseline,D30,0,True,True,18.0,0.418,0.0,0.418,False,True,True,False,clean dodge,False,0.0,1.871,0.292,0.174,-0.214,0.315,-0.198,-0.29,0.265,14.076,1.571,1.561,0.97,0.611,15.957,3,0.165,1
+baseline,D30,1,True,True,18.0,0.498,0.0,0.498,False,True,True,False,clean dodge,False,0.0,1.871,0.317,0.051,0.282,0.407,-0.014,-0.45,0.252,14.0,1.571,1.548,1.1,0.499,15.933,3,0.164,1
+baseline,D30,2,True,True,24.0,0.355,0.0,0.355,False,True,True,False,clean dodge,False,0.0,1.871,0.259,0.007,0.34,0.101,0.264,-0.236,0.167,14.074,1.571,1.578,0.92,0.157,15.84,4,0.232,1
+baseline,D30,3,True,True,18.0,0.264,0.0,0.264,False,True,False,False,dodged but min_dist 0.26 <= hit_radius,False,0.0,1.871,0.3,0.05,0.238,0.103,0.143,-0.189,0.138,13.926,1.571,1.572,0.77,0.355,15.793,5,0.331,1
+baseline,D30,4,True,True,20.0,0.25,0.0,0.25,False,True,False,False,dodged but min_dist 0.25 <= hit_radius,False,0.0,1.871,0.284,-0.064,0.048,-0.237,0.041,0.031,-0.256,14.0,1.571,1.568,0.81,0.47,15.858,5,0.304,1
+baseline,D30,5,True,True,20.0,0.516,0.0,0.516,False,True,True,False,clean dodge,False,0.0,1.871,0.307,-0.145,0.463,-0.177,0.41,0.243,-0.31,14.23,1.571,1.551,0.85,0.552,15.798,3,0.152,1
+baseline,D30,6,True,True,19.0,0.191,0.0,0.191,False,True,False,False,dodged but min_dist 0.19 <= hit_radius,False,0.0,1.871,0.269,0.005,0.187,0.039,0.126,-0.139,0.059,14.08,1.571,1.571,0.71,0.567,15.883,6,0.411,1
+baseline,D30,7,True,True,18.0,0.512,0.0,0.512,False,True,True,False,clean dodge,False,0.0,1.871,0.246,0.166,-0.192,0.444,0.519,-0.318,0.229,14.075,1.571,1.541,0.82,0.075,15.878,4,0.236,1
+baseline,D30,8,True,True,18.0,0.465,0.0,0.465,False,True,True,False,clean dodge,False,0.0,1.871,0.306,-0.11,0.336,-0.302,0.27,-0.256,-0.267,14.0,1.571,1.573,0.85,0.226,15.828,4,0.233,1
+baseline,D30,9,True,True,20.0,0.554,0.0,0.554,False,True,True,False,clean dodge,False,0.0,1.871,0.269,0.277,-0.14,0.458,0.565,-0.371,0.258,13.926,1.571,1.543,0.84,0.74,15.94,4,0.247,1

@@ -1,0 +1,43 @@
+# hz20_r16.0.yaml - HOVER, 20 m/s, the headline cell. PRE-REGISTERED PREDICTION BELOW.
+#
+# The 14 m/s hover data (40 throws, 37 on a hit course, dodge_speed_mps 3.0)
+# showed a clean THRESHOLD, not a rate:
+#     tca <= 0.79 s -> 0 saved of 25
+#     tca >= 0.83 s -> 12 saved of 12   (no overlap)
+# Fit: delta = 0.295 * tca^3.15 crosses the 0.182 m median shortfall at 0.86 s.
+#
+# Escape displacement depends on time since the dodge command, not on ball
+# speed, so required tca should be SPEED-INDEPENDENT and only the range needed
+# to buy it should scale. This cell tests exactly that.
+#
+#   range 16 m -> tca 0.62 s -> BELOW the 0.83 s threshold -> PREDICT NO SAVE
+#                              (negative control - must fail for the model to hold)
+#
+# If both cells save, tca is not the governing variable and the 14 m/s fit was
+# coincidence. If neither saves, required tca grows with ball speed and the
+# escape curve is not speed-independent. Only the split confirms the model.
+#
+# HOVER: patrol is not running, so throw_window.py:95 short-circuits (no corner
+# to cross) and the lead is exact by construction. This is the only
+# configuration in which the ball has ever been on a true hit course.
+#
+# SCORE ON THE COUNTERFACTUAL, never on `dodged` or `success`.
+# saved = counterfactual <= 0.30 m AND actual > 0.30 m.
+#
+# detection_range_m is an INPUT. Nothing here is evidence such a sensor exists;
+# the real OAK-D Lite measured ~3.4 m.
+
+defaults:
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 10
+
+runs:
+  - id: H20
+    description: "20 m/s head-on dead-centre, HOVER, oracle range 16.0 m, dodge_speed_mps 3.0"
+    speed_mps: 20.0
+    offset_forward_m: 23.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true

@@ -1,0 +1,12 @@
+combo,id,rep,expect_dodge,dodged,latency_ms,min_dist_m,spec_miss_m,aim_err_m,off_target,steady,success,error,note,skipped,window_s,needed_window_s,spawn_dead_s,miss_along_m,miss_cross_m,miss_vert_m,lead_along_m,lead_cross_m,lead_vert_m,ball_speed_mps,t_flight_assumed_s,flight_to_ca_s,tca_s,trigger_miss_m,first_det_range_m,track_updates,track_age_s,n_hypotheses
+baseline,S08,0,True,True,19.0,0.314,0.0,0.314,False,True,True,False,clean dodge,False,2.178,1.05,0.255,-0.12,-0.18,-0.228,0.527,0.129,-0.024,7.831,0.75,0.803,0.05,0.408,4.813,3,0.169,2
+baseline,S08,1,True,False,,0.32,0.0,0.32,False,True,False,False,no dodge fired,False,2.165,1.05,0.245,-0.022,-0.182,-0.262,0.509,0.136,-0.024,8.0,0.75,0.807,,,4.822,,,
+baseline,S08,2,True,True,18.0,0.315,0.0,0.315,False,True,True,False,clean dodge,False,2.029,1.05,0.257,-0.06,-0.168,-0.259,0.545,0.118,-0.021,7.917,0.75,0.808,0.29,0.545,4.993,3,0.153,1
+baseline,S14,0,True,False,,0.27,0.0,0.27,False,True,False,False,no dodge fired,False,2.17,1.014,0.254,0.068,-0.174,-0.194,0.525,0.132,-0.038,14.08,0.714,0.754,,,4.867,,,
+baseline,S14,1,True,True,19.0,0.411,0.0,0.411,False,True,True,False,clean dodge,False,1.887,1.014,0.25,-0.183,-0.234,-0.284,1.22,0.088,0.0,14.0,0.714,0.787,0.09,0.141,4.722,3,0.169,1
+baseline,S14,2,True,True,20.0,0.243,0.0,0.243,False,True,False,False,dodged but min_dist 0.24 <= hit_radius,False,2.169,1.014,0.246,0.025,-0.153,-0.187,0.558,0.093,-0.033,13.926,0.714,0.755,0.09,0.186,4.866,3,0.169,1
+baseline,S20,0,True,True,19.0,0.188,0.0,0.188,False,True,False,False,dodged but min_dist 0.19 <= hit_radius,False,2.164,1.05,0.265,-0.034,-0.145,-0.115,0.466,0.143,-0.037,20.105,0.75,0.775,0.03,0.169,4.752,3,0.171,1
+baseline,S20,1,True,,,,,,,,False,True,spawn z=0.03 < 0.3,,,,,,,,,,,,,,,,,,,
+baseline,S20,2,True,,,,,,,,False,True,spawn z=0.03 < 0.3,,,,,,,,,,,,,,,,,,,
+baseline,S20N,0,False,,,,,,,,False,True,spawn z=0.03 < 0.3,,,,,,,,,,,,,,,,,,,
+baseline,S20N,1,False,,,,,,,,False,True,spawn z=0.03 < 0.3,,,,,,,,,,,,,,,,,,,

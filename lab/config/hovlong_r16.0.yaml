@@ -1,0 +1,52 @@
+# hovlong_r16.0.yaml - HOVER, long-tca leg of the escape curve.
+#
+# WHY THIS CELL EXISTS. Every conclusion in this project rests on an escape
+# curve fitted from patrol-mode probes: 0.0836 m at t=0.30, 0.2957 at 0.60,
+# 0.8281 at 1.00 (dodge_speed_mps 3.0). Measured in HOVER, where the
+# counterfactual extrapolation is exact, the same probe gives 0.0042 / 0.0943 /
+# 0.5238 -- 3-20x smaller. The two curves are indistinguishable below tca
+# ~0.5 s and differ by 4x above 0.9 s, so only a long-tca cell separates them.
+#
+# WHY HOVER IS TRUSTED HERE. Counterfactual fit residual is 0.0011 m in hover
+# against 0.0112 m in patrol (10x), and at MATCHED tca 0.385 s the two report
+# escape 0.0066 m (hover) vs 0.1268 m (patrol). A constant-velocity
+# extrapolation of a vehicle that is actually accelerating accrues ~0.5*a*t^2
+# ~ 0.08 m at 0.4 s for a 1 m/s^2 unmodelled term, which is the size of the
+# whole patrol signal. Hover has no unmodelled acceleration.
+#
+# HOVER IS NOT STRICTLY THE FAVOURABLE CASE - RETRACTED. The earlier claim that
+# hover must beat patrol (no cruise to cancel the escape) is contradicted by the
+# response probe: hover shows a real DEAD TIME, median displacement within
+# +/-1.2 mm out to t=0.20 s with the sign at a coin flip, where patrol moves
+# from the first sample. Mechanism NOT isolated. So a hover failure is not by
+# itself proof the patrol case fails; it is the clean measurement of the
+# hover case, which is the only case where the ball is on a true hit course.
+#
+# WHAT MAKES LONG RANGE MEASURABLE. throw_window.py:95 short-circuits when
+# patrol is idle ("no corner to cross, lead is exact"), so there is no
+# straight-leg requirement and no skip. Range 18 m in patrol was 9/10 skipped.
+#
+# tca = range/14 - 0.177 (overhead measured by lab_valrange.sh; with the drone
+# stationary the closing speed is the ball alone).
+#   range 16 m -> tca ~= 0.97 s.  pooled curve ~0.29 m (SAVE, marginal)
+#                                 hover  curve ~0.10 m (NO save)
+#
+# SCORE ON THE COUNTERFACTUAL, never on `dodged` or `success`.
+# saved = counterfactual <= 0.30 m AND actual > 0.30 m.
+#
+# detection_range_m is an INPUT. Nothing here is evidence such a sensor exists.
+
+defaults:
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 10
+
+runs:
+  - id: H14
+    description: "14 m/s head-on dead-centre, HOVER, oracle range 16.0 m, dodge_speed_mps 3.0"
+    speed_mps: 14.0
+    offset_forward_m: 22.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true

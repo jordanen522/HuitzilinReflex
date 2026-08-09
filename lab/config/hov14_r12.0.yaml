@@ -1,0 +1,56 @@
+# hov14_r12.0.yaml - HOVER-MODE cell. The first true-hit test ever run at long tca.
+#
+# WHY HOVER. Every long-range patrol cell has failed to put a ball on a hit
+# course: measured lead error is 96-98% ALONG-track and a systematic OVER-lead
+# of +1.88 m at 1.21 s of flight, +2.58 m at 1.50 s. Mechanism: the throw
+# window gate holds the throw until speed >= 0.95 * rolling-MAX cruise, so it
+# samples the drone at its instantaneous PEAK (~3.4 m/s), and the lead then
+# extrapolates that peak over 1.2-1.5 s during which the drone realizes
+# something near its median (~2.1 m/s). Excess (3.4-1.9) * t_flight reproduces
+# the measured over-lead to within 0.3 m at both ranges.
+#
+# hover_mode (dodge_battery.py:618, passed as -p hover_mode:=true, NOT a key in
+# this file) stops patrol and waits for the drone to be genuinely stationary
+# before aiming. Against a stationary target the lead is exact BY CONSTRUCTION,
+# so the counterfactual should land near 0.00 m - a real hit course. It also
+# short-circuits the throw window (throw_window.py:95, patrol_running False),
+# so there are no skips at any offset.
+#
+# HOVER IS THE MOST FAVOURABLE CASE, NOT THE FLIGHT CASE. In patrol the escape
+# is deviation from an extrapolated ~3.4 m/s cruise, and the cruise component
+# along the escape axis cancels part of it (kalman.py:741). Hovering there is
+# no cruise to cancel, so achieved escape is the full dodge command. Therefore:
+#   a FAILURE here is strong evidence the patrol case also fails (upper bound)
+#   a SUCCESS here is an upper bound only and does NOT prove the patrol case
+#
+# CLOSING SPEED IS THE BALL ALONE. With the drone stationary there is no
+# closure term, so tca = range / speed - overhead, using the overhead 0.177 s
+# measured by lab_valrange.sh. That is what makes long tca reachable at ranges
+# this harness can actually deliver.
+#
+# THE PREDICTION, from the escape curve at dodge_speed_mps 3.0 (0.30 m cleared
+# at tca ~= 0.60 s):
+#   range 12 m -> tca ~= 12/14 - 0.177 = 0.68 s -> escape ~0.38 m -> SAVE
+
+# The two cells are meant to DISAGREE. A rig that saves in both, or neither,
+# has not tested the threshold - it has tested something else.
+#
+# SCORE ON THE COUNTERFACTUAL, never on `dodged` or `success`.
+# saved = counterfactual <= 0.30 m AND actual > 0.30 m.
+#
+# detection_range_m is an INPUT. Nothing here is evidence such a sensor exists.
+
+defaults:
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 10
+
+runs:
+  - id: H14
+    description: "14 m/s head-on dead-centre, HOVER, oracle range 12.0 m, dodge_speed_mps 3.0"
+    speed_mps: 14.0
+    offset_forward_m: 18.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true

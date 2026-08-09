@@ -1,0 +1,125 @@
+[guard] baseline eeprom intact (entry)
+
+################ oracle detection_range_m = 21.0 ################
+[patrol-3] [INFO] [1786251679.302097392] [patrol]: patrol up: 4 WPs, mode=position, running=False
+[mav_bridge-2] [INFO] [1786251679.741358051] [mav_bridge]: simulated time is publishing and advancing
+[patrol-3] [INFO] [1786251679.803060174] [patrol]: simulated time is publishing and advancing
+[oracle_detector-5] [INFO] [1786251682.133153496] [oracle_detector]: simulated time is publishing and advancing
+[evasion-6] [INFO] [1786251682.167027839] [evasion]: simulated time is publishing and advancing
+== done
+[ok] oracle confirmed at 21.0 m
+[cfg] oracle ball prefixes:
+[oracle_detector-5] [INFO] [1786251678.632187203] [oracle_detector]: oracle_detector up — GROUND TRUTH, not a detector. range 21.0 m (an INPUT, not a result), fov +/-45.0 deg, 14.5 Hz, noise [0.15, 0.15, 0.15] m, dropout 0.0, seed entropy, ball prefixes ['ball_', 'projectile_'] vs drone 'iris_depth'
+response:
+std_srvs.srv.SetBool_Response(success=True, message='patrol started')
+
+== patrol started
+Set parameter successful
+[dodge_speed] requested 3.0 | readback: Double value is: 3.0
+== counterfactual probe -> $HOME/hz_lab/results/hz20_r21.0_cf.csv
+== escape response probe -> $HOME/hz_lab/results/hz20_r21.0_resp.csv
+== altitude sampler -> $HOME/hz_lab/results/hz20_r21.0_alt.csv
+== battery: $HOME/hz_lab/config/hz20_r21.0.yaml
+    off-target: 0/10 throws (> 0.5 m from spec)
+    spawn dead time: mean 0.277 s, max 0.313 s (sim) — declared spawn_latency_s 0.216 s, undeclared +0.061 s = 0.33 m of aim error at 5.43 m/s
+    ball speed (measured horiz): mean 19.98 m/s, range 19.65-20.11
+    flight launch->closest approach: mean 1.394 s vs assumed 1.400 s (excess -0.006 s)
+    first detection at: mean 20.78 m, range 20.67-20.91 m (roi_max_range_m bounds this; if the mean sits well inside the gate, the gate is not the limit)
+    track at commit: 4.0 updates (range 3-5), age 0.263 s (0.165-0.406) => 11.4 Hz of accepted ball detections
+    detection consistency gap: mean +0.34 m (-2.11 to +1.51) between first detection and the track that matured — should sit near zero now that the ball keeps its own hypothesis
+      live hypotheses at commit: 1.2 mean (max 2) — anything at max_tracks means the false-positive stream is saturating the associator
+    tca at dodge commit: mean 0.760 s, range 0.600-0.980 s => 0.90-1.47 m of travel ASSUMING dodge_speed_mps=1.5 (not read back; scales linearly for a swept row) vs 0.3 m hit radius
+    latency: mean 20 ms, max 21 ms (budget 150 ms)
+
+  COMPLETE (no hard gate; judge rates above)
+════════════════════════════════════════════════════════════════════════
+
+
+== oracle detection_range_m = 21.0 (an INPUT)
+file: $HOME/hz_lab/results/hz20_r21.0.csv   (success = fired AND min_dist > 0.30 m)
+
+id    speed   expect  SUCCESS  fired    fail:why det_rng tca_s    lat_ms   min_dist
+-----------------------------------------------------------------------------------
+H20   20.0    dodge   3/10     10/10    7xHIT    20.78   0.760    20       0.28    
+
+ATTRIBUTION (expect_dodge rows only):
+  scored throws      10
+  succeeded          3
+  failed NO-FIRE     0   <- sensing/trigger bound
+  failed HIT         7   <- authority/dynamics bound
+
+== altitude over the battery (spawn z IS drone z) ==
+   n=14  min=1.40  max=2.59  mean=2.04 m
+
+== counterfactual verdicts ==
+   DODGE_FAILED         7
+   DODGE_SAVED          3
+   -- by scenario --
+   H20/DODGE_SAVED          3
+   H20/DODGE_FAILED         7
+== cell 21.0 done
+
+################ oracle detection_range_m = 16.0 ################
+[mav_bridge-2] [INFO] [1786252024.204416772] [mav_bridge]: mav_bridge up: cmd_vel in, odom/state out
+[patrol-3] [INFO] [1786252024.266168805] [patrol]: patrol up: 4 WPs, mode=position, running=False
+[mav_bridge-2] [INFO] [1786252024.706199155] [mav_bridge]: simulated time is publishing and advancing
+[patrol-3] [INFO] [1786252024.767034613] [patrol]: simulated time is publishing and advancing
+[evasion-6] [INFO] [1786252026.739728864] [evasion]: simulated time is publishing and advancing
+== done
+[ok] oracle confirmed at 16.0 m
+[cfg] oracle ball prefixes:
+[oracle_detector-5] [INFO] [1786252023.415486131] [oracle_detector]: oracle_detector up — GROUND TRUTH, not a detector. range 16.0 m (an INPUT, not a result), fov +/-45.0 deg, 14.5 Hz, noise [0.15, 0.15, 0.15] m, dropout 0.0, seed entropy, ball prefixes ['ball_', 'projectile_'] vs drone 'iris_depth'
+response:
+std_srvs.srv.SetBool_Response(success=True, message='patrol started')
+
+== patrol started
+Set parameter successful
+[dodge_speed] requested 3.0 | readback: Double value is: 3.0
+== counterfactual probe -> $HOME/hz_lab/results/hz20_r16.0_cf.csv
+== escape response probe -> $HOME/hz_lab/results/hz20_r16.0_resp.csv
+== altitude sampler -> $HOME/hz_lab/results/hz20_r16.0_alt.csv
+== battery: $HOME/hz_lab/config/hz20_r16.0.yaml
+    off-target: 0/10 throws (> 0.5 m from spec)
+    spawn dead time: mean 0.280 s, max 0.328 s (sim) — declared spawn_latency_s 0.216 s, undeclared +0.064 s = 0.34 m of aim error at 5.26 m/s
+    ball speed (measured horiz): mean 20.02 m/s, range 19.79-20.11
+    flight launch->closest approach: mean 1.148 s vs assumed 1.150 s (excess -0.002 s)
+    first detection at: mean 15.82 m, range 15.70-16.00 m (roi_max_range_m bounds this; if the mean sits well inside the gate, the gate is not the limit)
+    track at commit: 3.8 updates (range 3-6), age 0.225 s (0.150-0.382) => 12.4 Hz of accepted ball detections
+    detection consistency gap: mean +0.08 m (-1.56 to +1.21) between first detection and the track that matured — should sit near zero now that the ball keeps its own hypothesis
+      live hypotheses at commit: 1.0 mean (max 1) — anything at max_tracks means the false-positive stream is saturating the associator
+    tca at dodge commit: mean 0.561 s, range 0.410-0.690 s => 0.61-1.03 m of travel ASSUMING dodge_speed_mps=1.5 (not read back; scales linearly for a swept row) vs 0.3 m hit radius
+    latency: mean 36 ms, max 180 ms (budget 150 ms)
+
+  COMPLETE (no hard gate; judge rates above)
+════════════════════════════════════════════════════════════════════════
+
+
+== oracle detection_range_m = 16.0 (an INPUT)
+file: $HOME/hz_lab/results/hz20_r16.0.csv   (success = fired AND min_dist > 0.30 m)
+
+id    speed   expect  SUCCESS  fired    fail:why det_rng tca_s    lat_ms   min_dist
+-----------------------------------------------------------------------------------
+H20   20.0    dodge   0/10     10/10    10xHIT   15.82   0.561    36       0.16    
+
+ATTRIBUTION (expect_dodge rows only):
+  scored throws      10
+  succeeded          0
+  failed NO-FIRE     0   <- sensing/trigger bound
+  failed HIT         10   <- authority/dynamics bound
+
+== altitude over the battery (spawn z IS drone z) ==
+   n=14  min=1.71  max=2.83  mean=2.04 m
+
+== counterfactual verdicts ==
+   DODGE_FAILED         10
+   -- by scenario --
+   H20/DODGE_FAILED         10
+== cell 16.0 done
+
+== validation sweep complete
+   battery CSVs        $HOME/hz_lab/results/hz20_r*.csv
+   counterfactual CSVs $HOME/hz_lab/results/hz20_r*_cf.csv
+   escape response     $HOME/hz_lab/results/hz20_r*_resp.csv
+== restoring dodge_speed_mps=1.5
+Set parameter successful
+[guard] baseline eeprom intact (exit)

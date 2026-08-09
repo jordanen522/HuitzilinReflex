@@ -1,0 +1,46 @@
+
+════════════════════════════════════════════════════════════════════════
+  HuitzilinReflex Week 4 — Dodge Battery
+  Battery: val14_r10.0.yaml   Sweep: —   hit_radius: 0.3 m   window: 5.0 s
+  target: patrolling (aim error mixes lead error with geometry)
+  lead_target: True   spawn_latency_s: 0.216 s   odom_lag_s: 0.129 s   (total lead dead time 0.345 s)
+  throw window: enforced   margin: 0.3 s   wait: 40.0 s   cruise est: 7.38 m/s (floor 95%)
+════════════════════════════════════════════════════════════════════════
+
+  Combo                        ID Rep Dodge  MinDist  Lat ms  OK  Note
+  ────────────────────────────────────────────────────────────────────
+  baseline                    V14   0  True    0.906    20.0   ✓  clean dodge
+  baseline                    V14   1  True    0.782    20.0   ✓  clean dodge
+  baseline                    V14   2 False    0.842    None   ✗  no dodge fired | OFF-TARGET: spec miss 0.00 m, measured 0.84 m — aiming, not trigger
+  baseline                    V14   3 False    0.848    None   ✗  no dodge fired | OFF-TARGET: spec miss 0.00 m, measured 0.85 m — aiming, not trigger
+  baseline                    V14   4  True    0.915    19.0   ✓  clean dodge
+  baseline                    V14   5  True    0.759    16.0   ✓  clean dodge
+  baseline                    V14   6  True    0.788    19.0   ✓  clean dodge
+  baseline                    V14   7  True     0.74    19.0   ✓  clean dodge
+  baseline                    V14   8 False    0.705    None   ✗  no dodge fired | OFF-TARGET: spec miss 0.00 m, measured 0.71 m — aiming, not trigger
+  baseline                    V14   9  True     0.79    19.0   ✓  clean dodge
+
+  [baseline]
+    dodge success: 7/10  (70%)
+    false dodges:  0/0
+    -- on-target runs only (valid dodge measurement) --
+    dodge success: 7/7  (100%)
+    false dodges:  0/0
+    off-target: 3/10 throws (> 0.5 m from spec)
+    aim error (no-dodge runs): mean 0.80 m, max 0.85 m
+    spawn dead time: mean 0.295 s, max 0.364 s (sim) — declared spawn_latency_s 0.216 s, undeclared +0.079 s = 0.58 m of aim error at 7.38 m/s
+    miss (no-dodge, signed mean): along -0.34 (max |0.41|), cross -0.02 (max |0.04|), vert -0.72 (max |0.78|)
+      miss: ball vs drone in the BALL's frame (+along = ball went past, +cross = ball passed left, +vert = above)
+    lead (no-dodge, signed mean): along +1.92 (max |2.04|), cross -0.02 (max |0.04|), vert +0.02 (max |0.02|)
+      lead: aim point vs drone in the DRONE's frame (+along = over-led, +cross = aimed left of its track)
+    ball speed (measured horiz): mean 14.05 m/s, range 13.93-14.15
+    flight launch->closest approach: mean 1.305 s vs assumed 1.214 s (excess +0.091 s)
+    first detection at: mean 9.89 m, range 9.70-10.08 m (roi_max_range_m bounds this; if the mean sits well inside the gate, the gate is not the limit)
+    track at commit: 3.6 updates (range 3-5), age 0.237 s (0.153-0.384) => 10.8 Hz of accepted ball detections
+    detection consistency gap: mean +3.22 m (+2.06 to +5.67) between first detection and the track that matured — should sit near zero now that the ball keeps its own hypothesis
+      live hypotheses at commit: 1.7 mean (max 3) — anything at max_tracks means the false-positive stream is saturating the associator
+    tca at dodge commit: mean 0.240 s, range 0.080-0.400 s => 0.12-0.60 m of travel ASSUMING dodge_speed_mps=1.5 (not read back; scales linearly for a swept row) vs 0.3 m hit radius
+    latency: mean 19 ms, max 20 ms (budget 150 ms)
+
+  COMPLETE (no hard gate; judge rates above)
+════════════════════════════════════════════════════════════════════════

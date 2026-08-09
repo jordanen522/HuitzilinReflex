@@ -1,0 +1,41 @@
+
+════════════════════════════════════════════════════════════════════════
+  HuitzilinReflex Week 4 — Dodge Battery
+  Battery: dspd30_r16.0.yaml   Sweep: —   hit_radius: 0.3 m   window: 5.0 s
+  target: HOVER CONTROL (patrol stopped before every throw — the lead is exact, so residual aim error is spawn GEOMETRY)
+  lead_target: True   spawn_latency_s: 0.216 s   odom_lag_s: 0.129 s   (total lead dead time 0.345 s)
+  throw window: enforced   margin: 0.3 s   wait: 40.0 s   cruise est: 5.47 m/s (floor 95%)
+════════════════════════════════════════════════════════════════════════
+
+  Combo                        ID Rep Dodge  MinDist  Lat ms  OK  Note
+  ────────────────────────────────────────────────────────────────────
+  baseline                    D30   0  True    0.418    18.0   ✓  clean dodge
+  baseline                    D30   1  True    0.498    18.0   ✓  clean dodge
+  baseline                    D30   2  True    0.355    24.0   ✓  clean dodge
+  baseline                    D30   3  True    0.264    18.0   ✗  dodged but min_dist 0.26 <= hit_radius
+  baseline                    D30   4  True     0.25    20.0   ✗  dodged but min_dist 0.25 <= hit_radius
+  baseline                    D30   5  True    0.516    20.0   ✓  clean dodge
+  baseline                    D30   6  True    0.191    19.0   ✗  dodged but min_dist 0.19 <= hit_radius
+  baseline                    D30   7  True    0.512    18.0   ✓  clean dodge
+  baseline                    D30   8  True    0.465    18.0   ✓  clean dodge
+  baseline                    D30   9  True    0.554    20.0   ✓  clean dodge
+
+  [baseline]
+    dodge success: 7/10  (70%)
+    false dodges:  0/0
+    -- on-target runs only (valid dodge measurement) --
+    dodge success: 7/10  (70%)
+    false dodges:  0/0
+    off-target: 0/10 throws (> 0.5 m from spec)
+    spawn dead time: mean 0.285 s, max 0.317 s (sim) — declared spawn_latency_s 0.216 s, undeclared +0.069 s = 0.38 m of aim error at 5.47 m/s
+    ball speed (measured horiz): mean 14.04 m/s, range 13.93-14.23
+    flight launch->closest approach: mean 1.561 s vs assumed 1.571 s (excess -0.010 s)
+    first detection at: mean 15.87 m, range 15.79-15.96 m (roi_max_range_m bounds this; if the mean sits well inside the gate, the gate is not the limit)
+    track at commit: 4.1 updates (range 3-6), age 0.247 s (0.152-0.411) => 12.5 Hz of accepted ball detections
+    detection consistency gap: mean +0.27 m (-1.76 to +1.54) between first detection and the track that matured — should sit near zero now that the ball keeps its own hypothesis
+      live hypotheses at commit: 1.0 mean (max 1) — anything at max_tracks means the false-positive stream is saturating the associator
+    tca at dodge commit: mean 0.864 s, range 0.710-1.100 s => 1.06-1.65 m of travel ASSUMING dodge_speed_mps=1.5 (not read back; scales linearly for a swept row) vs 0.3 m hit radius
+    latency: mean 19 ms, max 24 ms (budget 150 ms)
+
+  COMPLETE (no hard gate; judge rates above)
+════════════════════════════════════════════════════════════════════════

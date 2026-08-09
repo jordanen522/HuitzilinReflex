@@ -1,0 +1,12 @@
+combo,id,rep,expect_dodge,dodged,latency_ms,min_dist_m,spec_miss_m,aim_err_m,off_target,steady,success,error,note,skipped,window_s,needed_window_s,spawn_dead_s,miss_along_m,miss_cross_m,miss_vert_m,lead_along_m,lead_cross_m,lead_vert_m,ball_speed_mps,t_flight_assumed_s,flight_to_ca_s,tca_s,trigger_miss_m,first_det_range_m,track_updates,track_age_s,n_hypotheses
+baseline,S08,0,True,False,,0.258,0.0,0.258,False,True,False,False,no dodge fired,False,1.678,1.05,0.266,-0.025,-0.118,0.228,-0.639,0.187,-0.046,7.958,0.75,0.664,,,3.269,,,
+baseline,S08,1,True,True,19.0,0.312,0.0,0.312,False,True,True,False,clean dodge,False,1.923,1.05,0.258,0.001,-0.162,-0.266,0.468,0.118,-0.037,8.043,0.75,0.805,0.07,0.167,3.216,3,0.155,1
+baseline,S08,2,True,True,19.0,0.277,0.0,0.277,False,True,False,False,dodged but min_dist 0.28 <= hit_radius,False,2.166,1.05,0.296,-0.11,-0.181,-0.179,0.405,0.144,-0.04,8.043,0.75,0.783,0.09,0.32,3.332,3,0.153,1
+baseline,S14,0,True,True,20.0,0.267,0.0,0.267,False,True,False,False,dodged but min_dist 0.27 <= hit_radius,False,2.158,1.014,0.259,-0.161,-0.176,-0.119,0.522,0.128,-0.026,14.0,0.714,0.739,0.04,0.112,3.257,3,0.139,1
+baseline,S14,1,True,False,,0.28,0.0,0.28,False,True,False,False,no dodge fired,False,2.168,1.014,0.244,0.091,-0.154,-0.215,0.589,0.1,-0.033,14.074,0.714,0.759,,,3.203,,,
+baseline,S14,2,True,True,21.0,0.197,0.0,0.197,False,True,False,False,dodged but min_dist 0.20 <= hit_radius,False,2.036,1.014,0.337,0.033,-0.169,-0.096,0.257,0.146,-0.021,14.233,0.714,0.732,0.03,0.274,3.29,3,0.171,1
+baseline,S20,0,True,False,,0.295,0.0,0.295,False,True,False,False,no dodge fired,False,2.174,1.05,0.261,-0.186,-0.188,-0.13,0.661,0.128,-0.039,20.0,0.75,0.771,,,3.034,,,
+baseline,S20,1,True,False,,0.296,0.0,0.296,False,True,False,False,no dodge fired,False,1.917,1.05,0.29,0.17,-0.173,-0.171,0.564,0.122,-0.028,20.106,0.75,0.784,,,3.062,,,
+baseline,S20,2,True,False,,0.306,0.0,0.306,False,True,False,False,no dodge fired,False,1.936,1.05,0.232,0.146,-0.197,-0.183,0.609,0.142,-0.036,20.106,0.75,0.785,,,3.099,,,
+baseline,S20N,0,False,False,,1.344,1.5,0.156,False,True,True,False,correctly ignored,False,2.024,1.05,0.234,0.007,1.333,-0.172,0.725,0.102,-0.029,20.105,0.75,0.785,,,3.128,,,
+baseline,S20N,1,False,False,,1.333,1.5,0.167,False,True,True,False,correctly ignored,False,2.042,1.05,0.266,-0.192,1.315,-0.098,0.586,0.133,-0.022,20.107,0.75,0.768,,,3.29,,,
