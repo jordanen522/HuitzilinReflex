@@ -1,0 +1,71 @@
+# oracle_mono_r30.yaml — CAN ONE MONO CAMERA BUY WITH REACH WHAT STEREO BUYS
+# WITH ACCURACY?
+#
+# THE BOM QUESTION THIS ANSWERS
+#   At the SAME 26 m, mono scored 7/10 and the modelled stereo pair 10/10, and
+#   the three mono failures were LATE COMMITS (tca 0.31/0.68/0.75 s), not weak
+#   escapes. Mono does not dodge worse — it decides later, because a 0.85 m
+#   depth axis makes the velocity estimate converge slowly.
+#
+#   A time deficit can be paid for with RANGE instead of with a second camera:
+#       tca = range/speed - t_dead
+#   so every extra metre of reach at 20 m/s returns 0.05 s directly. If mono at
+#   30 m matches stereo at 26 m, the BOM choice becomes
+#       ONE See3CAM_20CUG + a longer lens   ($89, 13.5 g, no extrinsics)
+#   versus
+#       TWO of them in a calibrated pair    ($178, 27 g, extrinsics good to
+#                                            ~12 arcsec, which is hard)
+#   That is a materially different aircraft, so it is worth one cell.
+#
+# THE NOISE VALUE IS NOT COPIED, IT IS RESCALED
+#   oracle_mono.yaml derives sigma_z = (z^2 * IFOV / D) * sigma_n from the
+#   known-diameter prior, so the depth error grows as z^2 and 0.85 m is
+#   specifically the value AT 26 m. Reusing 0.85 m at 30 m would be modelling a
+#   camera that gets better with distance. Rescaled:
+#       0.85 * (30/26)^2 = 1.13 m
+#   Bearing is unchanged at 0.02 m — bearing is what mono is good at, and
+#   holding it fixed is what makes this a clean test of the depth axis alone.
+#
+# THE COST THIS CELL DOES NOT MEASURE, AND MUST BE QUOTED BESIDE IT
+#   Reach and field of view are the same optical trade. 26 m corresponds to
+#   +/-13.5 deg on this sensor; 30 m needs a ~11.5 mm lens and narrows the cone
+#   to about +/-11.7 deg. fov13 already showed 20 deg off-axis is undefended
+#   and 10 deg is marginal, so buying reach makes the defended sector NARROWER.
+#   fov_half_angle_deg stays at 45.0 here deliberately, to isolate the depth
+#   question; the FOV cost is real and is accounted for separately.
+#
+# PRE-REGISTERED
+#   Primary readout is tca_s and track_age_s at commit, not the save count —
+#   ten throws cannot separate 7/10 from 9/10. The pooled fit (310 throws,
+#   LD50 0.798 s) says P >= 0.95 above tca 0.90 s, so:
+#     if commit tca >= 0.90 s, mono-plus-reach WORKS and the count should
+#       corroborate at >= 9/10;
+#     if commit tca stays near mono's 26 m value, the deficit is NOT a simple
+#       time deficit and extra reach cannot buy it back — buy the stereo pair.
+
+oracle_detector:
+  ros__parameters:
+    poses_topic: "/gz/dynamic_poses"
+    odom_topic: "/huitzilin/odom"
+    centroid_topic: "/threat/centroid"
+
+    drone_model: "iris_depth"
+    ball_name_prefixes: ["ball_", "projectile_"]
+
+    # Overridden by the launch's detection_range_m argument — present only so
+    # the file is a complete node configuration.
+    detection_range_m: 30.0
+    min_range_m: 0.30
+    fov_half_angle_deg: 45.0   # deliberately wide: isolate depth from FOV
+
+    # Overridden by the launch's oracle_rate_hz argument. 0.0 disables the
+    # limiter and delivers Gazebo's full 60 Hz pose grid.
+    rate_hz: 0.0
+
+    noise_std_m: 0.15                    # inert: noise_std_xyz_m wins
+    noise_std_xyz_m: [1.13, 0.02, 0.02]  # depth rescaled to 30 m, bearing held
+
+    dropout_prob: 0.0
+    seed: 20260810
+
+    stamp_offset_warn_s: 0.05
