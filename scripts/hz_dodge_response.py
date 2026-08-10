@@ -195,7 +195,18 @@ class DodgeResponse(Node):
         rows = []
         for dt in SAMPLES_S:
             target = t0 + dt
-            gap, t, p = min((abs(t - target), t, p) for t, p in post)
+            # key=, not a comparable tuple. `min` over (gap, t, pose) tuples
+            # falls through to the THIRD element whenever the first two tie,
+            # and that element is a numpy array, so the comparison raises
+            # "truth value of an array with more than one element is
+            # ambiguous" and kills the probe mid-battery. Two poses sharing a
+            # timestamp is all it takes, and a longer pose buffer makes that
+            # more likely, not less. The crash cost a whole control arm: the
+            # cell reported 10/10 dodges while the probe had died on the
+            # second one, leaving a single throw that still looked like a
+            # perfectly ordinary escape curve. The key never touches the pose.
+            t, p = min(post, key=lambda tp: (abs(tp[0] - target), tp[0]))
+            gap = abs(t - target)
             if gap > 0.05:      # no ground-truth sample near this offset
                 continue
             residual = p - (p0 + v0 * (t - t0))
