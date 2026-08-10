@@ -46,6 +46,16 @@
 #     D20 ~ D10 but D20b > D10  -> the direction confound was masking the gain
 #     D20b ~ D10 and D20 ~ D10  -> duration is a null; the brake costs nothing
 #
+#   CHECKED OFFLINE FIRST, and the confound looks SMALL. The same clamp
+#   arithmetic applied to the dodge_speed A/B (16 m, alt 1.90 m, headroom
+#   0.90 m) predicts max_down 0.600 / 0.300 / 0.150 across the 1.5 / 3.0 / 6.0
+#   arms — a 4x change in the vertical budget. Measured mean |miss_vert_m| in
+#   those arms is 0.192 / 0.258 / 0.208 m: flat and non-monotonic, no 4x trend.
+#   So the clamp was evidently not binding hard enough to re-aim the escape,
+#   and the dodge_speed null is not confounded by it. miss_vert_m is a proxy
+#   (it carries the ball's own trajectory too, not just the escape direction),
+#   which is why D20b stays in as cheap insurance rather than being dropped.
+#
 # HONEST CAVEAT
 #   The vehicle coasts after the cutoff rather than stopping dead, so the prize
 #   is the difference between an accelerating ramp and a braked coast over the

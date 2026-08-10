@@ -76,6 +76,11 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("oracle_rate_hz", default_value="14.5",
                               description="oracle detection rate; 14.5 mimics "
                                           "the measured depth cadence"),
+        DeclareLaunchArgument("oracle_delay_s", default_value="0.0",
+                              description="sensor pipeline latency (exposure "
+                                          "-> usable centroid). 0.0 = the "
+                                          "zero-latency oracle every recorded "
+                                          "result was flown against"),
         DeclareLaunchArgument(
             "oracle_params",
             default_value=os.path.join(pkg, "params", "oracle_detector.yaml"),
@@ -138,6 +143,12 @@ def generate_launch_description() -> LaunchDescription:
                     LaunchConfiguration("detection_range_m"), value_type=float),
                 "rate_hz": ParameterValue(
                     LaunchConfiguration("oracle_rate_hz"), value_type=float),
+                # A launch argument rather than yet another near-duplicate
+                # oracle yaml: the sweep is over one scalar, and every extra
+                # copied params file is another place the sensor model can
+                # drift from the one the cell thinks it is flying.
+                "detection_delay_s": ParameterValue(
+                    LaunchConfiguration("oracle_delay_s"), value_type=float),
             },
         ],
     )

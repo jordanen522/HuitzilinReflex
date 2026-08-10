@@ -24,6 +24,9 @@ LAB_DIR="${LAB_DIR:-$HOME/hz_lab}"
 STACK="${STACK:-oracle}"
 RANGE="${RANGE:-12.0}"
 ORACLE_RATE="${ORACLE_RATE:-14.5}"
+# Sensor pipeline latency, seconds. 0.0 = the zero-latency oracle every
+# recorded result was flown against, so leaving it unset changes nothing.
+ORACLE_DELAY="${ORACLE_DELAY:-0.0}"
 EXTRA_LAUNCH="${EXTRA_LAUNCH:-}"
 WORLD_WAIT="${WORLD_WAIT:-25}"
 SITL_WAIT="${SITL_WAIT:-40}"
@@ -91,7 +94,7 @@ sleep "$MAVP_WAIT"
 
 case "$STACK" in
   oracle)
-    LAUNCH="ros2 launch huitzilin_perception week6_oracle.launch.py with_patrol:=true detection_range_m:=$RANGE oracle_rate_hz:=$ORACLE_RATE $EXTRA_LAUNCH"
+    LAUNCH="ros2 launch huitzilin_perception week6_oracle.launch.py with_patrol:=true detection_range_m:=$RANGE oracle_rate_hz:=$ORACLE_RATE oracle_delay_s:=$ORACLE_DELAY $EXTRA_LAUNCH"
     ;;
   week4)
     LAUNCH="ros2 launch huitzilin_perception week4_evasion.launch.py with_patrol:=true $EXTRA_LAUNCH"
