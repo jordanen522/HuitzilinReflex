@@ -1,0 +1,11 @@
+combo,id,rep,expect_dodge,dodged,latency_ms,min_dist_m,spec_miss_m,aim_err_m,off_target,steady,success,error,note,skipped,window_s,needed_window_s,spawn_dead_s,miss_along_m,miss_cross_m,miss_vert_m,lead_along_m,lead_cross_m,lead_vert_m,ball_speed_mps,t_flight_assumed_s,flight_to_ca_s,tca_s,trigger_miss_m,first_det_range_m,track_updates,track_age_s,n_hypotheses
+baseline,H26,0,True,True,16.0,0.579,0.0,0.579,False,True,True,False,clean dodge,False,0.0,2.0,0.249,-0.215,0.105,-0.527,0.173,0.391,-0.435,20.109,1.7,1.708,1.09,0.307,25.86,13,0.213,2
+baseline,H26,1,True,True,18.0,0.93,0.0,0.93,False,True,True,False,clean dodge,False,0.0,2.0,0.332,0.015,0.912,-0.179,0.823,0.394,-0.171,19.787,1.7,1.7,1.16,0.721,25.79,6,0.085,1
+baseline,H26,2,True,True,20.0,0.662,0.0,0.662,False,True,True,False,clean dodge,False,0.0,2.0,0.26,-0.198,-0.112,-0.622,-0.109,0.439,-0.513,20.0,1.7,1.711,1.16,0.737,25.884,10,0.165,2
+baseline,H26,3,True,True,17.0,0.972,0.0,0.972,False,True,True,False,clean dodge,False,0.0,2.0,0.248,0.217,0.866,0.384,0.784,0.385,0.434,19.679,1.7,1.705,1.14,0.322,25.791,7,0.097,1
+baseline,H26,4,True,True,19.0,1.017,0.0,1.017,False,True,True,False,clean dodge,False,0.0,2.0,0.351,-0.25,0.981,-0.1,0.685,-0.745,-0.092,20.0,1.7,1.697,1.1,0.043,25.657,3,0.033,1
+baseline,H26,5,True,True,18.0,0.773,0.0,0.773,False,True,True,False,clean dodge,False,0.0,2.0,0.287,-0.335,0.671,-0.186,0.671,-0.022,-0.31,20.108,1.7,1.684,1.03,0.176,25.836,3,0.05,2
+baseline,H26,6,True,True,17.0,0.349,0.0,0.349,False,True,True,False,clean dodge,False,0.0,2.0,0.265,0.171,0.194,0.234,0.168,-0.403,0.151,20.0,1.7,1.689,0.78,0.652,25.914,16,0.38,3
+baseline,H26,7,True,True,18.0,0.316,0.0,0.316,False,True,True,False,clean dodge,False,0.0,2.0,0.316,0.144,-0.177,0.219,-0.241,-0.014,0.219,20.111,1.7,1.696,0.82,0.746,25.989,8,0.107,4
+baseline,H26,8,True,True,19.0,0.441,0.0,0.441,False,True,True,False,clean dodge,False,0.0,2.0,0.241,-0.127,-0.081,-0.415,0.036,0.22,-0.373,19.894,1.7,1.705,0.98,0.487,25.892,4,0.051,3
+baseline,H26,9,True,True,19.0,0.802,0.0,0.802,False,True,True,False,clean dodge,False,0.0,2.0,0.3,-0.228,0.227,-0.734,0.351,0.455,-0.6,19.892,1.7,1.714,1.19,0.541,25.859,7,0.118,2
