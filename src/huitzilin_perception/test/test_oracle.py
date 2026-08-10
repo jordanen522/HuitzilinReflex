@@ -15,6 +15,7 @@ import pytest
 from huitzilin_perception.cloud_geometry import quat_to_rot
 from huitzilin_perception.oracle import (
     DEFAULT_BALL_PREFIXES,
+    DelayLine,
     apply_noise,
     in_view,
     is_ball_name,
@@ -238,3 +239,78 @@ def test_a_visible_ball_is_reported_in_the_body_frame():
                      detection_range_m=12.0)               # north-facing drone
     assert got is not None
     np.testing.assert_allclose(got, [6.0, 0.0, 0.0], atol=1e-9)
+
+
+# ── pipeline delay ───────────────────────────────────────────────────────────
+#
+# The oracle without this hands the tracker a measurement the instant the world
+# moves, which no camera does. The delay comes straight off tca, the term the
+# whole envelope is bounded by, so the disabled path must be EXACTLY the old
+# behaviour and the enabled path must not leak or reorder frames.
+
+def test_zero_delay_returns_the_payload_immediately():
+    """The default must be byte-identical to having no delay line at all.
+
+    Every recorded result was flown against a zero-latency oracle. If the
+    disabled path ever buffered even one tick, all of them would silently stop
+    being reproducible.
+    """
+    line = DelayLine(0.0)
+    assert not line.enabled
+    assert line.push(10.0, "a") == ["a"]
+    assert line.push(10.5, "b") == ["b"]
+    assert len(line) == 0
+    assert line.due(99.0) == []
+
+
+def test_a_delayed_frame_is_held_then_released_once():
+    line = DelayLine(0.030)
+    assert line.push(1.000, "a") == []       # not due yet
+    assert line.due(1.020) == []             # still inside the pipeline
+    assert line.due(1.030) == ["a"]          # due exactly at the boundary
+    assert line.due(1.100) == []             # and never delivered twice
+    assert len(line) == 0
+
+
+def test_frames_come_out_in_order_and_the_queue_drains():
+    line = DelayLine(0.050)
+    for i, t in enumerate([1.00, 1.01, 1.02]):
+        assert line.push(t, i) == []
+    assert len(line) == 3
+    assert line.due(1.055) == [0]            # only the one that is due
+    assert line.due(1.080) == [1, 2]         # oldest first
+    assert len(line) == 0
+
+
+def test_frames_in_flight_survive_the_ball_leaving_the_frustum():
+    """due() is called every tick, not only when a detection is made.
+
+    A real pipeline still delivers what it already captured after the ball goes
+    out of view. If release only happened on push, the last frames before the
+    ball left would be lost — exactly the ones closest to impact.
+    """
+    line = DelayLine(0.040)
+    line.push(2.000, "last-frame-before-it-vanished")
+    assert line.due(2.041) == ["last-frame-before-it-vanished"]
+
+
+def test_a_sim_time_rewind_does_not_strand_the_queue():
+    """Relaunching against the same clock must not silence the node forever.
+
+    Without this the release times sit in an unreachable future, due() returns
+    nothing for the rest of the run, and the log says nothing about why.
+    """
+    line = DelayLine(0.050)
+    line.push(500.0, "stale")
+    assert line.due(0.0) == []               # clock went backwards; dropped
+    assert len(line) == 0
+    assert line.push(0.0, "fresh") == []
+    assert line.due(0.050) == ["fresh"]      # and the line still works after
+
+
+def test_a_negative_delay_is_refused():
+    """Negative latency is time travel, and would release frames early — a
+    sensor that is BETTER than ground truth, which is the one direction this
+    harness must never be able to flatter itself in."""
+    with pytest.raises(ValueError):
+        DelayLine(-0.001)

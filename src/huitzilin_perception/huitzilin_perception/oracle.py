@@ -29,6 +29,10 @@ Fidelity choices, and why each is here rather than "detect everything":
   * uniform dropout only -- deliberately NOT range-dependent. Making detection
     probability fall with range would confound the one variable this harness
     exists to isolate.
+  * an optional PIPELINE DELAY (DelayLine) -- the oracle otherwise hands the
+    tracker a measurement the instant the world moves, which no camera does.
+    Exposure, readout, USB transfer and detection all cost time, and that time
+    comes straight off tca, the term the whole envelope is bounded by.
 
 Gates are evaluated on the true geometry and noise is applied afterwards:
 visibility is a property of where the ball is, not of where the sensor
@@ -38,7 +42,8 @@ mistakenly reports it.
 from __future__ import annotations
 
 import math
-from typing import Iterable, Optional, Sequence, Tuple
+from collections import deque
+from typing import Deque, Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -146,6 +151,79 @@ def measurement_covariance(noise_std_xyz: Sequence[float],
     sigma = np.maximum(
         np.asarray(noise_std_xyz, dtype=np.float64).reshape(3), floor_m)
     return np.diag(sigma ** 2)
+
+
+class DelayLine:
+    """Hold each detection for `delay_s` of SIM time before releasing it.
+
+    Models the pipeline a real sensor has and the oracle does not: exposure,
+    readout, USB transfer and detection all sit between the world moving and a
+    centroid being usable. That interval comes straight off tca, which is the
+    term the whole 20 m/s envelope is bounded by, so an oracle with zero
+    latency is optimistic in exactly the place it matters most.
+
+    WHAT IS MODELLED, precisely. The payload's own timestamp is NOT touched --
+    the caller stamps a detection at EXPOSURE time and this class only makes it
+    ARRIVE late. That is the charitable case, and deliberately so: a
+    well-engineered pipeline timestamps at exposure, so a filter can predict
+    forward across the delay and lose no accuracy. What it cannot do is act on
+    data it does not have yet, so tca still shrinks by the full delay. The
+    pessimistic variant -- stamping at arrival, which additionally biases the
+    state estimate -- is a different and worse sensor, and is not this.
+
+    Time is whatever monotonic scalar the caller passes. The node drives it
+    from Gazebo pose stamps, the same clock the rate limiter uses, so a
+    delay is never a function of machine load. Release is therefore quantised
+    to the caller's tick: at the 60 Hz pose grid, an asked-for 0.020 s is
+    delivered as 0.020-0.037 s. Quantisation always rounds AGAINST the sensor,
+    never in its favour.
+    """
+
+    def __init__(self, delay_s: float = 0.0) -> None:
+        if delay_s < 0.0:
+            raise ValueError("delay_s must be >= 0, got %r" % (delay_s,))
+        self.delay_s = float(delay_s)
+        self._q: Deque[Tuple[float, object]] = deque()
+
+    def __len__(self) -> int:
+        return len(self._q)
+
+    @property
+    def enabled(self) -> bool:
+        return self.delay_s > 0.0
+
+    def push(self, t_now: float, payload):
+        """Accept a detection made at t_now. Returns items due immediately.
+
+        With no delay configured the payload comes straight back out, so the
+        caller has ONE code path and the disabled case cannot drift away from
+        the enabled one.
+        """
+        if not self.enabled:
+            return [payload]
+        self._q.append((float(t_now) + self.delay_s, payload))
+        return self.due(t_now)
+
+    def due(self, t_now: float) -> list:
+        """Everything whose release time has arrived, oldest first.
+
+        Called on every tick, not only when a detection is made: a ball that
+        leaves the frustum must still deliver the frames already in flight,
+        exactly as a real pipeline would.
+        """
+        t_now = float(t_now)
+        if not self._q:
+            return []
+        # A sim-time rewind (relaunching against the same clock) would
+        # otherwise strand the queue forever, and the node would go silent for
+        # the rest of the run with nothing in the log to say why.
+        if t_now < self._q[0][0] - self.delay_s:
+            self._q.clear()
+            return []
+        out = []
+        while self._q and self._q[0][0] <= t_now:
+            out.append(self._q.popleft()[1])
+        return out
 
 
 def synthesize(

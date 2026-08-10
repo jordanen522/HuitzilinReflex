@@ -55,6 +55,7 @@ from tf2_msgs.msg import TFMessage
 from huitzilin_perception.cloud_geometry import is_valid_quat, quat_to_rot
 from huitzilin_perception.oracle import (
     DEFAULT_BALL_PREFIXES,
+    DelayLine,
     select_ball,
     synthesize,
 )
@@ -93,6 +94,12 @@ class OracleDetectorNode(Node):
         self.declare_parameter("detection_range_m", 12.0)
         self.declare_parameter("min_range_m", 0.30)
         self.declare_parameter("fov_half_angle_deg", 45.0)
+        # Seconds of SIM time between the world moving and the centroid being
+        # publishable: exposure + readout + transfer + detection. 0.0 = OFF =
+        # the zero-latency oracle every recorded result was flown against, so
+        # nothing already measured changes. See DelayLine for what is and is
+        # not modelled -- in particular the stamp stays at exposure time.
+        self.declare_parameter("detection_delay_s", 0.0)
         self.declare_parameter("rate_hz", 14.5)
         self.declare_parameter("noise_std_m", 0.15)
         # (forward, left, up) sigma in base_link, which is how a stereo
@@ -123,6 +130,7 @@ class OracleDetectorNode(Node):
         self._range = float(self._p("detection_range_m"))
         self._min_range = float(self._p("min_range_m"))
         self._fov = float(self._p("fov_half_angle_deg"))
+        self._delay_line = DelayLine(float(self._p("detection_delay_s")))
         rate_hz = float(self._p("rate_hz"))
         self._period = 1.0 / rate_hz if rate_hz > 0.0 else 0.0
         self._dropout = float(self._p("dropout_prob"))
@@ -169,6 +177,10 @@ class OracleDetectorNode(Node):
             f"range {self._range} m (an INPUT, not a result), "
             f"fov +/-{self._fov} deg, {rate_hz} Hz, "
             f"noise {np.round(self._noise, 3).tolist()} m, "
+            # After the noise triple on purpose: EXPECT_BANNER patterns in the
+            # lab queues anchor on that field, and inserting ahead of it would
+            # abort every queued cell.
+            f"delay {self._delay_line.delay_s * 1e3:.0f} ms, "
             f"dropout {self._dropout}, seed {seed or 'entropy'}, "
             f"ball prefixes {self._ball_prefixes} vs drone "
             f"'{self._drone_model}'"
@@ -186,9 +198,26 @@ class OracleDetectorNode(Node):
     def _stamp_to_sec(stamp) -> float:
         return stamp.sec + stamp.nanosec * 1e-9
 
+    def _release_due(self, t_now: float) -> None:
+        for out, rng_m in self._delay_line.due(t_now):
+            self._publish(out, rng_m)
+
+    def _publish(self, out: PointStamped, rng_m: float) -> None:
+        self._pub.publish(out)
+        self._n_published += 1
+        self.get_logger().info(
+            "oracle centroid #%d at %.2f m" % (self._n_published, rng_m),
+            throttle_duration_sec=1.0)
+
     def _poses_cb(self, msg: TFMessage) -> None:
         if not msg.transforms:
             return
+
+        # Release anything the pipeline is still holding BEFORE any of the
+        # early returns below. Frames already in flight must still arrive after
+        # the ball leaves the frustum, or after a tick the rate limiter skips,
+        # exactly as a real pipeline delivers them. Inert when delay is 0.
+        self._release_due(self._stamp_to_sec(msg.transforms[0].header.stamp))
 
         drone = None
         candidates = []
@@ -256,13 +285,14 @@ class OracleDetectorNode(Node):
         out.header.stamp = stamp
         out.header.frame_id = "base_link"
         out.point.x, out.point.y, out.point.z = (float(v) for v in z_bl)
-        self._pub.publish(out)
-
-        self._n_published += 1
-        self.get_logger().info(
-            "oracle centroid #%d at %.2f m" % (
-                self._n_published, float(np.linalg.norm(ball - drone))),
-            throttle_duration_sec=1.0)
+        # True range captured at GENERATION, so the throttled log reports where
+        # the ball was when the frame was taken, not where it is when the frame
+        # lands. With a delay configured those differ by delay * closing speed
+        # — 0.6 m at 30 ms and 20 m/s.
+        rng_m = float(np.linalg.norm(ball - drone))
+        for pending_out, pending_rng in self._delay_line.push(t_pose,
+                                                              (out, rng_m)):
+            self._publish(pending_out, pending_rng)
 
     # Roughly 20 s of Gazebo pose messages. Long enough that arming, takeoff
     # and the first patrol leg pass without comment; short enough that a

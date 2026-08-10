@@ -1,0 +1,76 @@
+# q4_duration.txt — THE COMMAND STOPS BEFORE THE BALL ARRIVES.
+# ~75 min, 3 cells. HIGHEST PRIORITY: this is a NEW lever, not a re-run.
+#
+# THE FINDING
+#   dodge_duration_s is 1.0 s. trigger_horizon_s is 1.5 s. They are not
+#   coupled, and 1.0 < 1.5. In the flagship 26 m cell the tca at commit was
+#     0.93 1.01 1.05 1.06 1.06 1.07 1.07 1.12 1.23 1.24
+#   so NINE of ten throws were still inbound when the command ended. At the
+#   cutoff evasion_node publishes ZERO velocity, and a body-frame zero is a
+#   BRAKE, not a coast. The drone decelerates for the last 0.01-0.24 s before
+#   closest approach.
+#
+#   And it is cut at the steepest part of the curve. From that cell's own
+#   escape-response log: 0.0070 m at t=0.30, 0.1090 at 0.60, 0.6062 at 1.00 —
+#   0.497 m of it in the final 0.4 s, still accelerating when the command
+#   stops. The instrument sampled to exactly 1.00 s, so nothing in the repo has
+#   ever looked past the cutoff, and the fitted escape law
+#   (Delta = 0.337 * tca^3.39, pooled over 125 hover throws) was built
+#   ENTIRELY INSIDE the commanded window.
+#
+# WHY THIS IS NOT A REFUTED LEVER
+#   Every retired lever varied MAGNITUDE: dodge_speed_mps (escape ~
+#   command^0.065), WP_ACC, PSC_JERK_NE, ATC_ANGLE_MAX, and the dataflash row
+#   showing achieved dv EXCEEDS commanded dv in every arm. This asks the
+#   airframe for nothing new — same velocity, same acceleration, same tilt,
+#   for longer. dodge_duration_s has never been swept; a repo-wide grep finds
+#   it only in comments and defaults.
+#
+# THE CONFOUND, AND WHY THERE ARE THREE ARMS
+#   evasion_node passes descent_len_m = dodge_speed_mps * dodge_duration_s into
+#   the ground clamp, which computes max_down = min(1, headroom/descent_len).
+#   At 2.0 m AGL with dodge_floor_m 1.0 the headroom is 1.0 m, so:
+#       speed 3.0, duration 1.0 -> descent_len 3.0 -> max_down 0.333
+#       speed 3.0, duration 2.0 -> descent_len 6.0 -> max_down 0.167
+#   Doubling the duration therefore ALSO re-aims the escape more horizontal —
+#   onto the axis the code's own comment argues is the slower one. So D20 alone
+#   cannot separate "longer helps" from "flatter hurts".
+#
+#   D20b holds descent_len at 3.0 by halving the speed (1.5 x 2.0 = 3.0), which
+#   restores max_down to 0.333 — identical direction to the control. It pays
+#   for that with 2x less commanded magnitude, which by the measured
+#   command^0.065 law costs only ~4.6%.
+#
+#   Read the three together:
+#     D20 > D10 and D20b > D10  -> duration is real, direction is not the story
+#     D20 ~ D10 but D20b > D10  -> the direction confound was masking the gain
+#     D20b ~ D10 and D20 ~ D10  -> duration is a null; the brake costs nothing
+#
+# HONEST CAVEAT
+#   The vehicle coasts after the cutoff rather than stopping dead, so the prize
+#   is the difference between an accelerating ramp and a braked coast over the
+#   last 0.06-0.24 s — not the whole 0.497 m. A null here is entirely possible
+#   and must be reported as one.
+#
+# INSTRUMENT
+#   hz_dodge_response.py now samples to 2.00 s instead of 1.00 s, so the tail
+#   past the cutoff is visible for the first time, and takes --dodge-speed so
+#   the ideal_m column is not silently computed against the shipped 1.5.
+#   RESP_OUT=1 on every arm: the response curve is the mechanism, the save
+#   count is only the outcome.
+#
+# PRE-REGISTERED PREDICTION
+#   D10 (control): 8-10 of 10, matching hw26aniso/hw26 at 26 m.
+#   D20:  9-10 of 10, and — more diagnostic than the count, which is near
+#         ceiling — escape at t=1.2-1.6 s materially above the D10 tail.
+#   D20b: same as D20 within noise.
+#   The count is at ceiling at 26 m, so THE RESPONSE CURVE IS THE MEASUREMENT.
+#   If duration works, the place it will show is a lower required range, and
+#   the follow-up is to re-fly 21 m — where the pooled fit puts P(save) near
+#   0.5 and there is room to move — not another 26 m cell.
+
+TAG=dur10 RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 DODGE_DURATION=1.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+TAG=dur20 RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 DODGE_DURATION=2.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+TAG=dur20b RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=1.5 DODGE_DURATION=2.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"

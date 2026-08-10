@@ -71,22 +71,40 @@ RELIABLE_QOS = QoSProfile(
     depth=10,
 )
 
-# Sample points after the command, in seconds. 1.0 s is dodge_duration_s, so the
-# last one is the whole manoeuvre; the early ones are the only ones that can
-# matter at a tca of 0.2-0.3 s.
-SAMPLES_S = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.60, 1.00)
+# Sample points after the command, in seconds.
+#
+# This used to stop at 1.00 s, "because 1.0 s is dodge_duration_s, so the last
+# one is the whole manoeuvre". That reasoning made the instrument blind exactly
+# where the question now is. At 26 m the tca at commit is 0.93-1.24 s, so NINE
+# of ten throws in the flagship cell were still inbound when the command ended
+# — and evasion_node publishes ZERO velocity at the cutoff, which in body frame
+# is a brake, not a coast. Displacement was still accelerating there: 0.007 m
+# at 0.30 s, 0.109 at 0.60, 0.606 at 1.00.
+#
+# So the window now runs past the cutoff. Samples beyond dodge_duration_s
+# measure the coast/brake tail; samples beyond a given throw's tca are simply
+# after the fact and must be read as such, not as escape that helped.
+SAMPLES_S = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.60, 0.80, 1.00,
+             1.20, 1.40, 1.60, 2.00)
 BASELINE_FIT_S = 0.20     # window before the trigger used to fit cruise velocity
-HISTORY_S = 3.0           # pose ring-buffer span
-# evasion.yaml's SHIPPED dodge_speed_mps -- assumed, not measured. It is a
-# swept parameter, so a run at another value makes every figure derived from
-# this constant wrong in proportion. Rescale, or re-read it from the node.
-DODGE_SPEED_MPS = 1.5     # evasion.yaml dodge_speed_mps; the command is a step
+HISTORY_S = 4.0           # pose ring-buffer span; must exceed max(SAMPLES_S)
+# evasion.yaml's shipped dodge_speed_mps, used only for the `ideal_m` reference
+# column. It is a SWEPT parameter: the 26 m and 21 m cells all flew 3.0, so a
+# hardcoded 1.5 made every "fraction of ideal" figure from those runs 2x
+# optimistic. Override with --dodge-speed to match the cell being flown.
+DEFAULT_DODGE_SPEED_MPS = 1.5
 
 
 class DodgeResponse(Node):
-    def __init__(self, out_path: str, drone_model: str) -> None:
+    def __init__(self, out_path: str, drone_model: str,
+                 dodge_speed_mps: float = DEFAULT_DODGE_SPEED_MPS) -> None:
         super().__init__("hz_dodge_response")
         self._drone_model = drone_model
+        # Reference only: `ideal_m` is what a perfect step of this magnitude
+        # would displace. Wrong value -> every "fraction of ideal" is wrong in
+        # proportion, and silently so, which is how the 3.0 m/s cells came to
+        # be read against a 1.5 m/s ideal.
+        self._dodge_speed = float(dodge_speed_mps)
         self.set_parameters([Parameter("use_sim_time", value=True)])
 
         # (recv_s, xyz world). A deque, not a list: the eviction below runs once
@@ -185,7 +203,7 @@ class DodgeResponse(Node):
 
         for dt, esc in rows:
             self._csv.writerow([ev["_idx"], f"{dt:.2f}", f"{esc:.4f}",
-                                f"{DODGE_SPEED_MPS * dt:.4f}",
+                                f"{self._dodge_speed * dt:.4f}",
                                 f"{ev.get('tca_s', float('nan')):.3f}",
                                 f"{ev.get('miss_m', float('nan')):.3f}"])
         self._fh.flush()
@@ -206,10 +224,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="/tmp/dodge_resp.csv")
     ap.add_argument("--drone-model", default="iris_depth")
+    ap.add_argument("--dodge-speed", type=float,
+                    default=DEFAULT_DODGE_SPEED_MPS,
+                    help="dodge_speed_mps the CELL is flying; scales the "
+                         "ideal_m reference column only. Pass it — the 26 m "
+                         "and 21 m cells fly 3.0, and the 1.5 default made "
+                         "every fraction-of-ideal figure from them 2x "
+                         "optimistic.")
     args = ap.parse_args()
 
     rclpy.init()
-    node = DodgeResponse(args.out, args.drone_model)
+    node = DodgeResponse(args.out, args.drone_model, args.dodge_speed)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

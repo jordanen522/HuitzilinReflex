@@ -145,21 +145,34 @@ if [ "${PIPESTATUS[0]}" -ne 0 ]; then
   echo "!! never got airborne at range $RANGE"; exit 1
 fi
 
-# Optional per-cell dodge_speed_mps override. INERT when DODGE_SPEED is unset,
-# so every result measured before this hook existed ran an identical code path.
-# Must come AFTER lab_up.sh: that restarts /evasion, which reloads evasion.yaml
-# and resets dodge_speed_mps to 1.5. Readback is checked because a silently
-# ignored set would produce a whole sweep secretly flown at the shipped value.
-DODGE_SPEED="${DODGE_SPEED:-}"
-if [ -n "$DODGE_SPEED" ]; then
-  ros2 param set /evasion dodge_speed_mps "$DODGE_SPEED" 2>&1
-  RB="$(ros2 param get /evasion dodge_speed_mps 2>&1)"
-  echo "[dodge_speed] requested $DODGE_SPEED | readback: $RB"
-  case "$RB" in
-    *"$DODGE_SPEED"*) ;;
-    *) echo "!! dodge_speed_mps did not read back as $DODGE_SPEED - ABORT"; exit 1 ;;
+# Optional per-cell override of a RUNTIME-SWEEPABLE evasion parameter (the set
+# evasion.yaml lists as such: dodge_speed_mps, threat_radius_m,
+# trigger_horizon_s, dodge_duration_s, min_track_updates — the Kalman keys are
+# fixed at node start and must go through evasion_params instead).
+#
+# INERT when the variable is unset, so every result measured before a hook
+# existed ran an identical code path. Must come AFTER lab_up.sh: that restarts
+# /evasion, which reloads evasion.yaml and resets these to shipped values.
+#
+# The readback is not a formality. A silently ignored set would fly a whole
+# sweep at the shipped value, and when the stack was duplicated `set` and `get`
+# reached DIFFERENT nodes — this check is what caught that.
+set_evasion_param() {
+  local key="$1" want="$2" rb
+  [ -n "$want" ] || return 0
+  ros2 param set /evasion "$key" "$want" 2>&1
+  rb="$(ros2 param get /evasion "$key" 2>&1)"
+  echo "[$key] requested $want | readback: $rb"
+  case "$rb" in
+    *"$want"*) return 0 ;;
+    *) echo "!! $key did not read back as $want - ABORT"; return 1 ;;
   esac
-fi
+}
+
+DODGE_SPEED="${DODGE_SPEED:-}"
+DODGE_DURATION="${DODGE_DURATION:-}"
+set_evasion_param dodge_speed_mps  "$DODGE_SPEED"    || exit 1
+set_evasion_param dodge_duration_s "$DODGE_DURATION" || exit 1
 
 # Assert the evasion node actually received the measurement covariance this
 # cell asked for. EXPECT_BANNER covers oracle_params ONLY; evasion_params
@@ -199,7 +212,11 @@ fi
 RESP_BIN="${RESP_BIN:-$HOME/huitzilin_ws/scripts/hz_dodge_response.py}"
 if [ "${RESP_OUT:-}" = "1" ]; then
   echo "== escape response probe -> ${STEM}_resp.csv"
+  # --dodge-speed scales the probe's ideal_m reference column. Without it the
+  # probe assumes the shipped 1.5, so every fraction-of-ideal figure from a
+  # 3.0 m/s cell read 2x optimistic.
   nohup setsid python3 "$RESP_BIN" --out "${STEM}_resp.csv" \
+    --dodge-speed "${DODGE_SPEED:-1.5}" \
     > "${STEM}_resp.log" 2>&1 < /dev/null & disown
   sleep 5
   if ! pgrep -f "hz_dodge_respons[e]" > /dev/null; then
