@@ -1,0 +1,40 @@
+# q1_envelope.txt — first unattended queue. ~3 h, 6 cells.
+#
+# All six hold the reference sensor model (lab/params/oracle_stereo.yaml,
+# depth 0.30 m / bearing 0.02 m, the modelled AR0234 stereo pair) and vary ONE
+# thing each against the 26 m / 60 Hz / 20 m/s cell that scored 10/10.
+#
+#   fd26   false-dodge rate at the reference config       — can fail the project
+#   st23   23 m instead of 26 m                           — is the BOM shrinkable?
+#   sp24   24 m/s instead of 20 m/s                       — is there margin?
+#   ds15   dodge_speed_mps SHIPPED 1.5 instead of 3.0     — does the real config pass?
+#   rt30   30 Hz instead of 60 Hz                         — is 60 fps required?
+#   st21   21 m, pairs with the isotropic 21 m cells      — what did noise shape buy?
+#
+# Ordered by how much each can invalidate: a false-dodge regression matters
+# more than any of the reductions, and there is no point shrinking a BOM whose
+# discrimination is broken.
+#
+# EXPECT_BANNER aborts the cell in ~2 minutes if oracle_params failed to land,
+# instead of spending 25 minutes re-flying the shipped isotropic defaults.
+
+TAG=fd26 RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/fd20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+TAG=st23 RANGE=23.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r23.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+TAG=sp24 RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/hz24_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+# DODGE_SPEED deliberately UNSET: lab_cell.sh then skips its override and the
+# stack flies evasion.yaml's shipped dodge_speed_mps 1.5. Every 20 m/s result
+# so far was flown at 3.0, which is not what would ship. The dodge_speed null
+# says escape goes as ~command^0.065, so this should cost nothing — but that
+# null was measured at 14 m/s and 16 m, and it has never been checked at the
+# configuration the aircraft would actually carry.
+TAG=ds15 RANGE=26.0 ORACLE_RATE=0.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+# 30.0 quantises exactly onto Gazebo's 60 Hz pose grid (60/ceil(60/30) = 30),
+# so this is a real 30 Hz and not another 14.5-becomes-12 surprise. Confirm
+# from the data anyway: track_age_s / (track_updates - 1) must read ~0.033 s.
+TAG=rt30 RANGE=26.0 ORACLE_RATE=30.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+TAG=st21 RANGE=21.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r21.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"

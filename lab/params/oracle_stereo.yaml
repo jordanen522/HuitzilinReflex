@@ -1,0 +1,51 @@
+# oracle_stereo.yaml — the REFERENCE 20 m/s sensor model.
+#
+# A full copy of src/huitzilin_perception/params/oracle_detector.yaml with two
+# fields changed. It is a copy rather than an overlay because a params file
+# passed as `oracle_params:=` REPLACES the shipped file in the launch; anything
+# omitted here falls back to the node's own declared default, not to the
+# shipped yaml. CLAUDE.md forbids editing the shipped yaml for a diagnostic
+# (--symlink-install makes the installed copy a symlink into src/), so lab
+# sensor models live here.
+#
+# WHAT IT MODELS
+#   A synchronised AR0234 global-shutter stereo pair, 3.0 um pitch, 10 mm M12,
+#   at a ~150 mm baseline. sigma_z = z^2 * sigma_d / (f * b) with f = 3333 px
+#   and sigma_d = 0.2 px gives 0.27 m at 26 m; 0.30 m is that rounded up.
+#   Bearing at 0.2 px centroid on 0.300 mrad/px is 0.06 mrad = 1.6 mm at 26 m,
+#   so 0.02 m is deliberately PESSIMISTIC by ~12x and still costs nothing.
+#
+#   The axes are base_link FLU (forward, left, up) and the oracle applies the
+#   noise in that frame (oracle.py:126-136, after the rotation at :167-179), so
+#   "forward" is boresight depth for a head-on throw. For an off-axis throw the
+#   true error ellipse follows the line of sight, not the body x-axis; this
+#   file is faithful only near boresight. Say so in any off-axis result.
+#
+# 10/10 on-course saves at 20 m/s, 26 m, 60 Hz (hw26aniso, commit 2957526).
+
+oracle_detector:
+  ros__parameters:
+    poses_topic: "/gz/dynamic_poses"
+    odom_topic: "/huitzilin/odom"
+    centroid_topic: "/threat/centroid"
+
+    drone_model: "iris_depth"
+    ball_name_prefixes: ["ball_", "projectile_"]
+
+    # Overridden by the launch's detection_range_m argument — present only so
+    # the file is a complete node configuration.
+    detection_range_m: 26.0
+    min_range_m: 0.30
+    fov_half_angle_deg: 45.0
+
+    # Overridden by the launch's oracle_rate_hz argument. 0.0 disables the
+    # limiter and delivers Gazebo's full 60 Hz pose grid.
+    rate_hz: 0.0
+
+    noise_std_m: 0.15                    # inert: noise_std_xyz_m wins
+    noise_std_xyz_m: [0.30, 0.02, 0.02]  # depth, cross-range, vertical
+
+    dropout_prob: 0.0
+    seed: 20260810             # fixed for audit; timing still varies run to run
+
+    stamp_offset_warn_s: 0.05

@@ -29,6 +29,7 @@ from __future__ import annotations
 import sys
 import json
 from enum import Enum
+from typing import Optional
 
 import numpy as np
 import rclpy
@@ -48,6 +49,7 @@ from huitzilin_perception.cloud_geometry import (
     is_valid_quat,
     make_transform,
     quat_to_rot,
+    rotate_covariance,
 )
 from huitzilin_perception.kalman import (
     GRAVITY_ENU,
@@ -71,10 +73,28 @@ from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 FIXED_AT_START = {
     "centroid_topic", "odom_topic", "evade_topic", "alarm_topic",
     "intercept_topic", "event_topic", "marker_topic", "patrol_service",
-    "process_accel_std", "meas_std_m", "init_vel_std", "track_timeout_s",
-    "max_tracks", "max_assoc_sigma_m", "evade_cmd_rate_hz",
+    "process_accel_std", "meas_std_m", "meas_std_xyz_m", "init_vel_std",
+    "track_timeout_s", "max_tracks", "max_assoc_sigma_m", "evade_cmd_rate_hz",
     "evade_accel_topic", "cue_topic",
 }
+
+
+def _resolve_meas_std_xyz(values) -> Optional[np.ndarray]:
+    """meas_std_xyz_m -> the per-axis (forward, left, up) body-frame std used
+    to build a per-measurement R, or None if the anisotropic path is
+    disabled.
+
+    All-zero is the disable sentinel, not empty -- the identical convention
+    oracle_detector.yaml's noise_std_xyz_m already uses. Length is checked
+    eagerly because this value IS the enable/disable decision: a mis-sized
+    override must fail loudly at startup, not silently broadcast into the
+    wrong shape on the first centroid.
+    """
+    xyz = [float(v) for v in values]
+    if len(xyz) != 3:
+        raise ValueError(
+            "meas_std_xyz_m must be exactly 3 values, got %d" % len(xyz))
+    return np.asarray(xyz, dtype=np.float64) if any(v > 0.0 for v in xyz) else None
 
 
 class EvadeState(Enum):
@@ -101,6 +121,10 @@ class EvasionNode(Node):
         self.declare_parameter("patrol_service", "/huitzilin/start_patrol")
         self.declare_parameter("process_accel_std", 3.0)
         self.declare_parameter("meas_std_m", 0.15)
+        # (forward, left, up) sigma in base_link. All-zero = disabled, use
+        # the isotropic meas_std_m above -- mirrors oracle_detector.yaml's
+        # identical noise_std_xyz_m sentinel convention.
+        self.declare_parameter("meas_std_xyz_m", [0.0, 0.0, 0.0])
         self.declare_parameter("init_vel_std", 15.0)
         self.declare_parameter("track_timeout_s", 0.5)
         self.declare_parameter("max_tracks", 6)
@@ -135,6 +159,7 @@ class EvasionNode(Node):
                 "centroid_topic", "odom_topic", "evade_topic", "alarm_topic",
                 "intercept_topic", "event_topic", "marker_topic",
                 "patrol_service", "process_accel_std", "meas_std_m",
+                "meas_std_xyz_m",
                 "init_vel_std", "track_timeout_s", "max_tracks",
                 "max_assoc_sigma_m", "min_track_updates",
                 "threat_radius_m", "trigger_horizon_s", "prediction_horizon_s",
@@ -148,6 +173,7 @@ class EvasionNode(Node):
             )
         }
         self.add_on_set_parameters_callback(self._on_param_set)
+        self._meas_std_xyz = _resolve_meas_std_xyz(self._p["meas_std_xyz_m"])
 
         # ── Tracker + state machine ──────────────────────────────────────
         self._tracker = MultiHypothesisTracker(
@@ -273,6 +299,22 @@ class EvasionNode(Node):
     def _stamp_to_sec(stamp) -> float:
         return stamp.sec + stamp.nanosec * 1e-9
 
+    def _update_tracker(self, t: float, z_odom: np.ndarray,
+                        Rot: np.ndarray) -> None:
+        """One measurement into the tracker. With meas_std_xyz_m disabled
+        (the default) this is EXACTLY the old two-argument call -- never
+        R=None, never a computed-but-equal R -- reached by an early branch.
+
+        `Rot` must be the SAME base_link->odom rotation already used to lift
+        the point itself (T_odom_bl's rotation block), so the covariance and
+        the point it belongs to are re-expressed the same way.
+        """
+        if self._meas_std_xyz is None:
+            self._tracker.process(t, z_odom)
+            return
+        R_body = np.diag(np.square(self._meas_std_xyz))
+        self._tracker.process(t, z_odom, rotate_covariance(R_body, Rot))
+
     def _centroid_cb(self, msg: PointStamped) -> None:
         if self._state is not EvadeState.TRACKING:
             return  # mid-dodge/recovery: the tracker restarts fresh afterwards
@@ -298,7 +340,8 @@ class EvasionNode(Node):
         z_bl = np.array([msg.point.x, msg.point.y, msg.point.z])
         z_odom = apply_transform(T_odom_bl, z_bl[None, :])[0].astype(np.float64)
 
-        self._tracker.process(self._stamp_to_sec(msg.header.stamp), z_odom)
+        self._update_tracker(self._stamp_to_sec(msg.header.stamp), z_odom,
+                             T_odom_bl[:3, :3])
 
         min_updates = effective_min_updates(
             self.get_clock().now().nanoseconds * 1e-9, self._last_cue_s,

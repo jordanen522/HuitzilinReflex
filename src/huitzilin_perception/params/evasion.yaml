@@ -10,6 +10,12 @@ evasion:
     # ── Kalman filter (fixed at node start) ──────────────────────────────
     process_accel_std: 3.0     # m/s^2 accel noise; absorbs drag/stereo mismatch
     meas_std_m: 0.15           # centroid measurement noise (stereo + clustering)
+    # (forward, left, up) sigma in base_link, for a sensor whose depth and
+    # bearing noise differ (e.g. a stereo/mono pair: depth error grows as
+    # z^2, lateral as z). All-zero = disabled, use the isotropic meas_std_m
+    # above. Mirrors the identical sentinel convention in
+    # oracle_detector.yaml's noise_std_xyz_m.
+    meas_std_xyz_m: [0.0, 0.0, 0.0]
     init_vel_std: 15.0         # m/s prior; covers throws up to 14 m/s
     track_timeout_s: 0.5       # sim s of silence before a track is dropped
     # ── Multi-hypothesis association (fixed at node start) ───────────────

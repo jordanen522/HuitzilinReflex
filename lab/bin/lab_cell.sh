@@ -78,8 +78,42 @@ echo "[ok] oracle confirmed at $ACTUAL m"
 # The prefix bug published zero centroids while logging nothing wrong. Confirm
 # the oracle agrees with the battery about what a ball is called BEFORE
 # spending 12 minutes finding out it does not.
-echo "[cfg] oracle ball prefixes:"
-grep -a "ball prefixes" /tmp/lab_stack.log | tail -1 || echo "  (not logged — old node?)"
+#
+# The same banner carries every OTHER launch-time input, and range is the only
+# one checked above. noise_std_xyz_m, seed and the FOV half-angle arrive
+# through `oracle_params:=`, which reaches lab_up.sh only by environment
+# inheritance of EXTRA_LAUNCH — a cell that loses it silently re-flies the
+# SHIPPED defaults at the requested range and looks entirely normal. Two cells
+# were lost that way. Assert on what the node says it started with.
+BANNER="$(grep -a "oracle_detector up" /tmp/lab_stack.log | tail -1)"
+if [ -z "$BANNER" ]; then
+  echo "!! oracle printed no startup banner — is it running?"; exit 1
+fi
+echo "[cfg] $BANNER"
+
+# Exactly one oracle must be alive. A node that outlived its own `ros2 launch`
+# survives lab_up.sh's teardown (which kills by process GROUP) and keeps
+# publishing /threat/centroid alongside the new one — two uncorrelated views of
+# one ball, which is the very thing week6_oracle.launch.py exists to prevent.
+NORACLE="$(pgrep -fc "oracle_detecto[r]" 2>/dev/null || true)"
+if [ "${NORACLE:-0}" != "1" ]; then
+  echo "!! ${NORACLE:-0} oracle_detector processes alive, expected exactly 1 — ABORT"
+  pgrep -af "oracle_detecto[r]"
+  exit 1
+fi
+
+# INERT when unset, so every cell measured before this hook existed ran an
+# identical code path. Set it to an ERE matched against the banner line.
+EXPECT_BANNER="${EXPECT_BANNER:-}"
+if [ -n "$EXPECT_BANNER" ]; then
+  if printf '%s' "$BANNER" | grep -qE "$EXPECT_BANNER"; then
+    echo "[ok] banner matches EXPECT_BANNER='$EXPECT_BANNER'"
+  else
+    echo "!! banner does NOT match EXPECT_BANNER='$EXPECT_BANNER' — ABORT"
+    echo "   EXTRA_LAUNCH was: '${EXTRA_LAUNCH:-<unset>}'"
+    exit 1
+  fi
+fi
 
 bash "$BIN/lab_fly.sh" 2>&1 | tail -4
 if [ "${PIPESTATUS[0]}" -ne 0 ]; then

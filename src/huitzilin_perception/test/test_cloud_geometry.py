@@ -22,6 +22,7 @@ from huitzilin_perception.cloud_geometry import (
     is_valid_quat,
     make_transform,
     quat_to_rot,
+    rotate_covariance,
     voxel_downsample,
 )
 
@@ -61,6 +62,43 @@ def test_transform_round_trip():
     pts_cam = (pts_world - t) @ R  # == R.T applied from the left
     back = apply_transform(T_world_cam, pts_cam)
     np.testing.assert_allclose(back, pts_world, atol=1e-4)
+
+
+# ── covariance rotation (evasion_node's anisotropic-R fusion hook) ───────────
+
+def test_rotate_covariance_identity_is_a_no_op():
+    R = np.diag([1.0, 4.0, 9.0])
+    np.testing.assert_allclose(rotate_covariance(R, np.eye(3)), R)
+
+
+def test_rotate_covariance_isotropic_is_rotation_invariant():
+    # A round sensor's covariance doesn't care which way it is pointed.
+    R = np.eye(3) * 0.25
+    yaw = math.radians(37)
+    Rot = quat_to_rot(0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2))
+    np.testing.assert_allclose(rotate_covariance(R, Rot), R, atol=1e-12)
+
+
+def test_rotate_covariance_round_trip_via_transpose_restores_original():
+    rng = np.random.default_rng(3)
+    A = rng.uniform(-1, 1, (3, 3))
+    R = A @ A.T + np.eye(3) * 0.01  # a real (SPD) covariance
+    yaw = math.radians(52)
+    Rot = quat_to_rot(0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2))
+    rotated = rotate_covariance(R, Rot)
+    back = rotate_covariance(rotated, Rot.T)  # Rot.T undoes Rot for a rotation
+    np.testing.assert_allclose(back, R, atol=1e-9)
+
+
+def test_rotate_covariance_stays_symmetric_positive_definite():
+    rng = np.random.default_rng(11)
+    A = rng.uniform(-1, 1, (3, 3))
+    R = A @ A.T + np.eye(3) * 0.01
+    yaw = math.radians(81)
+    Rot = quat_to_rot(0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2))
+    rotated = rotate_covariance(R, Rot)
+    np.testing.assert_allclose(rotated, rotated.T, atol=1e-12)
+    assert np.all(np.linalg.eigvalsh(rotated) > 0.0)
 
 
 # ── egomotion compensation: the actual W3 failure mode ───────────────────────

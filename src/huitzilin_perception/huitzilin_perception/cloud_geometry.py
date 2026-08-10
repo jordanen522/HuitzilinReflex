@@ -47,6 +47,16 @@ def apply_transform(T: np.ndarray, pts: np.ndarray) -> np.ndarray:
     return (pts @ T[:3, :3].T + T[:3, 3]).astype(np.float32)
 
 
+def rotate_covariance(R: np.ndarray, Rot: np.ndarray) -> np.ndarray:
+    """Re-express a 3x3 covariance under rotation `Rot` (child frame -> parent
+    frame). A congruence transform, not a similarity one -- covariance is a
+    bilinear form, so applying `Rot` the way a vector would be rotated (a bare
+    `Rot @ R`) would not even stay symmetric. Callers should pass the SAME
+    `Rot` used to move the point the covariance belongs to, e.g. the rotation
+    block of the transform apply_transform() just applied to it."""
+    return Rot @ R @ Rot.T
+
+
 # ── Voxel grid (pure-numpy, no PCL / open3d dep) ─────────────────────────────
 
 # Voxel indices are packed into one int64 so np.unique can take its fast 1-D
