@@ -103,7 +103,7 @@ Inverting: 26 m → **24.6 m/s at P=0.90**. The speed ladder confirmed this inde
 | Rate | **≥60 Hz at full resolution** | 12 Hz costs 0.09 s of dead time = **1.8 m of extra reach** at 20 m/s. Measured, not assumed. |
 | Timestamping | **At exposure, not arrival** | The latency model assumes the centroid keeps its exposure stamp so the filter predicts across the delay. An arrival-stamped pipeline additionally *biases* the state estimate and is a worse sensor than anything measured here. **This is a firmware/driver requirement.** |
 | Depth | 0.30 m at 26 m (stereo pair) | Mono apparent-size depth is 0.85 m at 26 m and scored **7/10 vs stereo's 10/10**. See §7 for the one-vs-two-camera decision. |
-| Bearing | ≤0.05 m cross-range at 26 m (6.4 px) | See §7. |
+| Bearing | ≤0.05 m cross-range at 26 m (6.4 px) | **Derived budget, not a measured requirement** — the cell that would have tested bearing sensitivity (`bear10`) was not flown. Treat as conservative; it may be loose. |
 | Mass | 13.5 g (mono) / 27 g (pair) | Against the **61 g** OAK-D Lite being removed — the change *saves* mass. |
 | Part | e-con **See3CAM_20CUG** (mono, $89) | The See3CAM_24CUG is **colour**, verified; do not order it for this role. |
 
@@ -177,7 +177,7 @@ Settings that matter, with the reason attached:
 | `dodge_speed_mps` | **1.5** (shipped) | Command magnitude plateaus: escape goes as ~`command^0.065`, and a 4× command buys 1.095×. Raising it is not a lever. |
 | `dodge_duration_s` | **1.0** (shipped) | Null at operational tca — doubling the window changes escape by 1.00× where these dodges commit. |
 | `min_track_updates` | 3 | Not the binding gate; cells commit at 4.6–17.3 updates. |
-| `threat_radius_m` | 0.75 → see §7 | This *is* the gate that holds the dodge. |
+| `threat_radius_m` | **0.75 (shipped — do not change)** | This *is* the gate that holds the dodge: the wait for `miss_m < threat_radius_m` is most of dead time. Widening it to 1.25 was the one untested reach lever and its false-fire cost is unknown (§7.2). Fly the bracket before touching it. |
 | `trigger_horizon_s` | **1.5** | `should_dodge` requires `tca ≤ trigger_horizon_s`, which **hard-caps exploitable reach at `v × (1.5 + t_dead)` = 33.6 m at 20 m/s.** 26 m is under the cap; **any longer lens requires raising this or the extra reach is discarded.** |
 | `meas_std_xyz_m` | **[0, 0, 0]** (isotropic) | Correcting the tracker's covariance to match real mono depth was tested and **refuted** — it made the filter sluggish, not accurate. §6. |
 | `RTL_ALT` | 400 (**cm**) | Under the 5 m fence. ArduPilot's 15 m default would make a fence-breach RTL climb through the fence it is answering. `FENCE_ALT_MAX` is in **metres** — the units differ. |
@@ -208,18 +208,85 @@ Nothing on the maneuver side is the problem.
 
 ---
 
-## 7. Decisions pending the final queue
+## 7. The final queue — what it answered, and what it did not
 
-*(filled on completion — see §10 provenance)*
+The campaign was **stopped by decision on 2026-08-10**, not by exhaustion of the queue.
+Two cells of the planned nine flew; the rest are optional confidence-building that would
+not change the architecture, the BOM, or any specification in this document. This section
+records both halves honestly, because an unflown cell is an **open question**, never a
+null result.
 
-| Question | Cell | Decides |
+### 7.1 Answered
+
+| Question | Cell | Result |
 |---|---|---|
-| Is 10/10 real at n=30? | `ref30` | Whether the BOM rests on a Wilson lower bound of 0.72 or 0.88. |
-| Does a wider trigger gate buy reach back? | `trA/trB/trC` + `fdTR` | Whether `threat_radius_m` 1.25 cuts dead time — every 0.01 s is 0.2 m of reach at 20 m/s — and what it costs in false fires. |
-| Does bearing precision matter? | `bear10` | Whether centroid/calibration accuracy is a spec driver at all. |
-| Do degradations compound? | `stack` | The only multi-factor cell: real cone, depth 0.30, bearing 0.05, 30 ms latency, shipped `dodge_speed`, all at once. |
-| **One camera or two?** | `mono30` | Whether mono's *time* deficit can be paid for with reach ($89, 13.5 g, no extrinsics) instead of a second sensor ($178, 27 g, 12 arcsec extrinsics). |
-| Does mono false-fire? | `fdmonoISO/MCV` | Whether the faster/overconfident arm buys its speed with false dodges. |
+| Is 10/10 real at n=30? | `ref30` | **28/29 on-course saves at 26 m, 20 m/s, hover.** 30 fired, **0 NO-FIREs**, 1 `DODGE_FAILED`, 1 `WOULD_HAVE_MISSED` excluded from the denominator by rule. Commit tca mean 1.096 s (0.770–1.310). Latency mean 19 ms, max 23. **Wilson 95% lower bound 0.83**, against the 0.72 a 10/10 cell supports. |
+| Does mono false-fire? | `fdmonoISO` + `fdmonoMCV` | **0 false dodges in 31 clear-miss throws**, both arms. Isotropic: 0/10 at 1.5 m miss, 0/5 at 3.0 m. Matched-covariance: 0/10 and 0/6. Both still fired **6/6** on the 0.5 m near-miss control, so the discipline is not deafness. Mono does **not** buy its speed with false fires, under either tracker covariance. Neither cell contains an on-course throw, so neither reports a save rate. |
+
+All three cells pass all four contamination detectors (implied rate below launched,
+`n_post` inside one-pose-bridge bounds, first-detection range within 0.3 m of launched,
+response probe dodges equal to fires).
+
+`fdmonoMCV` was in flight when the campaign was stopped; it was allowed to land rather
+than discarded, and completed all 22 throws.
+
+### 7.2 Not answered — carried forward as open questions
+
+| Question | Cell | Status and what stands in its place |
+|---|---|---|
+| Does a wider trigger gate buy reach back? | `trA/trB/trC`, `fdTR` | **Unflown.** `threat_radius_m` stays at the shipped **0.75**. The hypothesis — that 1.25 shortens the velocity-convergence wait and so cuts dead time — is **untested in either direction**, and its false-fire cost is unmeasured. Do not change this parameter on hardware without flying the bracket. |
+| Does bearing precision matter? | `bear10` | **Unflown.** The ≤0.05 m cross-range figure in §3 is therefore a **derived budget, not a measured requirement**. It may well be loose. |
+| Do degradations compound? | `stack` | **Unflown.** See §7.4 — composed from single-factor results by model, which is weaker evidence than the cell would have been. |
+| **One camera or two?** | `mono30` | **Unflown.** See §7.3 — the decision is therefore made on the evidence that exists, and it goes the conservative way. |
+
+### 7.3 One camera or two — recommendation: **two (stereo pair)**
+
+The evidence actually in hand, at 26 m and 20 m/s in hover:
+
+| arm | saves | how the losses failed |
+|---|---|---|
+| stereo, σ_depth 0.30 m | **10/10**, and 28/29 at n=30 | — |
+| mono, σ_depth 0.85 m | **7/10** | all three were **late commits** (tca 0.31 / 0.68 / 0.75 s), not weak escapes |
+| mono, false fires | **0/15** | — |
+| tracker covariance matched to mono | 6/10 vs isotropic 7/10 and 7/10 | tca spread **doubled**; refuted |
+
+Mono does not dodge worse — it **decides later**, because a 0.85 m depth axis makes the
+velocity estimate converge slowly. That deficit is in *time*, and time has two currencies:
+buy accuracy with a second camera ($178, 27 g, extrinsics to ~12 arcsec), or buy time with
+a longer lens on one camera ($89, 13.5 g, no extrinsics). `mono30` existed to test the
+second currency at 30 m, where the extra 4 m returns 0.20 s. **It was not flown, so that
+option is unvalidated.**
+
+**Specify the stereo pair.** It is the only arm with a measured ≥9/10 at the design point.
+Mono-plus-reach remains a live cost-down path worth ~$89 and ~13.5 g, but it is a
+*hypothesis*, and it carries two costs that must be priced together: 30 m needs an
+~11.5 mm lens, narrowing the cone from ±13.5° to ~±11.7° when ~±10° is already the usable
+sector (§4), and `trigger_horizon_s` must rise above 1.5 s or the extra reach is discarded
+(§5). If the hardware confirms §8.2 comfortably, one 10-cell run at 30 m with the mono
+noise model rescaled by z² is the whole experiment.
+
+### 7.4 Do the degradations compound? — composed, not measured
+
+`stack` was to fly the real cone, 0.30 m depth, 0.05 m bearing, 30 ms latency and the
+shipped `dodge_speed_mps` all at once. Composing the single-factor results instead:
+
+| factor | measured cost at the design point |
+|---|---|
+| ±13.5° cone, **head-on** | none — 8/8 |
+| σ_depth 0.30 m (stereo) | none — this is the reference condition |
+| 30 ms latency | +0.030 s dead time = 0.6 m of reach; flown at 23 m it cost nothing (10/10) |
+| `dodge_speed_mps` 1.5 vs 3.0 | none — the command plateaus (§6) |
+| σ_bearing 0.05 m | **unmeasured** |
+
+At 26 m and 20 m/s the budget is `tca = 26/20 − t_dead − latency`. At p50 dead time that
+is 1.09 s, where the pooled sigmoid gives P ≈ 0.999; at the **p90** dead time of 0.350 s it
+is 0.92 s, where P ≈ 0.97. So the head-on design point retains margin even when the
+degradations are stacked pessimistically.
+
+**This is a model composition, and it is weaker than the cell would have been** in exactly
+one way: it assumes the factors are additive in dead time and independent. Nothing measured
+contradicts that, and nothing measured confirms it either. Off-axis it does not hold at all
+— the cone term is not additive, it is a cliff (§4).
 
 ---
 
@@ -348,3 +415,79 @@ commit in this repository. The rules the results were scored under:
 
 See also: `docs/week6_result.md` (the full derivation and every refuted lever),
 `docs/hardware_bringup.md` (the physical checklist), `docs/SAFETY_CASE.md`.
+
+---
+
+## 13. Bill of materials — the sensing change
+
+Only the sensing path changes. The airframe, flight controller, and companion computer
+are unchanged, because **no maneuver-side lever was ever found wanting** (§6).
+
+| Item | Part | Qty | Unit | Mass | Note |
+|---|---|---|---|---|---|
+| Camera | e-con **See3CAM_20CUG** — AR0234 global shutter, **mono** | **2** | $89 | 13.5 g | Stereo pair per §7.3. The See3CAM_24CUG is **colour** — verified; do not order it for this role. |
+| Lens | **10 mm M12**, matched pair | 2 | ~$20 | ~5 g | 0.300 mrad/px ⇒ 26 m reach on an 80 mm ball, and ±13.5°/±11.0° of cone. Both come from the same choice. |
+| Stereo mount | Rigid baseline bar, thermally stable | 1 | — | ~10 g | Extrinsic stability to ~12 arcsec is the demanding requirement, not the optics. |
+| Cabling | USB 3.0, 2× short | 2 | — | ~8 g | Full-resolution 60 Hz needs USB 3.0 bandwidth per camera; verify the Pi's controller sustains both. |
+| **Removed** | OAK-D Lite | −1 | — | **−61 g** | |
+
+**Net mass change: roughly −15 g.** The upgrade is lighter than the part it replaces.
+Net cost ~$218.
+
+**Cost-down option, unvalidated:** one camera + an ~11.5 mm lens (−$89, −13.5 g, no
+extrinsics requirement at all), contingent on flying the `mono30` cell and accepting a
+~±11.7° cone. See §7.3.
+
+---
+
+## 14. Final status
+
+**Software / simulation validation: COMPLETE.**
+**20 m/s architecture demonstrated in simulation.**
+**Physical hardware validation is now the blocking dependency.**
+
+The physical 20 m/s objective has **not** been achieved and must not be reported as
+achieved. What has been established is that a specified, purchasable sensor configuration
+makes it reachable, and that nothing on the maneuver side stands in the way.
+
+### 14.1 What simulation proved
+
+- P(save) is a **sigmoid in tca**, `logit P = −22.271 + 27.910·tca`, LD50 **0.798 s**
+  (CI 0.779–0.817), over **310 on-course hover throws from 30 cells**.
+- The law is **speed-independent** across nine speeds from 14 to 29 m/s (ball speed as a
+  covariate: z = +0.93, not significant; tca: z = +6.47).
+- **26 m of reach at 60 Hz yields 28/29 saves at 20 m/s head-on**, Wilson lower bound
+  **0.83**.
+- **Zero false dodges** across every validated miss-by-design control set — most recently
+  0 in 31 across both mono tracker-covariance arms, with the near-miss control still
+  firing 6/6.
+- Dead time is **0.179 s at 60 Hz**, rising to 0.270 s at 12 Hz, and is a *filter*
+  property — `track_age` is 70–94% of it.
+- **Latency converts to reach at 0.2 m per 10 ms** at 20 m/s; ≤30 ms is free at 26 m,
+  60 ms is not.
+- Robustness holds **head-on**; the ±13.5° lens leaves ~±10° usable and **20° undefended**,
+  and every off-axis loss is a no-fire, never a failed dodge.
+- **Every maneuver-side lever is refuted**, retired together by achieved Δv exceeding
+  commanded Δv in every arm of a controlled sweep.
+
+### 14.2 What only hardware can settle
+
+1. **Whether a 10 mm lens actually detects an 80 mm ball at 26 m.** Every other number
+   here is conditional on this one, and it is the cheapest to test (§8.2). It is also the
+   most likely to disappoint, because the oracle models no contrast, blur, or clutter.
+2. Real σ_depth and σ_bearing at range — the 0.30 m and 0.05 m figures are **model inputs**.
+3. Delivered frame rate at full resolution, sustained, on the real Pi.
+4. Real end-to-end latency, and whether centroids carry an **exposure** stamp.
+5. Real detector behaviour: false positives, missed small fast objects, background clutter.
+6. Real airframe response outside hover — the entire envelope is measured in **hover**,
+   because the harness cannot deliver a hit at range under patrol. The analytic ~1.7×
+   reach penalty for a moving drone is **unvalidated**.
+7. Wind, lighting, vibration, thermal drift of the stereo extrinsics.
+8. Real projectile validation at ascending speed: 8, then 14, then 20 m/s.
+
+### 14.3 Simulation questions deliberately left open
+
+Not blockers, and none of them changes the architecture or the BOM — recorded so they are
+not mistaken for settled: the `threat_radius_m` bracket, bearing sensitivity, the stacked
+multi-factor cell, and `mono30`. All four are described in §7.2, and each would be a
+single ~8-minute cell if hardware later makes one of them worth resolving.
