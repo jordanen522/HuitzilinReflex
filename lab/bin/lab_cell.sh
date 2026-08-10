@@ -290,4 +290,59 @@ if [ -s "${STEM}_cf.csv" ]; then
 else
   echo "   (empty — probe saw no episodes)"
 fi
+
+# ── contamination screen ─────────────────────────────────────────────────────
+#
+# A duplicated stack does not raise an error. It returns numbers that look
+# entirely normal, and one six-cell queue was scored, reported and only then
+# discovered to be void. These three checks are the cheapest reliable
+# detectors, calibrated against those quarantined cells:
+#
+#   implied rate  = (track_updates-1)/track_age_s. Cannot exceed the rate the
+#                   oracle was launched with. Void cells ran 1.4-2.9x over;
+#                   every clean cell sits at or below 1.12x (Gazebo catch-up
+#                   bursts explain the small overshoot). Flags above 1.20x.
+#   n_post        = pose samples hz_counterfactual saw after the dodge. One
+#                   60 Hz pose bridge gives 230-354. Void cells gave
+#                   1179-6317 — one band per duplicated bridge.
+#   resp dodges   = rows in the response probe. One /evasion node fires once
+#                   per throw; void cells fitted ZERO.
+#
+# Advisory, not fatal: a cell that has already flown is worth keeping and
+# judging. The abort for this lives in lab_up/lab_queue teardown and in the
+# singleton assertion above, which run BEFORE the 25 minutes are spent.
+echo ""
+echo "== contamination screen =="
+ORACLE_HZ="${ORACLE_RATE:-14.5}"
+awk -F, -v launched="$ORACLE_HZ" '
+  NR>1 && $31+0 > 1 && $32+0 > 0 {
+    r = ($31 - 1) / $32; n++; s += r; if (n == 1 || r > mx) mx = r
+  }
+  END {
+    if (!n) { print "   no track rows to screen"; exit }
+    # 0.0 means "limiter disabled" -> Gazebos full 60 Hz pose grid.
+    lim = (launched + 0 == 0.0) ? 60.0 : launched + 0
+    printf "   implied detection rate: mean %.1f Hz, max %.1f Hz (launched %.1f)\n",
+           s/n, mx, lim
+    if (mx > lim * 1.20)
+      printf "   !! max is %.2fx the launched rate — SUSPECT duplicate publishers\n",
+             mx / lim
+  }' "${STEM}.csv"
+
+if [ -s "${STEM}_cf.csv" ]; then
+  awk -F, 'NR>1 && $12+0 > 0 {n++; s+=$12; if(n==1||$12+0>mx)mx=$12+0}
+           END{ if(!n){print "   no counterfactual rows to screen"; exit}
+                printf "   n_post: mean %.0f, max %.0f (one 60 Hz bridge = 230-354)\n", s/n, mx;
+                if (mx > 600) print "   !! n_post far above one bridge — SUSPECT duplicate pose bridges" }' \
+    "${STEM}_cf.csv"
+fi
+
+if [ "${RESP_OUT:-}" = "1" ] && [ -s "${STEM}_resp.csv" ]; then
+  NRESP="$(awk -F, 'NR>1 && $1!="" {seen[$1]=1} END{print length(seen)}' "${STEM}_resp.csv")"
+  NFIRED="$(awk -F, 'NR>1 && tolower($5)=="true" {n++} END{print n+0}' "${STEM}.csv")"
+  echo "   response probe fitted $NRESP dodges vs $NFIRED fired in the battery"
+  [ "${NRESP:-0}" = "0" ] && [ "${NFIRED:-0}" != "0" ] && \
+    echo "   !! probe fitted NOTHING while the battery fired — SUSPECT a second /evasion"
+fi
+
 echo "== cell $RANGE done"
