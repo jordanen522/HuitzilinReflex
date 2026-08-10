@@ -161,6 +161,28 @@ if [ -n "$DODGE_SPEED" ]; then
   esac
 fi
 
+# Assert the evasion node actually received the measurement covariance this
+# cell asked for. EXPECT_BANNER covers oracle_params ONLY; evasion_params
+# travels the same fragile path (EXTRA_LAUNCH -> lab_up.sh -> launch file), and
+# a cell that loses it silently flies the shipped isotropic belief — which is
+# exactly the arm a covariance A/B is trying to distinguish itself from, so the
+# failure reads as a clean null rather than as an error.
+#
+# This is the ONLY chance to check it: meas_std_xyz_m is in FIXED_AT_START, so
+# the node read it once at construction and a later `ros2 param set` would be
+# accepted and ignored. INERT when unset.
+EXPECT_MEAS_STD="${EXPECT_MEAS_STD:-}"
+if [ -n "$EXPECT_MEAS_STD" ]; then
+  MRB="$(ros2 param get /evasion meas_std_xyz_m 2>&1)"
+  echo "[meas_std_xyz_m] expect '$EXPECT_MEAS_STD' | readback: $MRB"
+  case "$MRB" in
+    *"$EXPECT_MEAS_STD"*) echo "[ok] measurement covariance confirmed" ;;
+    *) echo "!! meas_std_xyz_m did not read back as '$EXPECT_MEAS_STD' — ABORT"
+       echo "   EXTRA_LAUNCH was: '${EXTRA_LAUNCH:-<unset>}'"
+       exit 1 ;;
+  esac
+fi
+
 echo "== counterfactual probe -> ${STEM}_cf.csv"
 nohup setsid python3 "$BIN/hz_counterfactual.py" --out "${STEM}_cf.csv" \
   > "${STEM}_cf.log" 2>&1 < /dev/null & disown

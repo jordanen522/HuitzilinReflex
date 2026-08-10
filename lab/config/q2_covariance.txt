@@ -1,0 +1,54 @@
+# q2_covariance.txt — DOES TELLING THE FILTER THE TRUTH RECOVER THE MONO ARM?
+# ~75 min, 3 cells. Run after q1_envelope.
+#
+# THE QUESTION
+#   Mono depth (sigma 0.85 m at 26 m, from apparent size) scored 7/10 where the
+#   modelled stereo pair (0.30 m) scored 10/10. The three losses were not
+#   no-fires — they were LATE COMMITS: saved at tca 0.91/0.94/0.94/1.10/1.11/
+#   1.15/1.15, failed at 0.31/0.68/0.75. Mean tca barely moved (1.045 -> 0.904);
+#   the SPREAD exploded. That is the signature of a filter over-trusting a bad
+#   measurement: evasion.yaml declares meas_std_m 0.15 m while the depth axis
+#   is actually 0.85 m, so the Kalman gain is ~5.7x too high on range and each
+#   noisy sample yanks the range estimate, which is the term tca is computed
+#   from.
+#
+#   meas_std_xyz_m now lets the filter be told the truth, per-axis, rotated
+#   into the odom frame (cloud_geometry.rotate_covariance). If the diagnosis is
+#   right, the ON arm should recover most of the 3 lost throws and — more
+#   diagnostic than the count — should TIGHTEN the tca distribution rather than
+#   raise its mean. If tca spread is unchanged, the diagnosis is wrong and the
+#   loss is somewhere other than the gain.
+#
+# WHY THREE CELLS AND NOT TWO
+#   The existing 7/10 is from a DIFFERENT session, and two identical control
+#   arms have drifted 1.58x apart in this harness — larger than the effect
+#   being measured. So the control is re-flown here, within session, and flown
+#   TWICE, bracketing the treatment. If OFFa and OFFb disagree by more than the
+#   ON-vs-OFF difference, this cell measured drift and nothing else, and that
+#   is the reportable result.
+#
+#   Order is OFFa -> ON -> OFFb deliberately: a monotone drift then shows up as
+#   OFFa != OFFb with ON between them, instead of hiding inside a single
+#   before/after comparison.
+#
+# BOTH ARMS ARE GENERATED, neither is the shipped file:
+#   mk_evasion_params.sh ~/hz_lab/params/evasion_iso.yaml  0 0 0
+#   mk_evasion_params.sh ~/hz_lab/params/evasion_mono.yaml 0.85 0.02 0.02
+# so the only difference between arms is that one key. Pointing the control at
+# src/evasion.yaml instead would put a second, invisible difference (comment
+# stripping, key ordering, yaml dialect) into the comparison.
+#
+# EXPECT_MEAS_STD is the readback assertion. Without it a cell that lost
+# evasion_params flies the isotropic belief and returns a clean, wrong null —
+# indistinguishable from "the covariance fix does nothing".
+#
+# PRE-REGISTERED PREDICTION
+#   OFFa, OFFb: 6-8 of 10 each, tca spread ~0.30-1.15 s.
+#   ON:         9-10 of 10, tca 10-90 percentile band at least 30% narrower.
+#   A 7/10 on the ON arm with an unchanged spread refutes the gain diagnosis.
+
+TAG=mcvOFFa RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_mono.yaml evasion_params:=$LAB/params/evasion_iso.yaml" EXPECT_BANNER="0.85, 0.02, 0.02" EXPECT_MEAS_STD="0.0, 0.0, 0.0"
+
+TAG=mcvON RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_mono.yaml evasion_params:=$LAB/params/evasion_mono.yaml" EXPECT_BANNER="0.85, 0.02, 0.02" EXPECT_MEAS_STD="0.85, 0.02, 0.02"
+
+TAG=mcvOFFb RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/hz20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_mono.yaml evasion_params:=$LAB/params/evasion_iso.yaml" EXPECT_BANNER="0.85, 0.02, 0.02" EXPECT_MEAS_STD="0.0, 0.0, 0.0"
