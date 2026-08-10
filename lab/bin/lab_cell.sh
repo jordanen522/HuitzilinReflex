@@ -337,6 +337,63 @@ if [ -s "${STEM}_cf.csv" ]; then
     "${STEM}_cf.csv"
 fi
 
+# Two one-sided gaps in the gates upstream of here, both of which have already
+# produced a wrong number that nothing complained about:
+#
+#   ball speed   min_launch_speed_frac rejects a throw that leaves too SLOW and
+#                says nothing about one that leaves too FAST. A corrupted
+#                derived speed reads high — one run reported 60.98 m/s against
+#                a 20.0 spec and was scored. The spec speed is not in the CSV,
+#                so compare each throw against the MEDIAN of its own scenario:
+#                all reps of one id share a spec, and good throws sit within
+#                1.5% of it. A 1.15x spread is far outside that and far inside
+#                the 2-3x a corruption produces.
+#                THIS FLAGS A READOUT, NOT NECESSARILY A BAD THROW. Before
+#                discarding anything, check the row against the three
+#                independent witnesses: tca_s and first_det_range_m in this
+#                same CSV, and n_pre/n_post/fit_resid_m in the _cf.csv. The
+#                60.98 m/s throw above had tca 0.75 s and first detection
+#                22.71 m — both in family with its nine 20 m/s siblings — and
+#                a cf fit residual of 0.0011 m, so the BALL was fine and only
+#                the derived speed was garbage. That cell's 8/10 stands.
+#   first det    offset_forward_m must keep the ball outside the sensor at
+#                spawn, or the cell measures a shorter sensor wearing the
+#                launched label. Every flown "12 m" cell once delivered first
+#                detection at 9.9-11.3 m. The runbook says to verify this by
+#                hand on every run; doing it by hand is how it was missed.
+#                Applied retroactively this fires on exactly the pre-e1e77d3
+#                12 m cells (2.11-3.62 m short) and on nothing clean.
+#                EXPECT IT TO FIRE ON A DELIBERATE-MISS CELL. Off-axis throws
+#                cross the range sphere outside the +-45 deg cone and are only
+#                seen once they enter it, which is nearer: the false-dodge cell
+#                reads 5.14 m short by geometry, not by fault.
+awk -F, -v want="$RANGE" '
+  NR>1 && $25+0 > 0 { sp[$2] = sp[$2] " " $25 }
+  NR>1 && $30+0 > 0 { dn++; ds += $30; if (dn==1 || $30+0 < dmn) dmn = $30+0 }
+  END {
+    for (id in sp) {
+      n = split(sp[id], v, " ")
+      # median of this scenario, insertion sort (n is <= repeats, tiny)
+      for (i=2; i<=n; i++) { x=v[i]+0; j=i-1; while (j>0 && v[j]+0 > x) { v[j+1]=v[j]; j-- } v[j+1]=x }
+      med = (n % 2) ? v[(n+1)/2]+0 : (v[n/2] + v[n/2+1]) / 2.0
+      mx = v[n]+0
+      if (med > 0 && mx > med * 1.15)
+        printf "   !! %s: ball speed max %.2f is %.2fx its own median %.2f — SUSPECT a corrupted derived speed\n",
+               id, mx, mx/med, med
+    }
+    if (!dn) { print "   no first_det_range_m rows to screen"; exit }
+    printf "   first detection: mean %.2f m, min %.2f m (launched %.1f)\n", ds/dn, dmn, want+0
+    # 1.0 m, not the ~0.2 m the runbook asks for by hand. The gate can only
+    # fire on a pose tick, and at 60 Hz / 20 m/s the ball covers 0.333 m
+    # between ticks, so first detection legitimately lands one to two ticks
+    # inside the range: the clean cells here read 0.11-0.59 m short. The
+    # failure this catches is 2-3 m short and up (a "12 m" cell delivering
+    # 9.9 m), so 1.0 m separates them with room on both sides.
+    if (want+0 > 0 && dmn < want+0 - 1.0)
+      printf "   !! first detection is %.2f m short of the launched range — the ball entered the gate from INSIDE it; this cell measured a shorter sensor\n",
+             want+0 - dmn
+  }' "${STEM}.csv"
+
 if [ "${RESP_OUT:-}" = "1" ] && [ -s "${STEM}_resp.csv" ]; then
   NRESP="$(awk -F, 'NR>1 && $1!="" {seen[$1]=1} END{print length(seen)}' "${STEM}_resp.csv")"
   NFIRED="$(awk -F, 'NR>1 && tolower($5)=="true" {n++} END{print n+0}' "${STEM}.csv")"
