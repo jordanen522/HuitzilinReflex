@@ -1,0 +1,19 @@
+# q6_ladder.txt — the top of the envelope, and a falsification test of the law.
+# ~50 min, 1 cell, 2 arms x 10 throws. Run last of the queued set.
+#
+# One cell, not two: both arms share a stack, so the 26 and 28 m/s numbers are
+# directly comparable with no between-cell drift between them (that drift is
+# x0.68 to x1.36 on escape offset across the pooled cells, which is larger than
+# the effect being measured here).
+#
+# The pooled law predicts P(save) 0.58 at 26 m/s and 0.20 at 28 m/s from a 26 m
+# sensor. Combined with the flown 20 m/s (10/10) and 24 m/s (9/10) at the same
+# range, this cell turns the range/speed relation from a fitted curve into a
+# four-point measured ladder.
+#
+# EXPECT_BANNER guards the sensor model as usual. Also check first_det_range_m
+# in the CSV: the offsets here are the largest flown (38 and 40 m), and if the
+# ball is spawned too close it enters the gate from inside it and the cell
+# quietly measures a shorter sensor.
+
+TAG=ladder RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 RESP_OUT=1 CONFIG=$LAB/config/hz_ladder_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
