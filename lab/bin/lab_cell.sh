@@ -171,8 +171,15 @@ set_evasion_param() {
 
 DODGE_SPEED="${DODGE_SPEED:-}"
 DODGE_DURATION="${DODGE_DURATION:-}"
+# threat_radius_m is the gate that actually holds the dodge. min_track_updates
+# is 3 and every cell commits at 4.6-17.3 updates, so confirmations are not
+# what costs the time -- waiting for the predicted miss to fall inside this
+# radius is, and track_age is 70-94% of the whole dead time. Unset by default,
+# so a cell that does not name it flies the shipped 0.75.
+THREAT_RADIUS="${THREAT_RADIUS:-}"
 set_evasion_param dodge_speed_mps  "$DODGE_SPEED"    || exit 1
 set_evasion_param dodge_duration_s "$DODGE_DURATION" || exit 1
+set_evasion_param threat_radius_m  "$THREAT_RADIUS"  || exit 1
 
 # Assert the evasion node actually received the measurement covariance this
 # cell asked for. EXPECT_BANNER covers oracle_params ONLY; evasion_params

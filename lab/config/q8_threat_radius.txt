@@ -1,0 +1,61 @@
+# q8_threat_radius.txt — CAN A WIDER TRIGGER GATE BUY BACK SENSOR REACH?
+# ~30 min, 4 cells. Run after q7.
+#
+# WHY THIS PARAMETER, AND WHY NOW
+#   The covariance A/B (q2) refuted its own hypothesis but produced a better
+#   one on the way. Dead time decomposes as track_age_s + latency_ms/1000, and
+#   latency is a stable ~19 ms — so track_age is 70-94% of it. min_track_updates
+#   is NOT what sets track_age: it is 3, and every cell measured commits at 4.6
+#   to 17.3 updates. The gate that actually holds the dodge is
+#
+#       miss_m < threat_radius_m
+#
+#   waiting on the tracker's velocity estimate to converge. threat_radius_m has
+#   never been swept. It is not on the nulls list. It is 0.75 m against a
+#   HIT_RADIUS_M of 0.30 m, so it already carries a 2.5x margin.
+#
+#   Every 0.01 s of dead time is 0.2 m of required reach at 20 m/s
+#   (range = speed x (tca + t_dead)). If a wider gate commits meaningfully
+#   sooner, the BOM requirement falls below 26 m — a wider, cheaper lens.
+#
+# WHY 23 m AND NOT 26 m
+#   26 m is at ceiling (10/10, 10/10, 9/9) and measures nothing. 23 m scored
+#   8/10, so there is room to move in both directions. A result here transfers
+#   to the reach question directly: 23 m at ceiling would retire the 26 m
+#   requirement.
+#
+# READ THE MECHANISM, NOT THE COUNT
+#   A 10-throw save count cannot separate 7/10 from 9/10. The pre-registered
+#   primary readout is therefore track_age_s and tca_s at commit, which are
+#   per-throw and far lower variance. The save count is secondary.
+#
+# PRE-REGISTERED PREDICTION
+#   trB (1.25 m) commits EARLIER than trA/trC (0.75 m): track_age lower by at
+#   least 0.03 s, tca_s higher by the same, saves equal or better.
+#   If track_age is unchanged, the radius is not the binding gate — velocity
+#   convergence is slower than the radius crossing — and the dead time is
+#   irreducible by this lever. That is a real answer and closes the question.
+#   KILL CONDITION: if trA and trC differ by more than trB differs from trA,
+#   this measured drift and nothing else. That is the reportable result.
+#
+# THE COST IS PRICED IN THE SAME QUEUE
+#   A wider gate fires on balls that were never going to hit. fdTR runs the
+#   reference false-dodge geometry at the treatment radius. Note F15 is a 1.5 m
+#   miss against a 1.25 m radius — only 0.25 m of margin, so SOME F15 fires
+#   would not be a surprise and are not automatically disqualifying; F30 at
+#   3.0 m must stay clean. Judge the two arms together: a radius that buys
+#   0.05 s of dead time and costs 30% false fires is not a win, and this cell
+#   is the only thing that can say so.
+#   Scoring here is inverted exactly as in fd20_r26.0.yaml — the measurement is
+#   the FIRE COUNT from `dodged`, with F05 as the live-trigger positive control.
+#
+# Order is trA -> trB -> trC so a monotone drift shows as trA != trC with the
+# treatment between them, the same bracket that made q2 readable.
+
+TAG=trA RANGE=23.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 THREAT_RADIUS=0.75 RESP_OUT=1 CONFIG=$LAB/config/hz20_r23.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+TAG=trB RANGE=23.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 THREAT_RADIUS=1.25 RESP_OUT=1 CONFIG=$LAB/config/hz20_r23.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+TAG=trC RANGE=23.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 THREAT_RADIUS=0.75 RESP_OUT=1 CONFIG=$LAB/config/hz20_r23.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
+
+TAG=fdTR RANGE=26.0 ORACLE_RATE=0.0 DODGE_SPEED=3.0 THREAT_RADIUS=1.25 RESP_OUT=1 CONFIG=$LAB/config/fd20_r26.0.yaml BATTERY_ARGS="-p hover_mode:=true" EXTRA_LAUNCH="oracle_params:=$LAB/params/oracle_stereo.yaml" EXPECT_BANNER="0.3, 0.02, 0.02"
