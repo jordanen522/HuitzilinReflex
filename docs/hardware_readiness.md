@@ -272,7 +272,7 @@ Nothing on the maneuver side is the problem.
 | Vertical sector | §8.3 | ≥±11.0° |
 | Exposure-stamp integrity | §8.1 | offset stable under load |
 | `track_age_s` at commit | flight CSV | ≤0.20 s at 60 Hz |
-| End-to-end latency | flight CSV `latency_ms` | ≤60 ms (30 ms measured free; 60 ms is the tested bound) |
+| End-to-end latency | flight CSV `latency_ms` | **≤30 ms preferred.** Latency is not free — it adds to dead time one-for-one, so **every 10 ms costs 0.2 m of required reach at 20 m/s**. Flown at 23 m: 0 ms → 10/10, 30 ms → 10/10, **60 ms → 6/10** (commit tca fell to 0.828 s). At 26 m the margin absorbs it; do not read "30 ms was free" as latency being harmless. |
 | `first_det_range_m` | flight CSV | within 1.0 m of the static figure |
 | tca at commit, 20 m/s | flight CSV | **≥0.90 s** |
 | Save rate, 20 m/s head-on | counterfactual | **≥9/10** |
@@ -300,7 +300,10 @@ measurement, and if one is destroyed, so is the conclusion resting on it.
    depends on the detector's real behaviour on a small, low-contrast blob, which the
    oracle does not model at all.
 5. **The defended sector is ±13.5° nominal / ~±10° usable**, and 20° is undefended.
-6. **Latency up to 30 ms is free**; 60 ms is the tested bound.
+6. **Latency converts to reach at 0.2 m per 10 ms at 20 m/s.** Flown at 23 m:
+   0 ms → 10/10, 30 ms → 10/10, 60 ms → 6/10 as commit tca fell to 0.828 s, which
+   the pooled fit and the measured first-detection range predict to within 0.008 s.
+   Falsified by: a latency cost that is *not* explained by the tca it removes.
 7. **No maneuver-side parameter improves the outcome** (§6). Falsified by: any
    authority lever producing a real gain on hardware.
 
