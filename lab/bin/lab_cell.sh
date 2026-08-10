@@ -91,14 +91,39 @@ if [ -z "$BANNER" ]; then
 fi
 echo "[cfg] $BANNER"
 
-# Exactly one oracle must be alive. A node that outlived its own `ros2 launch`
-# survives lab_up.sh's teardown (which kills by process GROUP) and keeps
-# publishing /threat/centroid alongside the new one — two uncorrelated views of
-# one ball, which is the very thing week6_oracle.launch.py exists to prevent.
-NORACLE="$(pgrep -fc "oracle_detecto[r]" 2>/dev/null || true)"
-if [ "${NORACLE:-0}" != "1" ]; then
-  echo "!! ${NORACLE:-0} oracle_detector processes alive, expected exactly 1 — ABORT"
-  pgrep -af "oracle_detecto[r]"
+# Exactly one of EACH stack singleton must be alive. A node that outlived its
+# own `ros2 launch` survives lab_up.sh's teardown (which kills by process
+# GROUP) and keeps running alongside the new one.
+#
+# This check used to cover the oracle only, and the gap cost a whole 6-cell
+# queue. lab_queue.sh's kill list named `evasion_nod[e]` / `patrol_nod[e]`
+# while the installed executables are `evasion` / `patrol`, so seven complete
+# stacks accumulated. The oracle check passed every time — the oracle was one
+# of the processes being killed correctly — while underneath it:
+#   * `ros2 param set /evasion` and `ros2 param get /evasion` addressed
+#     DIFFERENT nodes, so a dodge_speed override read back as the shipped 1.5;
+#   * seven gz_pose_bridge instances republished the same dynamic-pose stream,
+#     so hz_counterfactual scored NO_FIT and reported actual=54 m;
+#   * ball speed derived from those poses read 8-32 m/s for one 20 m/s throw,
+#     which the battery reported as "impulse wrench dropped".
+# None of that raises an error. Match on INSTALLED PATH, which cannot drift
+# from the entry-point name the way a guessed `_node` suffix did.
+SINGLETONS='oracle_detecto[r]
+huitzilin_perception/evasio[n]
+huitzilin_perception/gz_pose_bridg[e]
+huitzilin_sim/mav_bridg[e]
+huitzilin_sim/patro[l]'
+DIRTY=0
+while IFS= read -r pat; do
+  n="$(pgrep -fc "$pat" 2>/dev/null || true)"
+  [ "${n:-0}" = "1" ] && continue
+  echo "!! ${n:-0} processes match '$pat', expected exactly 1"
+  pgrep -af "$pat"
+  DIRTY=1
+done <<< "$SINGLETONS"
+if [ "$DIRTY" != "0" ]; then
+  echo "!! stack is NOT clean — ABORT. Every number from a duplicated stack is void,"
+  echo "   and it fails silently: see the comment above this check."
   exit 1
 fi
 

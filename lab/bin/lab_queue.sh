@@ -53,15 +53,28 @@ mkdir -p "$LOGDIR"
 # braces (pkill's argv holds the pattern, not the loop body), but these get
 # copy-pasted into ssh one-liners where an unbracketed pattern matches the
 # invoking command line and kills the controlling session — exit 255, twice.
+#
+# NODES ARE KILLED BY INSTALLED PATH, never by guessed executable name. The
+# first version of this list named `evasion_nod[e]` and `patrol_nod[e]`, but a
+# colcon console_script installs as `lib/huitzilin_perception/evasion` and
+# `lib/huitzilin_sim/patrol` — no `_node` suffix — so those two patterns
+# matched NOTHING while `mav_bridg[e]`, `oracle_detecto[r]` and the rest
+# matched fine. `gz_pose_bridge` and `telemetry_logger` were not listed at all.
+# Six cells then ran with up to SEVEN complete stacks alive: duplicate
+# /evasion nodes made `ros2 param set` and `ros2 param get` disagree,
+# duplicate pose bridges fed hz_counterfactual an interleaved ball track that
+# scored NO_FIT, and the derived ball speed read anywhere from 8 to 32 m/s for
+# one 20 m/s throw — which the battery then blamed on a dropped impulse
+# wrench. Every number was void and nothing in the output said so.
+# `[h]uitzilin_ws/install/` matches every node in both packages regardless of
+# what its entry point is called, which is the property the old list lacked.
 PATTERNS='hz_counterfactua[l]
 hz_dodge_respons[e]
 dodge_batter[y]
-oracle_detecto[r]
-evasion_nod[e]
-mav_bridg[e]
-patrol_nod[e]
+[h]uitzilin_ws/install/
 [r]os2 launch huitzilin
 [p]arameter_bridge
+gz-transport-topi[c]
 [m]avproxy.py
 [s]im_vehicle.py
 [a]rducopter
@@ -83,8 +96,23 @@ hard_teardown() {
   # exactly what lets a reused stack pass the range check on the PREVIOUS
   # cell's banner.
   : > /tmp/lab_stack.log
-  left="$(pgrep -fc "oracle_detecto[r]|[a]rducopter|[g]z sim" 2>/dev/null || true)"
+  # Survivors are counted against the SAME list that was just killed. The old
+  # check counted only oracle/ArduPilot/Gazebo — which happen to be three
+  # patterns that worked — so it printed `survivors=0` while seven complete
+  # ROS stacks were still running, and the queue spent 40 minutes producing
+  # data that looked entirely normal and meant nothing.
+  local alt
+  alt="$(printf '%s' "$PATTERNS" | tr '\n' '|')"
+  left="$(pgrep -fc "${alt%|}" 2>/dev/null || true)"
   echo "[teardown] survivors=${left:-0}"
+  # FAIL CLOSED. Continuing past a failed teardown is strictly worse than
+  # stopping: a dirty stack does not error, it silently returns void numbers.
+  if [ "${left:-0}" != "0" ]; then
+    echo "!! teardown FAILED — these are still alive:"
+    pgrep -af "${alt%|}"
+    return 1
+  fi
+  return 0
 }
 
 echo "############ lab_queue $(date -Is)"
@@ -107,7 +135,12 @@ while IFS= read -r line || [ -n "$line" ]; do
   echo ""
   echo "=========== [$n] $tag  start $(date -Is) ==========="
   echo "  $line"
-  hard_teardown
+  if ! hard_teardown; then
+    echo "!! ABORTING QUEUE before [$n] $tag — every cell run on a dirty stack is void"
+    SUMMARY="$SUMMARY$(printf '%-14s %s' "$tag" "NOT RUN (teardown failed)")
+"
+    break
+  fi
 
   # stdin from /dev/null: the queue file is this loop's stdin, and a child that
   # reads stdin would swallow the remaining cells.

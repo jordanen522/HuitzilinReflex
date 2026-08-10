@@ -52,13 +52,18 @@ if [ ! -f "$LAB_DIR/eeprom.bin" ]; then
 fi
 
 echo "== teardown"
-for pat in "[r]os2 launch huitzilin" "[p]arameter_bridge" "[m]avproxy.py" "[s]im_vehicle.py" "[a]rducopter" "[g]z sim"; do
+# Killed by INSTALLED PATH, not by executable name. `evasion_nod[e]` matched
+# nothing (colcon installs the entry point as `lib/huitzilin_perception/
+# evasion`), which let node processes outlive the `ros2 launch` process group
+# this loop targets. lab_cell.sh's singleton check is the backstop; this is
+# the fix. See the long note in lab_queue.sh for what the survivors did.
+for pat in "[h]uitzilin_ws/install/" "[r]os2 launch huitzilin" "[p]arameter_bridge" "gz-transport-topi[c]" "[m]avproxy.py" "[s]im_vehicle.py" "[a]rducopter" "[g]z sim"; do
   for p in $(pgrep -f "$pat"); do
     kill -TERM -"$(ps -o pgid= -p "$p" | tr -d ' ')" 2>/dev/null
   done
 done
 sleep 6
-for pat in "[r]os2 launch huitzilin" "[p]arameter_bridge" "[m]avproxy.py" "[s]im_vehicle.py" "[a]rducopter" "[g]z sim"; do
+for pat in "[h]uitzilin_ws/install/" "[r]os2 launch huitzilin" "[p]arameter_bridge" "gz-transport-topi[c]" "[m]avproxy.py" "[s]im_vehicle.py" "[a]rducopter" "[g]z sim"; do
   for p in $(pgrep -f "$pat"); do
     kill -KILL -"$(ps -o pgid= -p "$p" | tr -d ' ')" 2>/dev/null
   done
