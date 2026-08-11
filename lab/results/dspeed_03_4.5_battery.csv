@@ -1,9 +1,0 @@
-combo,id,rep,expect_dodge,dodged,latency_ms,min_dist_m,spec_miss_m,aim_err_m,off_target,steady,success,error,note,skipped,window_s,needed_window_s,spawn_dead_s,miss_along_m,miss_cross_m,miss_vert_m,lead_along_m,lead_cross_m,lead_vert_m,ball_speed_mps,t_flight_assumed_s,flight_to_ca_s,tca_s,trigger_miss_m,first_det_range_m,track_updates,track_age_s,n_hypotheses
-baseline,W01,0,True,False,,0.168,0.0,0.168,False,True,False,False,no dodge fired,False,2.343,1.05,0.227,-0.048,-0.155,-0.044,0.064,0.149,-0.04,7.957,0.75,0.749,,,3.356,,,
-baseline,W01,1,True,True,18.0,0.33,0.0,0.33,False,True,True,False,clean dodge,False,2.105,1.05,0.225,-0.149,-0.156,-0.25,0.616,0.099,-0.02,7.956,0.75,0.807,0.06,0.413,3.27,3,0.163,1
-baseline,W01,2,True,True,20.0,0.362,0.0,0.362,False,True,True,False,clean dodge,False,2.048,1.05,0.221,-0.074,-0.218,-0.279,0.569,0.175,-0.037,8.043,0.75,0.806,0.05,0.415,3.232,3,0.164,1
-baseline,W01,3,True,True,18.0,0.55,0.0,0.55,False,True,True,False,clean dodge,False,2.02,1.05,0.209,-0.254,-0.172,-0.456,1.112,0.083,-0.007,7.957,0.75,0.855,0.08,0.051,3.274,3,0.163,1
-baseline,W01,4,True,True,17.0,0.632,0.0,0.632,False,True,True,False,clean dodge,False,1.848,1.05,0.225,-0.247,-0.198,-0.547,1.259,0.097,-0.006,8.09,0.75,0.873,0.1,0.367,3.352,3,0.162,1
-baseline,W01,5,True,True,18.0,0.61,0.0,0.61,False,True,True,False,clean dodge,False,1.874,1.05,0.213,-0.224,-0.165,-0.543,1.238,0.115,0.003,8.043,0.75,0.875,0.09,0.337,3.23,3,0.163,1
-baseline,W01,6,True,True,18.0,0.312,0.0,0.312,False,True,True,False,clean dodge,False,2.17,1.05,0.234,-0.013,-0.162,-0.267,0.506,0.115,-0.024,7.914,0.75,0.809,0.09,0.181,3.298,3,0.165,1
-baseline,W01,7,True,True,19.0,0.372,0.0,0.372,False,True,True,False,clean dodge,False,2.149,1.05,0.218,-0.18,-0.132,-0.297,0.704,0.106,-0.033,8.043,0.75,0.811,0.12,0.348,3.369,3,0.154,1

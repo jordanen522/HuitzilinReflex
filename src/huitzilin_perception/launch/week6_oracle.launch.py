@@ -137,8 +137,8 @@ def generate_launch_description() -> LaunchDescription:
                 # against a DOUBLE declaration and oracle_detector dies at
                 # startup with InvalidParameterTypeException. A sweep over
                 # "3.4 5 7 9 12" therefore ran one cell and skipped four, and
-                # the only reason that was noticed at all is lab_sweep.sh
-                # re-reads the range out of the oracle's own startup log.
+                # the only reason that was noticed at all is that the harness
+                # re-read the range out of the oracle's own startup log.
                 "detection_range_m": ParameterValue(
                     LaunchConfiguration("detection_range_m"), value_type=float),
                 "rate_hz": ParameterValue(

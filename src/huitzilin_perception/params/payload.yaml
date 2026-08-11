@@ -20,7 +20,7 @@ payload:
     # WS2812B data line. GPIO18 is the PWM-capable pin rpi_ws281x wants.
     # The strip needs 5 V logic, so the data line goes through a 3.3->5 V
     # level shifter (74AHCT125) before DIN -- the Pi's 3.3 V is out of spec
-    # driving the strip directly. See hardware_bringup.md section 7.
+    # driving the strip directly.
     led_pin: 18
     led_count: 8
 

@@ -9,11 +9,9 @@ __pycache__/
 # Unrelated separately-cloned tool plugin marketplace (untracked)
 ECC/
 
-# Lab: raw dataflash and telemetry are too large for git (7.2 GB, five .BIN
-# files over GitHub's 100 MB hard limit). The conclusions that rest on them
-# are reproduced in lab/results/*.csv, which IS committed.
+# Run artifacts: dataflash and telemetry are too large for git (.BIN files
+# routinely exceed GitHub's 100 MB hard limit).
 logs/
-lab/logs/
 *.BIN
 *.tlog
 *.tlog.raw

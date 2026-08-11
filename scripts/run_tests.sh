@@ -11,8 +11,7 @@
 # NOTE the source-then-set-u ordering below. ROS/ament setup.bash reference
 # unbound variables (AMENT_TRACE_SETUP_FILES and friends), so a script that
 # enables 'set -u' first exits at the source line with no useful message.
-# run_regression.sh gets this right; preflight_hw.sh sidesteps it by not using
-# -u at all.
+# run_regression.sh gets this right.
 
 set -eo pipefail
 

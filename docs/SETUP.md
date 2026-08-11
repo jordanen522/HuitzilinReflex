@@ -75,13 +75,6 @@ source install/setup.bash
 Bring-up commands, the service calls, and the traps that bite (`sitl_frame.parm`,
 `--out` port fan-out) live in `CLAUDE.md`. Read its sharp edges before the first run.
 
-Optional smoke test: `python3 scripts/first_flight.py` (heartbeat → armed → takeoff →
-"Holding position"). It connects on **`:14551`**, not `:14550` — point a
-`sim_vehicle.py --out` there or it hangs forever in `wait_heartbeat()`.
-
-`first_flight.py` is **SITL-only**: it takes off to 5 m, which is exactly
-`FENCE_ALT_MAX` on the real vehicle. Never run it against hardware.
-
 Perception stack (depth world, detector, bag capture — Dell only):
 `docs/bag_capture_runbook.md`.
 

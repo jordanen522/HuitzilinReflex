@@ -2,8 +2,8 @@
 
 Owns: bring-up, smoke test, battery, and sweep procedure for the evasion loop, plus how
 to read the miss decomposition. Native-Ubuntu Dell only (live Gazebo depth).
-Results and the capability envelope live in `CLAUDE.md`; the Week 6 tca threshold law and
-the levers it retired live in `docs/week6_result.md`.
+The tca law, the capability envelope and every lever this harness retired live in
+`docs/RESULTS.md`.
 
 **If you are here to measure escape or saves rather than to exercise the loop, read §4
 first** — §1–§3 are the wrong instrument for that question.

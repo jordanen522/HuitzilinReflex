@@ -1,2 +1,0 @@
-episode,ball,scenario,rep,t_dodge_s,actual_min_m,counterfactual_min_m,delta_m,verdict,fit_resid_m,n_pre,n_post
-1,ball_V14_r0_1786236716,V14,0,,2.0098,,,NO_DODGE,,0,316

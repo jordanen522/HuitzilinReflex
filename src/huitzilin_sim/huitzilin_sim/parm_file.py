@@ -6,7 +6,7 @@ MAVProxy; that is a parse error here. A duplicated key is also an error,
 because a duplicate is exactly how a safety parameter gets silently overridden
 by a later line nobody scrolled down to.
 
-The comparison half is shared with scripts/hw_param_readback.py so that
+The comparison half is kept here, rather than in a caller, so that
 readback-vs-expected logic lives in tested Python rather than in bash.
 """
 

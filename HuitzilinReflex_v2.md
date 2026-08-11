@@ -103,39 +103,25 @@ flight staged late. Each week has a Definition of Done.
 | 2 — ROS 2 ↔ pymavlink bridge + patrol ✔ | Autonomous closed patrol loop, logged telemetry (43 laps, mean 29.51 s). Airframe fidelity deferred to Weeks 7–8 |
 | 3 — Perception pipeline ✔ (2026-07-15) | Simulated OAK-D depth, synthetic scenarios, detection node, 17-bag labeled library + regression harness; held-out test recall 100% |
 | 4 — Evasion logic & KF in the loop ✔ (2026-07-27) | Predictive KF + multi-hypothesis tracker + dodge trigger; closed detection → intercept → velocity-spike → alarm (mocked GPIO) over a 7-scenario battery. All four DoD criteria met; result is a capability envelope bounded by sensing, so Week 6 is what moves it |
+| 5 — Software lane ✔ (2026-07-31) | Supervisor state machine, payload node, clock guard, hardware config overlays, hardware preflight; 253 unit tests |
+| 6 — The 20 m/s answer ✔ (2026-08-10) | The project's central question, answered in simulation ahead of the hardware — see below and `docs/RESULTS.md` |
 
-The Week 6 **sim** lane has since answered the project's central question ahead of the
-hardware. A save is a **threshold in time-to-closest-approach at ~0.83 s**, independent of
-ball speed; in hover `range = speed × (tca + 0.177)`; every maneuver-side lever is
-refuted. As built, the maximum dodgeable ball speed is **~3.5 m/s**, and 20 m/s needs
-~21 m of reach on a 7 cm ball — which an **AR0234 global-shutter mono + 10 mm M12** buys
-for $99 and 26 g, *lighter* than the OAK-D Lite it replaces. The deficit was angular
-resolution, never headline range. Full derivation: `docs/week6_result.md`.
+**Week 6 answered the project's central question.** A save is a **sigmoid in
+time-to-closest-approach**, `logit P = −22.271 + 27.910·tca`, LD50 **0.798 s**, measured
+over 310 on-course hover throws and independent of ball speed across nine speeds from 14
+to 29 m/s. In hover `range = speed × (tca_required + t_dead)`, and every maneuver-side
+lever is refuted. As built the maximum dodgeable ball speed is **~3.2 m/s**; 20 m/s needs
+**21.1 m** of reach on an 80 mm ball, and a 26 m sensor scores 28/29 head-on. That reach is
+bought by an **AR0234 global-shutter mono + 10 mm M12** (See3CAM_20CUG, $89, 13.5 g —
+*lighter* than the OAK-D Lite it replaces), at the cost of narrowing the defended sector to
+~±10° usable. The deficit was angular resolution, never headline range. Full derivation:
+`docs/RESULTS.md`.
 
-**Remaining** — planned in detail, hardware lane vs software lane, in
-`docs/weeks_5_9_plan.md`:
-
-- **Week 5 — FC swap, avionics & power** (the one fabrication step). Swap F722 → H743,
-  flash ArduPilot, motor test (props off), bind radio + failsafes + kill-switch, wire
-  Pololu BEC, mount Pi + OAK-D. *DoD:* clean bench arm-up, failsafes verified, Pi powered
-  with no FC-rail draw.
-- **Week 6 — Payload *wiring* & real OAK-D bring-up.** WS2812B (level-shifted) + siren on
-  GPIO; depthai-ros streaming over verified USB-3; characterize real stereo noise into
-  the KF model; Remote ID / registration. *DoD:* live depth frames + payload triggers
-  within latency budget. (The `payload_node` software landed early, in the Week 5 SW
-  lane — Week 6 is the hardware it drives.) The Week 6 **sim** lane is separate and
-  already closed (`docs/week6_result.md`); what this bullet still owes is the real
-  sensor's own reach and rate, the two inputs that law consumes.
-- **Week 7 — HITL & tethered hover.** Real H743 + simulated world; tethered/netted hover.
-  *DoD:* stable tethered hover with full stack running and logging.
-- **Week 8 — Incremental real flight.** Manual hover → autonomous patrol → evasion, only
-  inside a netted enclosure with soft projectiles; re-tune KF against real stereo noise.
-  *DoD:* one clean autonomous patrol + successful evasion, fully logged.
-- **Week 9 — Validation, documentation & retro.** Validation matrix, as-built wiring doc,
-  final vlog, sim-vs-real post-mortem. *DoD:* reproducible build doc + validation report.
-
-> **Cut order if behind:** Weeks 1–5 are sacred. Trim real evasion flights first (Week
-> 8) — demo evasion in HITL/SITL rather than rush an unsafe test.
+**Weeks 7–9 — out of scope.** The project closed at the end of the simulation phase on
+2026-08-10. The remaining weeks were physical: HITL and tethered hover, incremental real
+flight inside a netted enclosure with soft projectiles, and a sim-vs-real validation retro.
+They are not cancelled for cause — the simulation phase answered what it set out to answer.
+What hardware would still have to settle is recorded in `docs/RESULTS.md` §9.
 
 ---
 
@@ -173,6 +159,15 @@ enclosure and kill-switch discipline is what actually bounds evasion testing.
 | 19 | COMRUN M2.5 nylon standoff kit | 1 | $9.99 | Amazon |
 | 20 | Samsung 30Q 18650 cell | 2 | $13.98 | 18650 Battery Store |
 | | **Item subtotal (pre-tax/shipping)** | | **$1,149.21** | |
+
+**The one BOM change the campaign concluded, not purchased:** replace the OAK-D Lite
+(item 5) with a **stereo pair of e-con See3CAM_20CUG** (AR0234 global shutter, mono,
+$89 each, 13.5 g each) on matched **10 mm M12** lenses, on a rigid thermally-stable
+baseline bar. Net ~$218 and roughly **−15 g** — the upgrade is lighter than the part it
+replaces. This is what buys 26 m of reach on an 80 mm ball and so the 20 m/s objective;
+the OAK-D Lite's measured ~3.4 m caps the aircraft at ~3.2 m/s. Note the See3CAM_**24**CUG
+is colour — verified; do not order it for this role. Reasoning and the sector cost:
+`docs/RESULTS.md` §4.1 and §5.
 
 *Prices June 2026, several on sale. Not yet purchased: 3.3→5 V level shifter for the LED
 data line; DJI FPV goggles if manual FPV flight is desired in Week 8.*

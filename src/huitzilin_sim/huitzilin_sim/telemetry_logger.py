@@ -44,8 +44,8 @@ class TelemetryLogger(Node):
         p, v = m.pose.pose.position, m.twist.twist.linear
         # ROS time, not time.time(). Under use_sim_time the two diverge by the
         # real-time factor -- ~0.33 on the Dell under depth rendering -- so a
-        # wall-clock stamp stretched plot_telemetry.py's x-axis by 3x and made
-        # every duration read off it wrong. CLAUDE.md: judge timing in sim time.
+        # wall-clock stamp stretched the logged x-axis by 3x and made every
+        # duration read off it wrong. CLAUDE.md: judge timing in sim time.
         t = self.get_clock().now().nanoseconds * 1e-9
         self.w.writerow([f"{t:.3f}",
                          p.x, p.y, p.z,

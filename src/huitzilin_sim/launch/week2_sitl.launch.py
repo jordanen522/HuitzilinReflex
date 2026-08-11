@@ -21,7 +21,7 @@ def generate_launch_description():
     pkg = get_package_share_directory("huitzilin_sim")
     bridge_params = os.path.join(pkg, "params", "bridge.yaml")
     # Overridable so Week 4 can fly a longer loop without changing the Week 2
-    # demo geometry (scripts/plot_telemetry.py hardcodes the 5 m square).
+    # demo geometry, which is the 5 m square.
     default_patrol_params = os.path.join(pkg, "params", "patrol.yaml")
     supervisor_params = os.path.join(pkg, "params", "supervisor.yaml")
 
