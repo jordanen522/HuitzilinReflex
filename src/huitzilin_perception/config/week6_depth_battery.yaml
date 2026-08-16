@@ -1,0 +1,216 @@
+# Synthetic-DEPTH battery — the 20 m/s question asked through the REAL detector.
+#
+# RUN THIS ONLY UNDER week6_synthetic_depth.launch.py. Every row here assumes
+# /threat/centroid is COMPUTED by the unmodified detector_node.py from a
+# sensor_msgs/PointCloud2 on /oak/points, and that the cloud is published by
+# synthetic_depth_publisher_node.py. Never run it under week6_oracle.launch.py
+# (which asserts the centroid from Gazebo truth and shares no clustering code)
+# and never with both stacks up: two publishers on /threat/centroid give the
+# tracker two uncorrelated views of one ball.
+#
+# WHAT THIS LANE IS, AND THE CEILING ON WHAT IT MAY CLAIM
+#   The cloud is SYNTHETIC — derived from Gazebo ground truth by a model of an
+#   AR0234-class global-shutter mono + 10 mm M12 stereo pair. The sensor is
+#   MODELLED, NOT RENDERED. An 80 mm ball at 26 m subtends 0.176 deg, which is
+#   sub-pixel at this world's 640x480 over 67.3 deg, so no rendered depth camera
+#   in this simulation can produce that return; that is why the oracle exists at
+#   all. What changes here is only WHO COMPUTES the detection. The ROI gate,
+#   voxel downsample, background differencing, Euclidean clustering, extent test
+#   and centroid extraction are the real code running on real points.
+#
+#   So a number from this file is evidence about the real detection and
+#   clustering pipeline. It is NOT evidence that a rendered — or a physical —
+#   depth sensor sees this far. Say "the real detection and clustering
+#   pipeline"; never say "a rendered depth sensor".
+#
+# THE RATE IS 60 Hz. Quote it beside every number. Dead time is rate-dependent
+#   (0.178 s at 60 Hz against 0.270 s at 12 Hz), and the publisher logs the
+#   DELIVERED rate at startup — quote that one, not the requested one. 60 Hz
+#   also sets a SLOW-BALL FLOOR through the detector's frame differencing:
+#   v_min = diff_threshold_m * delivered_rate_hz = 0.10 * 60 = 6.0 m/s. Below it
+#   NOTHING is detected at any range, silently, with every stage upstream
+#   healthy. Every row here is at 8 m/s or above, deliberately.
+#
+# WHAT A RESULT FROM THIS FILE MEANS. It is conditional on the launched
+# detection_range_m, which is an INPUT, read once in the publisher's __init__
+# with no parameter callback (`ros2 param set` is accepted and ignored — every
+# range change needs a full stack restart, and it must be passed as a float:
+# `detection_range_m:=26` is inferred as an integer and rejected). "28/30 at
+# 20 m/s" is a claim about the perception pipeline, tracker, trigger and
+# airframe GIVEN a 26 m sensor — never a claim that the hardware can see 26 m.
+# Quote the range beside every number.
+#
+# NO FALSE-POSITIVE NUMBER LIVES HERE. The cloud contains the ball and nothing
+# else: no ground, no runway, no background return. detector_node's
+# background-differencing stage therefore RUNS but rejects NOTHING, so this lane
+# cannot say how often scene clutter fabricates a threat. The Week 4 patrol
+# figures (0/12 false dodges at 8 m/s, B07) remain the only measurement of that,
+# and D10 below is NOT a substitute for them — see D10's own note.
+#
+# week4_battery.yaml and week6_synthetic_battery.yaml are both untouched and
+# stay the regression/provenance paths. This file is a sibling, never an edit of
+# either: their counts are measured provenance.
+#
+# ORDER OF OPERATIONS (do not skip):
+#   1. Fidelity gate. Run D11/D12 on PATROL with the modelled sensor pinned to
+#      the real rendered detector's measured reach, `detection_range_m:=3.4`,
+#      and confirm D11 reproduces the measured 0/17 shape at 14 m/s and D12 the
+#      78/78 shape at 8 m/s. Score that gate on `dodged`, not on the
+#      counterfactual: the Week 4 reference is itself a patrol dodge count, and
+#      under patrol 0 of 98 throws have ever arrived inside 0.109 m, so a
+#      counterfactual score of that cell correctly reports "no on-course throws
+#      — measured nothing". If the harness cannot reproduce what is already
+#      known, nothing it says about 20 m/s is worth reading. NEVER blend the
+#      gate's dodge counts with the save rates below.
+#   2. Only then run at the full range, in HOVER, and read D08-D10.
+#   3. Check `first_det_range_m` in the CSV against the detection_range_m you
+#      launched with. They must agree to ~0.2 m. If delivered reach is short,
+#      the row measured a SHORTER sensor than it claims and the offset rule
+#      below was violated — fix the offset and re-fly, do not report the row.
+#   4. Score D08/D09 on the COUNTERFACTUAL, never on `dodged`: a throw is on a
+#      hit course only if `counterfactual_min_m` <= 0.30 m, and a save is that
+#      AND `actual_min_m` > 0.30 m. Report saves / on-course. A fire count and a
+#      save rate are different numbers, and a cell with no on-course throws
+#      measured NOTHING — never report it as 0/N.
+#
+# HOVER IS NOT OPTIONAL for D08-D10. It is the only configuration that has ever
+# put a ball on a hit course: under patrol 0 of 98 throws arrived inside
+# 0.109 m, in hover 40/40 did. Patrol's throw-window gate holds each throw until
+# the drone reaches a ROLLING-MAX cruise (min_cruise_frac 0.95 of a 3.49 m/s max
+# against a 2.09 m/s median), so the lead extrapolates a peak the drone never
+# sustains. Hover also drops the straight-leg requirement, which is what made
+# ranges >= 18 m unmeasurable — and offset 35.0 below would otherwise demand a
+# 1.75 s straight leg.
+#
+#     EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6depth
+#
+# THE OFFSET RULE (measured 2026-08-08 over 13 flown cells, and it applies here
+# unchanged). offset_forward_m must clear the sensor gate by a margin, or the
+# ball is already inside the gate when the sensor first reports and the cell
+# silently delivers less reach than it configures. Three things eat the margin
+# between spawn and first report:
+#   ball travel during spawn_dead_s (~0.27 s)      = 0.27 * speed_mps
+#   drone closure over dead time + one frame       ~ 4.2 * (0.27 + 1/rate_hz)
+#   one frame of ball travel                       = speed_mps / rate_hz
+# At 20 m/s and 14.5 Hz that is ~8.5 m, so:
+#
+#     offset_forward_m  >=  detection_range_m + 8.5 m     (at 20 m/s)
+#
+# 26 + 8.5 = 34.5, rounded up to 35.0 in `defaults`. That 8.5 m was derived at
+# the ORACLE's 14.5 Hz; at this lane's 60 Hz the same arithmetic gives ~6.9 m,
+# so 35.0 is DELIBERATELY CONSERVATIVE. Do not shave it — a cell that measures a
+# 30 m sensor and reports it as 26 is exactly the failure this rule exists for.
+#
+# THE COST, which is why the rule is not just "make it huge". dodge_battery.py
+# sets t_flight = offset_forward_m / speed_mps and gates the throw on a straight
+# patrol leg of t_flight + throw_window_margin_s, so offset 35.0 at 20 m/s needs
+# a 1.75 s leg. Under patrol that is what made long ranges unmeasurable (9/10
+# throws skipped at >= 18 m). Hover drops the requirement entirely, which is the
+# second reason D08-D10 must be flown in hover. A leg the loop cannot supply
+# returns "SKIPPED, not thrown" — NO DATA, not a failed dodge. If D08-D10 come
+# back mostly skipped, suspect the throw window and the waypoint spacing, never
+# the tracker.
+#
+# THE ROI INTERLOCK, which binds anyone changing detection_range_m here. The
+# detector's roi_max_range_m gate runs on the NOISED cloud and the depth sigma
+# grows as z^2, so the ceiling must clear the reach by 4 * sigma(reach): 26 m
+# needs 27.2 m against the 28.00 m that synthetic_depth_detector.yaml ships, and
+# 30 m would need 31.6 m. week6_synthetic_depth.launch.py refuses to start on a
+# violation rather than delivering a short sensor under a long label.
+#
+# Report split by ball speed — 8, 14 and 20 never blended (CLAUDE.md).
+
+defaults:
+  # Sized for a 26 m gate at 20 m/s: 26 + 8.5, rounded up. D11/D12 override it
+  # downward because they run against the 3.4 m gate in the fidelity step, where
+  # 6.0 already leaves 2.6 m of margin — and because their whole purpose is to
+  # be geometrically identical to the flown B02/B03.
+  # RAISE THIS WITH THE GATE, per the offset rule in the header.
+  offset_forward_m: 35.0
+  offset_vertical_m: 0.0
+  compensate_gravity: true
+  aim_at_drone: true
+  repeats: 3
+
+runs:
+  # ── the question ───────────────────────────────────────────────────────
+  - id: D08
+    description: "Head-on 20 m/s, true hit — the target case, through the REAL detector, n=30"
+    speed_mps: 20.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+    repeats: 30
+    # repeats: 30 matches the n=30 behind the oracle lane's 28/29 figure, and
+    # that match IS the point of this cell: it is the like-for-like confirmation
+    # run for the claim the whole project rests on, with the detection COMPUTED
+    # rather than ASSERTED. A Wilson 95% interval on 10/10 has a lower bound of
+    # 0.72; 30 throws in one session has no between-cell seam.
+    #
+    # The ball must SPAWN OUTSIDE the modelled reach and fly into it. Spawning
+    # inside it would hand the pipeline a detection it never had to acquire,
+    # which is the easiest way to accidentally prove the thing you set out to
+    # test. "Outside" is not enough on its own: the ball flies 5.4 m and the
+    # drone closes ~1.4 m during spawn_dead_s (~0.27 s) before the first cloud
+    # can carry it. Hence offset_forward_m 35.0 from `defaults`.
+    #
+    # A LONG CELL HAS A FAILURE MODE A SHORT ONE DOES NOT: station drift. Read
+    # the altitude trace before reading the save count. If altitude drifts
+    # monotonically the last throws are not the same experiment as the first,
+    # and the cell must be reported as two halves rather than as one rate.
+    # Check the rep index of every failure — failures clustered in the last
+    # third are drift, not envelope.
+
+  - id: D09
+    description: "20 m/s near miss 0.5 m — inside threat radius, must dodge"
+    speed_mps: 20.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.5
+    expect_dodge: true
+    repeats: 10
+
+  - id: D10
+    description: "20 m/s wide miss 1.5 m — outside threat radius, must NOT dodge"
+    speed_mps: 20.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 1.5
+    expect_dodge: false
+    repeats: 10
+    # WHAT THIS ROW MEASURES, AND WHAT IT DOES NOT. It is NOT a false-positive
+    # rate for the perception stack, and it must never be merged with
+    # RESULTS.md's "0 false dodges in 31" or with Week 4's B07 0/12. The cloud
+    # here contains only the ball, so the background-differencing stage has no
+    # clutter to reject and this lane is structurally incapable of producing a
+    # false-POSITIVE number.
+    #
+    # What it does measure is real and different: TRIGGER DISCRIMINATION ON A
+    # DETECTED NON-THREAT. The ball genuinely is detected and tracked by the
+    # real pipeline; the question is whether the trigger fires on a track that
+    # is not on a hit course. Report it in exactly those words. A faster ball
+    # crosses the frame sooner and its early track is worse conditioned, so a
+    # longer-ranged sensor buying more warning could also buy more opportunity
+    # to fire wrongly — anything other than 0 here is worth reporting no matter
+    # what the save rate above says.
+
+  # ── continuity: the same harness against results we already have ───────
+  # These two are the FIDELITY GATE, and they are flown on PATROL at
+  # detection_range_m:=3.4 — the real rendered detector's measured reach — not
+  # at 26.0 and not in hover. Scored on `dodged` against the Week 4 patrol
+  # envelope (78/78 at <= 8 m/s, 0/17 at 14 m/s). See the order of operations.
+  - id: D11
+    description: "14 m/s dead-centre — B03 geometry; fidelity gate at range 3.4, on patrol"
+    speed_mps: 14.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+    repeats: 6
+    offset_forward_m: 6.0     # exactly B03, so the two are comparable
+
+  - id: D12
+    description: "8 m/s dead-centre — B02 geometry; the working case must stay working"
+    speed_mps: 8.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.0
+    expect_dodge: true
+    repeats: 6
+    offset_forward_m: 6.0     # exactly B02
