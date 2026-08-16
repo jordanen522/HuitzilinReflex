@@ -24,11 +24,18 @@ Pure numpy/scipy: no ROS import anywhere, so this runs in CI.
 """
 
 import math
+import pathlib
+from collections import deque
 
 import numpy as np
 import pytest
+import yaml
 
-from huitzilin_perception.cloud_geometry import cluster_and_split, voxel_downsample
+from huitzilin_perception.cloud_geometry import (
+    cluster_and_split,
+    foreground_mask,
+    voxel_downsample,
+)
 from huitzilin_perception.synthetic_depth import (
     DEFAULT_BALL_RADIUS_M,
     DEFAULT_DEPTH_SIGMA_M,
@@ -44,25 +51,74 @@ from huitzilin_perception.synthetic_depth import (
     depth_sigma_m,
     emit_period_s,
     in_frustum,
+    min_detectable_closing_speed_mps,
     quantize_rate_hz,
+    required_roi_max_range_m,
     synthesize_ball_cloud,
 )
 
-# The shipped detector.yaml values the cloud has to survive. Mirrored here on
-# purpose rather than parsed: if one of them changes, this file must be re-read
-# and re-justified, not silently re-pointed at a new number.
+# ── the SHIPPED configuration, loaded, not copied ────────────────────────────
+#
+# Every geometry assertion below runs against the values the Dell will actually
+# launch. An earlier revision mirrored them as literals, which made the ROI
+# headroom check a tautology over two constants declared in this file: editing
+# the yaml, or sweeping detection_range_m past the ceiling, left the suite green
+# while the cell delivered a shorter sensor than its label — the failure class
+# CLAUDE.md says has invalidated whole result sets.
+#
+# The literals are kept BESIDE the loaded values and pinned equal to them, so a
+# config change still has to be re-read and re-justified here rather than
+# silently re-pointing the tests at a new number. Drift fails loudly, once.
+
+PARAMS_DIR = pathlib.Path(__file__).resolve().parents[1] / "params"
+
+
+def _shipped(filename: str, node: str) -> dict:
+    doc = yaml.safe_load((PARAMS_DIR / filename).read_text(encoding="utf-8"))
+    return doc[node]["ros__parameters"]
+
+
+SENSOR = _shipped("synthetic_depth.yaml", "synthetic_depth_publisher")
+OVERLAY = _shipped("synthetic_depth_detector.yaml", "detector")
+
 DETECTOR_VOXEL_LEAF_M = 0.02
 DETECTOR_CLUSTER_TOL_M = 0.20
 DETECTOR_CLUSTER_MIN_POINTS = 5
 DETECTOR_CLUSTER_MAX_EXTENT_M = 0.35
 DETECTOR_CLUSTER_SPLIT_TOL_M = 0.10
 DETECTOR_CLUSTER_SPLIT_MAX_POINTS = 5000
+DETECTOR_BG_HISTORY_FRAMES = 5
+DETECTOR_DIFF_THRESHOLD_M = 0.10
 # synthetic_depth_detector.yaml's one forced widening (detector.yaml ships 5.00).
 # 28.00, not 26.0x: the ROI gate runs on the NOISED cloud, so it has to clear
 # detection_range_m by several depth sigmas or it silently eats the far-edge
-# detections — the earliest and most valuable ones. See the test below.
+# detections — the earliest and most valuable ones. See the tests below.
 OVERLAY_ROI_MAX_RANGE_M = 28.00
 OVERLAY_ROI_MIN_RANGE_M = 0.30
+
+
+@pytest.mark.parametrize("key,mirrored", [
+    ("voxel_leaf_m", DETECTOR_VOXEL_LEAF_M),
+    ("cluster_tolerance_m", DETECTOR_CLUSTER_TOL_M),
+    ("cluster_min_points", DETECTOR_CLUSTER_MIN_POINTS),
+    ("cluster_max_extent_m", DETECTOR_CLUSTER_MAX_EXTENT_M),
+    ("cluster_split_tol_m", DETECTOR_CLUSTER_SPLIT_TOL_M),
+    ("cluster_split_max_points", DETECTOR_CLUSTER_SPLIT_MAX_POINTS),
+    ("bg_history_frames", DETECTOR_BG_HISTORY_FRAMES),
+    ("diff_threshold_m", DETECTOR_DIFF_THRESHOLD_M),
+    ("roi_max_range_m", OVERLAY_ROI_MAX_RANGE_M),
+    ("roi_min_range_m", OVERLAY_ROI_MIN_RANGE_M),
+])
+def test_every_mirrored_constant_matches_the_shipped_overlay(key, mirrored):
+    """Drift between this file and the launched config fails here, once."""
+    assert OVERLAY[key] == mirrored
+
+
+def test_the_overlay_still_differences_rather_than_mapping():
+    """The whole background analysis below assumes the rolling deque. If
+    use_persistent_bg is ever flipped back, every floor computed here is about
+    a stage that no longer runs."""
+    assert OVERLAY["use_persistent_bg"] is False
 
 OPTICS = dict(
     hfov_rad=math.radians(2.0 * DEFAULT_FOV_HALF_H_DEG),
@@ -482,21 +538,37 @@ def test_the_recovered_centroid_lands_on_the_ball():
     assert abs(flu[1]) < 0.10 and abs(flu[2]) < 0.10
 
 
-def test_the_overlays_roi_ceiling_clears_the_depth_noise_at_full_reach():
+def test_the_shipped_roi_ceiling_clears_the_shipped_reach():
     """Why synthetic_depth_detector.yaml says 28.00 and not 26.50.
 
-    The ROI gate is applied to the NOISED cloud, so a ceiling only just above
-    detection_range_m throws away every frame whose common-mode depth draw went
-    long — roughly one in six at 1 sigma. Those are the FIRST detections of the
-    throw, the ones that buy tca, so losing them costs exactly the quantity the
-    26 m requirement was derived from, and it would look like a marginal sensor
-    rather than a misconfigured gate. Requirement: the ceiling must clear
-    detection_range_m by >= 4 * depth_sigma(detection_range_m).
+    Both numbers come out of the two SHIPPED yamls — the reach the publisher is
+    configured for and the ceiling the detector is configured with — so this
+    fails if either file is edited alone. The ROI gate is applied to the NOISED
+    cloud, so a ceiling only just above the reach throws away every frame whose
+    common-mode depth draw went long: roughly one in six at 1 sigma, and those
+    are the FIRST detections of the throw, the ones that buy tca. Losing them
+    costs exactly the quantity the 26 m requirement was derived from and reads
+    as a marginal sensor rather than a misconfigured gate.
     """
-    assert (OVERLAY_ROI_MAX_RANGE_M - 26.0) >= 4.0 * depth_sigma_m(26.0)
+    needed = required_roi_max_range_m(
+        SENSOR["detection_range_m"],
+        sigma_ref_m=SENSOR["depth_sigma_m"],
+        ref_range_m=SENSOR["depth_sigma_ref_range_m"])
+    assert OVERLAY["roi_max_range_m"] >= needed
     lost = sum(_through_the_detector(_cloud([26.0, 0.0, 0.0], seed=s))[1] == []
                for s in range(60))
     assert lost == 0
+
+
+def test_the_required_ceiling_grows_faster_than_the_reach():
+    """Because sigma goes as z^2. This is why a sweep cannot just raise
+    detection_range_m and leave the detector alone — the launch file refuses to
+    start on exactly this comparison."""
+    assert required_roi_max_range_m(26.0) == pytest.approx(27.2)
+    assert required_roi_max_range_m(30.0) == pytest.approx(31.5976, abs=1e-3)
+    assert required_roi_max_range_m(3.4) == pytest.approx(3.4205, abs=1e-3)
+    # A 30 m sweep against the shipped 28.00 m ceiling must be refused.
+    assert required_roi_max_range_m(30.0) > OVERLAY["roi_max_range_m"]
 
 
 def test_the_ball_survives_across_the_whole_modelled_reach():
@@ -504,6 +576,98 @@ def test_the_ball_survives_across_the_whole_modelled_reach():
         _, clusters = _through_the_detector(_cloud([float(z), 0.0, 0.0]))
         assert len(clusters) >= 1, f"no cluster at {z} m"
         assert clusters[0].shape[0] >= DETECTOR_CLUSTER_MIN_POINTS
+
+
+# ── the slow-ball floor that frame differencing imposes ──────────────────────
+#
+# A ball advances v/rate between frames. detector_node's differencing keeps a
+# return only if it is further than diff_threshold_m from EVERY background
+# return, so once v/rate <= diff_threshold_m the ball sits inside its own
+# previous blob and the whole cloud reads as background — nothing detected, at
+# any range, with every upstream stage healthy.
+#
+#     v_min = diff_threshold_m * delivered_rate_hz
+#
+# This is a property of the shipped detector meeting a fast frame rate, not of
+# the cloud model. It does not bite at long range, where the 0.30 m common-mode
+# jitter dwarfs the 0.10 m threshold, only at short range where sigma collapses
+# to 0.005 m — which is where the slow scenarios (B01 at ~4 m/s) live. The
+# rendered lane never met it because it runs at 15 Hz, floor 1.5 m/s; the 60 Hz
+# default here is what makes it reachable.
+
+@pytest.mark.parametrize("threshold,rate,floor", [
+    (0.10, 60.0, 6.0),      # the shipped pairing
+    (0.10, 15.0, 1.5),      # the rendered lane's rate
+    (0.10, 12.0, 1.2),
+    (0.05, 60.0, 3.0),
+])
+def test_the_slow_ball_floor_is_threshold_times_rate(threshold, rate, floor):
+    assert min_detectable_closing_speed_mps(threshold, rate) == pytest.approx(floor)
+
+
+def test_the_shipped_pairing_puts_the_floor_at_6_metres_per_second():
+    """Both numbers from the shipped yamls, so the documented 6.0 m/s cannot
+    drift away from the configuration that produces it."""
+    assert min_detectable_closing_speed_mps(
+        OVERLAY["diff_threshold_m"],
+        quantize_rate_hz(SENSOR["rate_hz"])) == pytest.approx(6.0)
+
+
+def _clustered_fraction(speed_mps, rate_hz, *, reach_m=3.4, seed=5):
+    """Walk an approaching ball through the overlay's real pipeline.
+
+    ROI gate -> voxel -> 5-frame rolling deque differencing -> cluster/split,
+    with the shipped values, in the order _cloud_cb_impl runs them. Short range
+    on purpose: that is where the depth sigma is small enough for the floor to
+    be visible at all.
+    """
+    rng = np.random.default_rng(seed)
+    buffer = deque(maxlen=DETECTOR_BG_HISTORY_FRAMES)
+    z, clustered, frames = reach_m, 0, 0
+    while z > 0.35:
+        cloud = synthesize_ball_cloud([z, 0.0, 0.0], detection_range_m=reach_m,
+                                      rng_gen=rng)
+        z -= speed_mps / rate_hz
+        if cloud is None:
+            continue
+        voxels = _through_the_detector(cloud)[0]
+        buffer.append(voxels)
+        if len(buffer) < 2:
+            continue
+        frames += 1
+        background = np.vstack(list(buffer)[:-1])
+        current = buffer[-1]
+        fg = current[foreground_mask(current, background,
+                                     DETECTOR_DIFF_THRESHOLD_M)]
+        if fg.shape[0] and cluster_and_split(
+                fg, tol=DETECTOR_CLUSTER_TOL_M,
+                min_pts=DETECTOR_CLUSTER_MIN_POINTS,
+                max_extent=DETECTOR_CLUSTER_MAX_EXTENT_M,
+                split_tol=DETECTOR_CLUSTER_SPLIT_TOL_M,
+                max_split_points=DETECTOR_CLUSTER_SPLIT_MAX_POINTS):
+            clustered += 1
+    return (clustered / frames) if frames else 0.0
+
+
+@pytest.mark.parametrize("speed", [20.0, 14.0, 8.0])
+def test_a_ball_above_the_floor_is_detected_on_every_frame(speed):
+    assert _clustered_fraction(speed, 60.0) == 1.0
+
+
+@pytest.mark.parametrize("speed", [4.0, 2.0, 1.0])
+def test_a_ball_below_the_floor_is_detected_on_no_frame_at_all(speed):
+    """THE regression this whole section exists for. At the shipped 60 Hz a
+    4 m/s ball — B01's speed — produces 45 healthy clouds and zero detections.
+    Silent: the funnel shows returns arriving and foreground going to zero."""
+    assert _clustered_fraction(speed, 60.0) == 0.0
+
+
+def test_dropping_the_rate_lowers_the_floor_exactly_as_the_arithmetic_says():
+    """15 Hz moves the floor to 1.5 m/s, and the same 4 m/s ball that scored
+    0/45 at 60 Hz then scores every frame. The floor is the RATE's, not the
+    ball's — which is why the fix is to know it, not to slow the sensor."""
+    assert _clustered_fraction(4.0, 15.0) == 1.0
+    assert _clustered_fraction(1.0, 15.0) == 0.0
 
 
 def test_fully_independent_per_point_depth_noise_destroys_the_26_m_cluster():

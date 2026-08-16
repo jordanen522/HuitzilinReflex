@@ -41,8 +41,34 @@ and has to be carried with every result taken through this lane:
     way to do harm: it retains a throw's trail for `bg_map_ttl_s` 20 s, while
     `dodge_battery` re-throws after `settle_s` 6 s down the same corridor in the
     same odom frame, so throw 2 onward would be absorbed into throw 1's trail
-    and read as background. The Week-3 rolling deque remembers 4 frames (0.067 s
-    at 60 Hz), which cannot span two throws.
+    and read as background. The Week-3 rolling deque holds 5 frames and
+    differences against the older 4 (0.067 s at 60 Hz), which cannot span two
+    throws.
+
+THE SLOW-BALL FLOOR THE DEQUE IMPOSES — this is not free, and it is silent
+-------------------------------------------------------------------------
+Frame differencing keeps a return only if it is further than `diff_threshold_m`
+from every background return, so a ball must advance more than one threshold per
+frame or it sits inside its own previous blob and the ENTIRE cloud reads as
+background:
+
+    v_min = diff_threshold_m * delivered_rate_hz = 0.10 * 60 = 6.0 m/s
+
+Below `v_min` nothing is detected, at any range, with every stage upstream
+looking healthy — measured through the real `voxel_downsample` /
+`foreground_mask` / `cluster_and_split`: 20/14/8 m/s cluster on 100% of frames,
+6 m/s on 20%, and 4 m/s (B01's speed) on 0 of 45. It does not bite at long range,
+where the 0.30 m common-mode depth jitter dwarfs the 0.10 m threshold, only at
+short range where sigma collapses to 0.005 m. The rendered lane never met it
+because it runs at 15 Hz (floor 1.5 m/s); the 60 Hz default here is what makes it
+reachable, and 60 Hz is kept because it is the configuration the headline 26 m /
+20 m/s result was flown at.
+
+This node cannot prevent it — the differencing is the detector's — so it does the
+next best thing and makes it LOUD: the computed floor is printed as a WARN in the
+startup banner, for the same reason CLAUDE.md makes `FRAME_CLASS=0` and the ball
+prefixes loud. To fly a scenario slower than `v_min`, lower `rate_hz` (15 Hz
+gives a 1.5 m/s floor) and quote the lower rate beside the result.
 
 Frames. The ball is taken from Gazebo (both models, so the world/odom origin
 offset cancels), rotated into base_link with the odom attitude — the same
@@ -92,8 +118,10 @@ from huitzilin_perception.synthetic_depth import (
     DEFAULT_IMAGE_HEIGHT_PX,
     DEFAULT_IMAGE_WIDTH_PX,
     DEFAULT_MAX_POINTS_PER_BALL,
+    SCENE_BROADCASTER_HZ,
     camera_relative,
     emit_period_s,
+    min_detectable_closing_speed_mps,
     quantize_rate_hz,
     synthesize_ball_cloud,
 )
@@ -128,6 +156,14 @@ _POINT_STEP_BYTES = 12
 # without comment, short enough that a misconfigured prefix is loud inside the
 # first scenario rather than after a battery has finished scoring a blind node.
 UNMATCHED_WARN_AFTER = 2000
+
+# ~2 s of 60 Hz poses. Enough to measure the stream's real cadence to well under
+# a percent, early enough that the number is in the log before the first throw.
+POSE_RATE_SAMPLE_MSGS = 120
+
+# How far the measured pose cadence may sit from SCENE_BROADCASTER_HZ before the
+# delivered-rate claim in the banner stops being true.
+POSE_RATE_TOLERANCE = 0.05
 
 
 class SyntheticDepthPublisherNode(Node):
@@ -192,6 +228,11 @@ class SyntheticDepthPublisherNode(Node):
         self._delivered_hz = quantize_rate_hz(self._requested_hz)
         self._period_s = emit_period_s(self._requested_hz)
         self._delay_line = DelayLine(float(self._p("detection_delay_s")))
+        # Advisory only — this node runs no differencing. It exists so the
+        # slow-ball floor is a number in the log rather than a zero-detection
+        # run that reads as a marginal sensor. See _log_banner.
+        self._min_speed_mps = min_detectable_closing_speed_mps(
+            float(self._p("bg_diff_threshold_m")), self._delivered_hz)
         # Seeded so a battery is replayable. Seed 0 means "seed from entropy",
         # which is what you want when asking whether a result is robust rather
         # than whether it reproduces. Same convention as the oracle.
@@ -219,13 +260,29 @@ class SyntheticDepthPublisherNode(Node):
         self._checked_stamp = False
         self._n_unmatched_msgs = 0
         self._unmatched_names: set[str] = set()
+        self._warned_no_drone = False
+        self._n_no_drone_msgs = 0
+        self._pose_t_first = None
+        self._n_pose_msgs = 0
+        self._pose_rate_logged = False
 
     def _log_banner(self, cloud_qos: QoSProfile) -> None:
-        """Say what this is, and say the DELIVERED rate — never the requested.
+        """Say what this is, and say every number a run can be wrong about.
 
-        Dead time is 0.178 s at 60 Hz and 0.270 s at 12 Hz, so a report that
-        quotes the requested rate beside a save figure quotes the wrong
-        constant (docs/RESULTS.md §3).
+        The DELIVERED rate, never the requested: dead time is 0.178 s at 60 Hz
+        and 0.270 s at 12 Hz, so a report that quotes the requested rate beside
+        a save figure quotes the wrong constant (docs/RESULTS.md §3).
+
+        The MINIMUM CLOSING SPEED, because below it the detector's frame
+        differencing reads the ball as its own background and the run scores
+        zero with every stage upstream healthy. Same reasoning as the
+        FRAME_CLASS=0 and ball-prefix traps in CLAUDE.md: a silent
+        misconfiguration has to be made loud at startup.
+
+        The DRONE MODEL and BALL PREFIXES, because a world that names the drone
+        something else makes this node publish nothing at all — not even the
+        empty-cloud heartbeat — and the names are what the fix is compared
+        against.
         """
         self.get_logger().info(
             "synthetic_depth_publisher up — a SYNTHETIC CLOUD from Gazebo "
@@ -240,8 +297,18 @@ class SyntheticDepthPublisherNode(Node):
             f"delay {self._delay_line.delay_s * 1e3:.0f} ms, "
             f"seed {self._seed or 'entropy'} -> {str(self._p('cloud_topic'))} "
             f"[{cloud_qos.reliability.name} depth={cloud_qos.depth}] "
-            f"frame '{self._frame_id}' in gz FLU"
+            f"frame '{self._frame_id}' in gz FLU, "
+            f"ball prefixes {self._ball_prefixes} vs drone "
+            f"'{self._drone_model}'"
         )
+        self.get_logger().warn(
+            "min detectable closing speed %.2f m/s = diff_threshold_m %.2f m x "
+            "%g Hz. A ball SLOWER than this advances less than one differencing "
+            "threshold per frame, sits inside its own previous blob, and is "
+            "detected on NO frame at any range — silently. Lower rate_hz (or "
+            "the detector's diff_threshold_m) before running a slow scenario."
+            % (self._min_speed_mps, float(self._p("bg_diff_threshold_m")),
+               self._delivered_hz))
 
     def _declare_params(self) -> None:
         """Every tunable, with detector-facing defaults. No magic numbers."""
@@ -269,6 +336,13 @@ class SyntheticDepthPublisherNode(Node):
         self.declare_parameter("per_point_depth_frac", 0.0)
         self.declare_parameter("detection_delay_s", 0.0)
         self.declare_parameter("rate_hz", 60.0)
+        # A MIRROR of the detector's diff_threshold_m, used for nothing except
+        # computing and logging the minimum detectable closing speed. This node
+        # does no differencing; the detector does, and it is the pairing of the
+        # two configs that creates the floor. week6_synthetic_depth.launch.py
+        # overrides this from the launched detector params file so the two
+        # cannot drift.
+        self.declare_parameter("bg_diff_threshold_m", 0.10)
         self.declare_parameter("publish_empty_clouds", True)
         self.declare_parameter("cloud_reliable", True)
         self.declare_parameter("cloud_queue_depth", 5)
@@ -299,12 +373,16 @@ class SyntheticDepthPublisherNode(Node):
         # when detection_delay_s is 0.
         for pending in self._delay_line.due(t_pose):
             self._publish(pending)
+        # Measured on EVERY pose message, not only emitted frames: it is the
+        # input stream's cadence that is being checked, not this node's output.
+        self._measure_pose_rate(t_pose)
         if not self._frame_due(t_pose):
             return
         self._check_stamp_source(t_pose)
 
         drone, candidates = self._split_models(msg)
         if drone is None:
+            self._note_no_drone(msg)
             return
         self._last_emit_t = t_pose
 
@@ -428,6 +506,80 @@ class SyntheticDepthPublisherNode(Node):
             throttle_duration_sec=1.0)
 
     # ── alarms ───────────────────────────────────────────────────────────────
+
+    def _note_no_drone(self, msg: TFMessage) -> None:
+        """Say once that the configured drone model is not in the world.
+
+        The loudest failure this node has, because it is otherwise the
+        quietest: with no drone there is no camera pose, so the callback
+        returns before building anything and the topic carries NOTHING — not
+        even the empty-cloud heartbeat that would show the node alive. The
+        battery then reports NO-FIRE on every scenario, which reads as a
+        trigger that never fires. `iris_depth` vs `iris_with_standoffs` is one
+        typo away.
+        """
+        if self._warned_no_drone or self._n_published:
+            return
+        self._n_no_drone_msgs += 1
+        self._unmatched_names.update(tr.child_frame_id for tr in msg.transforms)
+        if self._n_no_drone_msgs < UNMATCHED_WARN_AFTER:
+            return
+        self._warned_no_drone = True
+        self.get_logger().error(
+            "drone model '%s' has matched NO model in %d pose messages — this "
+            "node has published nothing at all, not even an empty cloud, and "
+            "every scenario will score NO-FIRE. Models actually seen: %s"
+            % (self._drone_model, self._n_no_drone_msgs,
+               sorted(self._unmatched_names)))
+
+    def _measure_pose_rate(self, t_pose: float) -> None:
+        """Check the 60 Hz assumption the delivered-rate claim rests on.
+
+        `quantize_rate_hz` and the emit period are both computed against
+        SCENE_BROADCASTER_HZ. If the pose stream actually runs faster, this node
+        emits ABOVE the rate its banner advertises and above the rate the cell
+        is labelled with — and an implied rate above the launched one is
+        CLAUDE.md's decisive contamination signature. That must not be something
+        only a downstream CSV can reveal.
+        """
+        if self._pose_rate_logged:
+            return
+        if self._pose_t_first is None or t_pose < self._pose_t_first:
+            # First message, or a sim-time rewind: restart the window.
+            self._pose_t_first = t_pose
+            self._n_pose_msgs = 0
+            return
+        self._n_pose_msgs += 1
+        if self._n_pose_msgs < POSE_RATE_SAMPLE_MSGS:
+            return
+        self._pose_rate_logged = True
+        span = t_pose - self._pose_t_first
+        if span <= 0.0:
+            self.get_logger().warn(
+                "%d pose messages carried no elapsed sim time — the pose "
+                "cadence cannot be measured, so the delivered rate in the "
+                "banner is an assumption" % self._n_pose_msgs)
+            return
+        self._report_pose_rate(self._n_pose_msgs / span)
+
+    def _report_pose_rate(self, measured_hz: float) -> None:
+        drift = abs(measured_hz - SCENE_BROADCASTER_HZ) / SCENE_BROADCASTER_HZ
+        if drift <= POSE_RATE_TOLERANCE:
+            self.get_logger().info(
+                "pose stream measured at %.2f Hz over %d messages — the "
+                "assumed %g Hz holds, so %g Hz delivered is a fact"
+                % (measured_hz, self._n_pose_msgs, SCENE_BROADCASTER_HZ,
+                   self._delivered_hz))
+            return
+        self.get_logger().warn(
+            "pose stream measured at %.2f Hz, not the assumed %g Hz. The rate "
+            "quantisation and the '%g Hz delivered' banner are both computed "
+            "against %g Hz, so this node is emitting at roughly %.2f Hz — "
+            "quote THAT, and treat an implied rate above the launched one as "
+            "contamination until proven otherwise."
+            % (measured_hz, SCENE_BROADCASTER_HZ, self._delivered_hz,
+               SCENE_BROADCASTER_HZ,
+               quantize_rate_hz(self._requested_hz, measured_hz)))
 
     def _note_unmatched(self, candidates) -> None:
         """Say once that models are present but none of them look like a ball.

@@ -105,6 +105,59 @@ _GOLDEN_ANGLE_RAD = math.pi * (3.0 - math.sqrt(5.0))
 # contract. One picoradian is ~26 nm of cross-range at 26 m.
 _ANGLE_EPS_RAD = 1e-12
 
+# How far a detector's ROI ceiling must clear the modelled reach. The ROI gate
+# runs on the NOISED cloud, so a ceiling at the reach itself discards every
+# frame whose depth draw went long — about one in six at 1 sigma, and those are
+# the FIRST detections of a throw, the ones that buy tca. 4 sigma leaves that
+# below one frame in 15000.
+ROI_HEADROOM_SIGMAS = 4.0
+
+
+# ── the two configuration floors, as arithmetic ──────────────────────────────
+
+def required_roi_max_range_m(
+    detection_range_m: float,
+    *,
+    sigma_ref_m: float = DEFAULT_DEPTH_SIGMA_M,
+    ref_range_m: float = DEFAULT_DEPTH_SIGMA_REF_RANGE_M,
+    n_sigma: float = ROI_HEADROOM_SIGMAS,
+) -> float:
+    """Smallest `roi_max_range_m` that does not clip this modelled reach.
+
+    Grows FASTER than the reach, because sigma goes as z^2: 26 m needs 27.2 m
+    of ceiling, 30 m needs 31.6 m. A cell that raises detection_range_m without
+    raising the detector's ceiling delivers a shorter sensor than its label,
+    which CLAUDE.md names as the failure class that has invalidated whole
+    result sets. `week6_synthetic_depth.launch.py` refuses to start on it.
+    """
+    return float(detection_range_m) + n_sigma * float(
+        depth_sigma_m(detection_range_m, sigma_ref_m, ref_range_m))
+
+
+def min_detectable_closing_speed_mps(diff_threshold_m: float,
+                                     delivered_rate_hz: float) -> float:
+    """Slowest ball frame differencing can separate from its own last frame.
+
+    A ball advances `v / rate` metres between frames. Frame differencing marks
+    a return as foreground only if it is further than `diff_threshold_m` from
+    every background return, so once `v / rate <= diff_threshold_m` the current
+    ball sits inside its own previous blob, the whole cloud reads as
+    background, and NOTHING is detected — at any range, with every stage
+    upstream looking healthy.
+
+        v_min = diff_threshold_m * delivered_rate_hz
+
+    This is a property of `detector_node`'s differencing meeting a fast frame
+    rate, not of this model: at the shipped 0.10 m and 60 Hz it is 6.0 m/s. It
+    does not bite at long range, where the common-mode depth jitter (0.30 m at
+    26 m) dwarfs the threshold, only at short range where sigma collapses to
+    0.005 m — which is exactly where a slow scenario like B01 lives. The
+    rendered lane never met it because it runs at 15 Hz (floor 1.5 m/s).
+    """
+    if delivered_rate_hz <= 0.0:
+        return 0.0
+    return float(diff_threshold_m) * float(delivered_rate_hz)
+
 
 # ── rate ──────────────────────────────────────────────────────────────────────
 

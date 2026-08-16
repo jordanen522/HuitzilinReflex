@@ -122,7 +122,28 @@ synthetic_depth_publisher:
     # result was flown at; dead time is 0.178 s at 60 Hz against 0.270 s at
     # 12 Hz, which is 1.8 m of extra required reach. The node logs the DELIVERED
     # rate at startup — quote that one, never this one.
+    #
+    # RATE ALSO SETS A SLOW-BALL FLOOR, and it is the thing to check before
+    # picking a scenario. The detector keeps a return only if it is further
+    # than diff_threshold_m from every background return, so a ball has to
+    # advance more than one threshold per frame:
+    #
+    #     v_min = bg_diff_threshold_m x delivered_rate_hz = 0.10 x 60 = 6.0 m/s
+    #
+    # Below that, NOTHING is detected at any range, silently, with every stage
+    # upstream healthy — measured: 8 m/s gives 100% of frames clustered, 6 m/s
+    # gives 20%, 4 m/s gives 0/45. 60 Hz is kept anyway because it is the
+    # configuration the headline 26 m / 20 m/s result was flown at. For a
+    # scenario slower than 6 m/s drop this to 15.0 (floor 1.5 m/s) and quote
+    # the lower rate beside the result.
     rate_hz: 60.0
+
+    # A MIRROR of the detector's diff_threshold_m. This node does no
+    # differencing; it uses this for exactly one thing — computing the floor
+    # above and printing it as a startup WARN, so that failure cannot be met in
+    # silence. week6_synthetic_depth.launch.py overrides it from the detector
+    # params file it is actually launching, so the two cannot drift apart.
+    bg_diff_threshold_m: 0.10
 
     # Seconds of SIM time between the world moving and the cloud being
     # publishable: exposure + readout + transfer. 0.0 = OFF, matching the

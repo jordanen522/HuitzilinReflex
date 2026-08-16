@@ -36,10 +36,30 @@
 #       re-throws after settle_s (6 s) down the same corridor. Throw 2 onward
 #       would land inside throw 1's 0.10 m voxels and read as BACKGROUND — a
 #       silent zero-detection run after a healthy first throw. The Week-3
-#       rolling deque that this falls back to remembers 4 frames (0.067 s at
-#       60 Hz), which cannot span two throws, and still difference-gates every
-#       frame: at 20 m/s the ball moves 0.33 m per 60 Hz frame against
-#       diff_threshold_m 0.10.
+#       rolling deque that this falls back to holds 5 frames and differences
+#       against the older 4 (0.067 s at 60 Hz), which cannot span two throws.
+#
+# THE SLOW-BALL FLOOR THIS BUYS, and it is NOT free — read it before choosing a
+# scenario. Frame differencing keeps a return only if it is further than
+# diff_threshold_m from every background return, so a ball must advance more
+# than one threshold per frame or it sits inside its own previous blob and the
+# whole cloud reads as background:
+#
+#       v_min = diff_threshold_m x delivered_rate_hz = 0.10 x 60 = 6.0 m/s
+#
+# Below 6.0 m/s NOTHING is detected, at any range, with every stage upstream
+# healthy — measured: 20/14/8 m/s give 100% of frames clustered, 6 m/s gives
+# 20%, 4 m/s (B01's speed) gives 0/45. It does not bite at long range, where the
+# 0.30 m common-mode depth jitter dwarfs the 0.10 m threshold, only at short
+# range where sigma collapses to 0.005 m. The rendered lane never met this
+# because it runs at 15 Hz (floor 1.5 m/s); the 60 Hz here is what makes it
+# reachable, and 60 Hz is kept because it is the configuration the headline
+# 26 m / 20 m/s result was flown at.
+#
+# To run a scenario slower than 6 m/s, LOWER rate_hz in synthetic_depth.yaml
+# (15 Hz -> 1.5 m/s floor) and quote the lower rate beside the result — dead
+# time is 0.178 s at 60 Hz against 0.270 s at 12 Hz. The publisher prints the
+# computed floor as a WARN at startup so this cannot be met silently.
 #
 # WHAT THIS COSTS IN FIDELITY, and it must be carried with every number:
 # background differencing RUNS but rejects NOTHING, because every return in the
@@ -104,12 +124,15 @@ detector:
     bg_map_ttl_s: 20.0        # inert
     bg_map_max_voxels: 400000 # inert
 
-    # The rolling buffer this lane actually uses: 5 frames = 0.067 s at 60 Hz.
+    # The rolling buffer this lane actually uses. detector_node holds 5 frames
+    # and differences the newest against the older FOUR, so the background
+    # spans 4 frames = 0.067 s at 60 Hz.
     bg_history_frames: 5
 
-    # Minimum per-voxel depth change to count as foreground. At 20 m/s and
-    # 60 Hz the ball advances 0.33 m between frames, so it is never mistaken
-    # for its own previous position.
+    # Minimum per-voxel depth change to count as foreground, and half of the
+    # slow-ball floor in the header: v_min = diff_threshold_m x rate_hz. At
+    # 20 m/s and 60 Hz the ball advances 0.33 m between frames and clears this
+    # easily; at 4 m/s it advances 0.067 m and never clears it at all.
     diff_threshold_m: 0.10
 
     # Whole-scene change = egomotion flood, not a projectile. Cannot trigger on

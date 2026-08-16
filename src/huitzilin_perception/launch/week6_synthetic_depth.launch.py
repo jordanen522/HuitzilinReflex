@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import os
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
@@ -77,6 +78,11 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+from huitzilin_perception.synthetic_depth import (
+    ROI_HEADROOM_SIGMAS,
+    required_roi_max_range_m,
+)
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -227,6 +233,10 @@ def _sensor_node(context):
     lc = context.launch_configurations
     offset = [float(lc.get(f"camera_link_{axis}", default))
               for axis, default in (("x", "0.10"), ("y", "0.0"), ("z", "0.02"))]
+    sensor = _ros_params(lc["sensor_params"], "synthetic_depth_publisher")
+    detector = _ros_params(lc["detector_params"], "detector")
+    reach_m = float(lc["detection_range_m"])
+    _assert_roi_clears_the_reach(reach_m, sensor, detector)
     return [Node(
         package="huitzilin_perception",
         executable="synthetic_depth_publisher",
@@ -247,9 +257,53 @@ def _sensor_node(context):
                 # offset the publisher subtracts is always the one the detector
                 # adds back.
                 "camera_offset_xyz_m": offset,
+                # Taken from the DETECTOR file that is actually being launched,
+                # so the slow-ball floor the banner prints is the floor this
+                # pairing really has rather than a second copy of 0.10.
+                "bg_diff_threshold_m": float(detector["diff_threshold_m"]),
             },
         ],
     )]
+
+
+def _ros_params(path: str, node: str) -> dict:
+    """The ros__parameters block of a shipped params file."""
+    with open(path, "r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)[node]["ros__parameters"]
+
+
+def _assert_roi_clears_the_reach(reach_m: float, sensor: dict,
+                                 detector: dict) -> None:
+    """Refuse to start a cell that would deliver a shorter sensor than its label.
+
+    The detector's ROI ceiling is applied to the NOISED cloud, and the noise
+    grows as z^2, so raising detection_range_m without raising roi_max_range_m
+    silently clips the far edge: a cell launched as 30 m emits to 30 m while the
+    detector discards everything past 28 m, and reports ~28 m of reach under a
+    30 m label. CLAUDE.md names that failure class as one that has invalidated
+    whole result sets, and every unit test stays green through it because the
+    two numbers live in different files.
+
+    This is the one place that sees both, so it is the place that checks. It
+    raises rather than warns: failing at launch, before the world and SITL are
+    committed, beats failing a result set afterwards. The same check also
+    catches the reverse edit — someone lowering roi_max_range_m in the yaml.
+    """
+    needed = required_roi_max_range_m(
+        reach_m,
+        sigma_ref_m=float(sensor["depth_sigma_m"]),
+        ref_range_m=float(sensor["depth_sigma_ref_range_m"]))
+    ceiling = float(detector["roi_max_range_m"])
+    if needed <= ceiling:
+        return
+    raise RuntimeError(
+        "detection_range_m:=%g needs roi_max_range_m >= %.2f m (%g sigma of "
+        "depth noise at that range), but the launched detector params allow "
+        "only %.2f m. The cell would emit to %g m while the detector clipped "
+        "at %.2f m and would report a shorter sensor than its label. Raise "
+        "roi_max_range_m in the detector params file, or lower "
+        "detection_range_m."
+        % (reach_m, needed, ROI_HEADROOM_SIGMAS, ceiling, reach_m, ceiling))
 
 
 def _detector_node(use_sim_time) -> Node:
