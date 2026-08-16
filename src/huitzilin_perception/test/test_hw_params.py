@@ -14,12 +14,12 @@ PERCEPTION = pathlib.Path(__file__).resolve().parents[1]
 
 
 def hw():
-    doc = yaml.safe_load((PERCEPTION / "params" / "hw_detector.yaml").read_text())
+    doc = yaml.safe_load((PERCEPTION / "params" / "hw_detector.yaml").read_text(encoding="utf-8"))
     return doc["detector"]["ros__parameters"]
 
 
 def hw_evasion():
-    doc = yaml.safe_load((PERCEPTION / "params" / "hw_evasion.yaml").read_text())
+    doc = yaml.safe_load((PERCEPTION / "params" / "hw_evasion.yaml").read_text(encoding="utf-8"))
     return doc["evasion"]["ros__parameters"]
 
 

@@ -23,7 +23,7 @@ PERCEPTION = SRC / "huitzilin_perception"
 
 
 def load_yaml(path):
-    return yaml.safe_load(path.read_text())
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def params(doc, node):
@@ -52,7 +52,7 @@ def test_the_parm_glob_finds_every_shipped_file():
 @pytest.mark.parametrize("path", ALL_PARM_FILES, ids=lambda p: p.name)
 def test_parm_files_parse_clean(path):
     """No inline comments, no duplicate keys, every value numeric."""
-    parse_parm(path.read_text())
+    parse_parm(path.read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize("path", ALL_PARM_FILES, ids=lambda p: p.name)
@@ -66,11 +66,11 @@ def test_no_parm_file_sets_rtl_above_the_hardware_fence(path):
     -- while every fence-consistency check passed, because it had no fence of
     its own to be inconsistent with.
     """
-    parms = parse_parm(path.read_text())
+    parms = parse_parm(path.read_text(encoding="utf-8"))
     if "RTL_ALT" not in parms:
         pytest.skip("no RTL_ALT in %s" % path.name)
     ceiling_m = parse_parm(
-        (SIM / "params" / "hw_frame.parm").read_text())["FENCE_ALT_MAX"]
+        (SIM / "params" / "hw_frame.parm").read_text(encoding="utf-8"))["FENCE_ALT_MAX"]
     assert parms["RTL_ALT"] / 100.0 < ceiling_m, (
         "%s sets RTL_ALT %s cm, not below the %s m hardware fence"
         % (path.name, parms["RTL_ALT"], ceiling_m))
@@ -85,26 +85,26 @@ def test_hw_frame_geofence_is_self_consistent():
     Note the /100: a naive comparison would happily accept RTL_ALT 4, meaning
     4 cm.
     """
-    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text())
+    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text(encoding="utf-8"))
     assert check_fence_consistency(parms) == []
     assert parms["RTL_ALT"] / 100.0 < parms["FENCE_ALT_MAX"]
 
 
 def test_hw_frame_never_disables_arming_checks():
-    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text())
+    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text(encoding="utf-8"))
     assert parms.get("ARMING_CHECK") != 0
 
 
 def test_hw_frame_maps_a_kill_switch():
     """SAFETY_CASE.md section 3: motor emergency stop on a dedicated channel."""
-    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text())
+    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text(encoding="utf-8"))
     assert any(k.startswith("RC") and k.endswith("_OPTION") and v == 31
                for k, v in parms.items())
 
 
 def test_a_broken_fence_set_is_actually_caught():
     """Guards the check itself: an assertion that cannot fail proves nothing."""
-    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text())
+    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text(encoding="utf-8"))
     parms["RTL_ALT"] = 1500.0          # the ArduPilot default, 15 m
     assert any("FENCE_ALT_MAX" in p for p in check_fence_consistency(parms))
 
@@ -148,7 +148,7 @@ def declared_names():
     names = set()
     for pkg in (SIM, PERCEPTION):
         for path in sorted((pkg / pkg.name).glob("*.py")):
-            names |= declared_node_names(path.read_text())
+            names |= declared_node_names(path.read_text(encoding="utf-8"))
     return names
 
 
@@ -223,6 +223,6 @@ def test_supervisor_fence_matches_the_flight_controller_fence():
     """The supervisor's fence is a second line of defence. If it is looser
     than the FC's own, it never fires; if tighter, it pre-empts it."""
     sup = params(load_yaml(SIM / "params" / "supervisor.yaml"), "supervisor")
-    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text())
+    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text(encoding="utf-8"))
     assert sup["fence_radius_m"] == parms["FENCE_RADIUS"]
     assert sup["fence_alt_max_m"] == parms["FENCE_ALT_MAX"]
