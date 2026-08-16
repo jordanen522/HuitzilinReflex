@@ -1,0 +1,141 @@
+# synthetic_depth.yaml — the synthetic depth cloud publisher.
+#
+# A SYNTHETIC CLOUD FROM GAZEBO TRUTH, NOT A RENDERED SENSOR. It publishes the
+# point cloud a camera of the optics below would return for the ball, so the
+# real, unmodified detector_node.py runs its own ROI / voxel / differencing /
+# clustering / centroid pipeline over it. detection_range_m is an INPUT and
+# never a result; what range a real camera delivers is a hardware measurement
+# and nothing here predicts it.
+#
+# Sim-only by construction (it reads /gz/dynamic_poses), so there is no hw_
+# overlay and there must never be one.
+#
+# Never run alongside oracle_detector, and never alongside a second detector:
+# both ends of that pair reach /threat/centroid, and the tracker would receive
+# two uncorrelated views of the same ball.
+#
+# THE CLOUD CONTAINS THE BALL AND NOTHING ELSE. No ground, no runway, no
+# background return. detector_node's background-differencing stage therefore
+# runs but has nothing to reject, which is why synthetic_depth_detector.yaml
+# ships use_persistent_bg: false. Read that file's header before quoting any
+# false-positive number from this lane — there isn't one to quote.
+
+synthetic_depth_publisher:
+  ros__parameters:
+    poses_topic: "/gz/dynamic_poses"
+    odom_topic: "/huitzilin/odom"
+
+    # The topic detector_node subscribes to. It is HARD-CODED in
+    # detector_node.py (not a parameter there), so this must stay /oak/points.
+    cloud_topic: "/oak/points"
+
+    # What the real ros_gz_bridge stamps on the depth cloud. Points go out in
+    # the gz sensor BODY convention (FLU: x forward, y left, z up) under this
+    # frame name, because <optical_frame_id> in the SDF renames the header
+    # without rotating the data — which is exactly why detector.yaml carries
+    # cloud_convention: "gz_flu". Publishing optical-convention points here
+    # instead would silently mirror the cloud and nothing would clear the ROI.
+    cloud_frame_id: "camera_optical_frame"
+
+    # Must match detector.yaml. /oak/points is normally a 7.37 MB sample and
+    # BEST_EFFORT loses most of it to UDP fragmentation; this cloud is ~1 KB,
+    # so the reliability choice is about MATCHING the detector's subscription,
+    # not about bandwidth. A mismatch means no connection at all.
+    cloud_reliable: true
+    cloud_queue_depth: 5
+
+    drone_model: "iris_depth"
+    # BOTH conventions, because this repo has two spawners and they disagree:
+    # spawn_projectile names its ball projectile_<scenario>_<epoch> while
+    # dodge_battery — the harness that actually scores anything — names its own
+    # ball_<run>_r<rep>_<epoch>. See oracle.py's DEFAULT_BALL_PREFIXES for what
+    # matching only one of them cost. Must stay a non-empty list of strings:
+    # `[]` carries no element type, so ROS 2 leaves the parameter uninitialized
+    # and the node dies reading it.
+    ball_name_prefixes: ["ball_", "projectile_"]
+
+    # base_link -> camera_link, and it MUST equal the static TF the launch file
+    # publishes (week6_synthetic_depth.launch.py drives both from the same
+    # camera_link_x/y/z arguments). detector_node transforms its centroid back
+    # through that chain, so a mismatch leaves a fixed bias the oracle lane does
+    # not have.
+    camera_offset_xyz_m: [0.10, 0.0, 0.02]
+
+    # 80 mm ball — models/projectile/model.sdf.
+    ball_radius_m: 0.04
+
+    # ── The modelled optics: AR0234 class + 10 mm M12 (RESULTS.md §4.1/§5) ────
+    # 26 m is the derived requirement at 20 m/s (P=0.95 even at the 90th
+    # percentile dead time). The same lens narrows the cone to ±13.5° x ±11.0°,
+    # and that loss is the whole price of the reach: `reach x half-angle ~ 351
+    # m.deg` is fixed by pixel count, so a wider lens on this sensor buys sector
+    # by giving back range. Plan for a defended sector of about ±10° usable.
+    detection_range_m: 26.0
+    min_range_m: 0.30            # mirrors detector.yaml roi_min_range_m
+    fov_half_h_deg: 13.5
+    fov_half_v_deg: 11.0
+
+    # >=1600x1300 active at 3.0 um pitch. With the FOV above this is
+    # 0.295 mrad/px against the 0.300 quoted in RESULTS.md — the difference is
+    # the doc rounding the pixel count, not a second model. The resolution is
+    # load-bearing: it is what sets how many returns land on the ball, and an
+    # 80 mm ball at 26 m spans ~10.4 x 10.4 px = 85 returns.
+    image_width_px: 1600
+    image_height_px: 1300
+
+    # Cost ceiling only. It binds below ~3.40 m, where the ball already
+    # saturates its voxel neighbourhood, so it cannot change a detection
+    # outcome; it exists so a ball at 0.3 m does not ask for a 650k-point
+    # message at 60 Hz. It may only ever REMOVE returns — never raise this to
+    # make something detect.
+    max_points_per_ball: 5000
+
+    # ── Depth error ──────────────────────────────────────────────────────────
+    # sigma_depth(z) = depth_sigma_m * (z / depth_sigma_ref_range_m)^2, applied
+    # ALONG each return's own bearing ray. z = f*b/d, so a fixed disparity error
+    # becomes a range error growing as z^2. Pinned to the 0.30 m at 26 m spec'd
+    # for the stereo pair in RESULTS.md §4.1 (mono apparent-size depth is
+    # 0.85 m there and scored 7/10 against stereo's 10/10).
+    depth_sigma_m: 0.30
+    depth_sigma_ref_range_m: 26.0
+
+    # How much of that error is drawn INDEPENDENTLY per return rather than once
+    # for the whole ball. Weighted so the marginal per-return sigma is
+    # sigma_depth(z) at any setting.
+    #
+    # 0.0 = the ball's patch has ONE disparity solution, which is what the
+    # 0.30 m figure is a spec for and what the oracle applies to its single
+    # centroid: the returns keep the ball's physical 80 mm extent and the error
+    # lands on the centroid.
+    #
+    # 1.0 smears the ball across ~1.36 m along the ray at 26 m. detector.yaml's
+    # cluster_max_extent_m is 0.35 m — sized for a ball at <= 5 m, where the
+    # same law gives 0.011 m — so the blob is rejected outright and the run
+    # scores ZERO detections at 26 m while every upstream stage looks healthy.
+    # Measured in test_synthetic_depth.py. Change this only deliberately.
+    per_point_depth_frac: 0.0
+
+    # ── Rate ─────────────────────────────────────────────────────────────────
+    # Gazebo's SceneBroadcaster runs at 60 Hz, so the delivered rate is
+    # 60/ceil(60/requested) and nothing can outrun it. 60 Hz is the sensor
+    # requirement in RESULTS.md §4.1 and the rate the headline 26 m / 20 m/s
+    # result was flown at; dead time is 0.178 s at 60 Hz against 0.270 s at
+    # 12 Hz, which is 1.8 m of extra required reach. The node logs the DELIVERED
+    # rate at startup — quote that one, never this one.
+    rate_hz: 60.0
+
+    # Seconds of SIM time between the world moving and the cloud being
+    # publishable: exposure + readout + transfer. 0.0 = OFF, matching the
+    # zero-latency oracle every recorded result was flown against, so the two
+    # lanes stay comparable. The stamp stays at exposure time either way — see
+    # oracle.DelayLine for what is and is not modelled.
+    detection_delay_s: 0.0
+
+    # Publish a zero-width cloud when the sensor sees nothing, so the topic is
+    # a live heartbeat at the sensor rate rather than going silent between
+    # throws. detector_node early-outs on an empty cloud before touching its
+    # background model, so this costs nothing downstream.
+    publish_empty_clouds: true
+
+    seed: 0                      # 0 = entropy; set non-zero to replay a battery
+    stamp_offset_warn_s: 0.05

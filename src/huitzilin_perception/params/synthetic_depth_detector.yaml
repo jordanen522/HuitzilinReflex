@@ -1,0 +1,149 @@
+# synthetic_depth_detector.yaml — detector_node.py, configured for the
+# synthetic long-range cloud published by synthetic_depth_publisher_node.py.
+#
+# DERIVED FROM params/detector.yaml AT REVISION ae02696.
+# detector_node.py itself is byte-identical — nothing in this lane modifies the
+# detector. This is a STANDALONE params file, not a partial overlay: it is
+# passed as the node's only --params-file, and detector_node's in-code defaults
+# differ from detector.yaml in places that matter (min_publish_score 0.3 vs
+# 0.006), so every key has to be present. Re-sync it whenever detector.yaml
+# changes; test_synthetic_depth.py mirrors the geometry values it depends on.
+#
+# EVERY KEY CHANGED FROM detector.yaml, AND WHY — there are exactly two:
+#
+#   roi_max_range_m   5.00 -> 28.00
+#       Forced. detector.yaml's 5.00 m ROI rejects a 26 m ball before it ever
+#       reaches the clusterer, so with the shipped value this lane measures
+#       nothing at all. 5.00 was itself a measured value (8.0 let 12-19 m
+#       background dominate the diff and flooded the foreground every frame) —
+#       but that failure mode is a property of a RENDERED cloud full of scene.
+#       This cloud contains the ball and nothing else, so there is no far
+#       background to flood with.
+#       28.00 rather than 26.0x because the ROI gate runs on the NOISED cloud:
+#       the ceiling has to clear detection_range_m by at least
+#       4 * sigma_depth(detection_range_m) = 4 * 0.30 = 1.20 m at 26 m, or
+#       roughly one frame in six is thrown away for having drawn long — and
+#       those are the FIRST detections of the throw, the ones that buy tca.
+#       2.00 m of headroom is 6.7 sigma. **Sweeping detection_range_m above
+#       ~26.7 m requires raising this too**: sigma grows as z^2, so at 30 m the
+#       requirement is 30.0 + 1.60 = 31.6 m.
+#
+#   use_persistent_bg   true -> false
+#       Forced by the ball-only cloud. The persistent voxel map exists to model
+#       a static scene, and there is no static scene here — so it has nothing
+#       to gain and one way to do harm: it retains a throw's trail for
+#       bg_map_ttl_s (20 s) in the fixed odom frame, while dodge_battery
+#       re-throws after settle_s (6 s) down the same corridor. Throw 2 onward
+#       would land inside throw 1's 0.10 m voxels and read as BACKGROUND — a
+#       silent zero-detection run after a healthy first throw. The Week-3
+#       rolling deque that this falls back to remembers 4 frames (0.067 s at
+#       60 Hz), which cannot span two throws, and still difference-gates every
+#       frame: at 20 m/s the ball moves 0.33 m per 60 Hz frame against
+#       diff_threshold_m 0.10.
+#
+# WHAT THIS COSTS IN FIDELITY, and it must be carried with every number:
+# background differencing RUNS but rejects NOTHING, because every return in the
+# cloud is the ball. This lane measures the ROI / voxel / cluster / extent /
+# centroid path with the real code. It says nothing about false-positive
+# rejection against scene clutter — the Week 4 patrol figures remain the only
+# measurement of that, and a false-dodge count taken here would be meaningless.
+#
+# The bg_map_* keys below are inert while use_persistent_bg is false. They are
+# kept at detector.yaml's values rather than deleted so the diff against that
+# file stays exactly the two entries above.
+
+detector:
+  ros__parameters:
+
+    # ── Diagnostics — all off, same as detector.yaml ──────────────────────────
+    # debug_dump_dir costs ~40 ms/frame and invalidates every latency number
+    # from the run. debug_funnel is chatty but cheap (1.4-2.3 ms/frame);
+    # turn it on to read per-stage survivor counts for one specific throw.
+    # None of the three can be flipped with `ros2 param set` — detector_node
+    # caches its params at construction — so set them here and restart.
+    debug_funnel: false
+    debug_funnel_throttle_s: 1.0
+    profile_stages: false
+    profile_window_frames: 30
+    debug_dump_dir: ""
+
+    # ── Cloud transport ───────────────────────────────────────────────────────
+    # Must match synthetic_depth.yaml's cloud_reliable / cloud_queue_depth. A
+    # reliability mismatch means the subscription never connects to the
+    # publisher and the topic looks alive while delivering nothing.
+    cloud_reliable: true
+    cloud_queue_depth: 5
+
+    # ── Input cloud axis convention ───────────────────────────────────────────
+    # synthetic_depth_publisher emits points in the gz sensor body frame
+    # (X fwd, Y left, Z up) under the header frame camera_optical_frame, which
+    # is exactly what ros_gz_bridge produces from the rendered depth camera.
+    # "gz_flu" remaps them to REP-103 optical at ingest. Setting "optical" here
+    # would rotate the cloud 90 degrees and nothing would clear the ROI gate.
+    cloud_convention: "gz_flu"
+
+    # ── ROI / range gate ──────────────────────────────────────────────────────
+    roi_min_range_m: 0.30
+    roi_max_range_m: 28.00   # CHANGED from 5.00 — see the header for the rule
+                             # that ties this to detection_range_m.
+
+    # Unchanged at 45 deg, and it never binds here: the publisher's own
+    # rectangular frustum is +/-13.5 x 11.0 deg, so every return it emits is
+    # already well inside this cone. The modelled sector lives in
+    # synthetic_depth.yaml, not here.
+    roi_half_angle_deg: 45.0
+
+    # ── Voxel downsampling ────────────────────────────────────────────────────
+    # 0.02 m resolves the 80 mm ball into ~27 voxels at 26 m (measured in
+    # test_synthetic_depth.py); 0.05 m is coarser than the ball itself.
+    voxel_leaf_m: 0.02
+
+    # ── Background model / frame differencing ────────────────────────────────
+    use_persistent_bg: false  # CHANGED from true — see the header.
+    bg_map_leaf_m: 0.10       # inert while use_persistent_bg is false
+    bg_map_ttl_s: 20.0        # inert
+    bg_map_max_voxels: 400000 # inert
+
+    # The rolling buffer this lane actually uses: 5 frames = 0.067 s at 60 Hz.
+    bg_history_frames: 5
+
+    # Minimum per-voxel depth change to count as foreground. At 20 m/s and
+    # 60 Hz the ball advances 0.33 m between frames, so it is never mistaken
+    # for its own previous position.
+    diff_threshold_m: 0.10
+
+    # Whole-scene change = egomotion flood, not a projectile. Cannot trigger on
+    # a ball-only cloud (peak ~32 post-voxel returns), kept for parity.
+    fg_max_points: 5000
+
+    # ── Euclidean clustering ──────────────────────────────────────────────────
+    cluster_tolerance_m: 0.20
+    cluster_min_points: 5     # the 26 m ball yields ~27 post-voxel returns
+    cluster_max_points: 500
+
+    cluster_split_tol_m: 0.10
+    cluster_split_max_points: 5000
+
+    # The 80 mm ball measures 0.069-0.073 m of extent after 0.02 m voxelization
+    # at every range from 1 m to 26 m in this lane, so 0.35 m holds with a 5x
+    # margin. It is ALSO the gate that rejects the ball outright if the depth
+    # error is drawn independently per return — see per_point_depth_frac in
+    # synthetic_depth.yaml.
+    cluster_max_extent_m: 0.35
+
+    # ── Centroid publishing ───────────────────────────────────────────────────
+    # ~3 pts; cluster_min_points is the size floor, not this.
+    min_publish_score: 0.006
+
+    # ── Output topics ─────────────────────────────────────────────────────────
+    threat_centroid_topic: "/threat/centroid"
+    marker_topic: "/threat/marker"
+
+    # ── Egomotion compensation ────────────────────────────────────────────────
+    # Requires odom with a valid orientation quaternion AND the
+    # base_link -> camera_link -> camera_optical_frame static TF chain, which
+    # week6_synthetic_depth.launch.py publishes for exactly this reason. Without
+    # the chain the detector silently falls back to camera-frame differencing.
+    compensate_egomotion: true
+    odom_topic: "/huitzilin/odom"
+    fixed_frame: "odom"

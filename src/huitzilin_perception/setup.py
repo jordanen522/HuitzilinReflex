@@ -31,6 +31,8 @@ setup(
         "console_scripts": [
             "detector = huitzilin_perception.detector_node:main",
             "oracle_detector = huitzilin_perception.oracle_detector_node:main",
+            "synthetic_depth_publisher = "
+            "huitzilin_perception.synthetic_depth_publisher_node:main",
             "mono_flash_detector = "
             "huitzilin_perception.mono_flash_detector_node:main",
             "spawn_projectile = huitzilin_perception.spawn_projectile:main",
