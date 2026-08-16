@@ -93,7 +93,7 @@ class ScorerNode(Node):
         self.declare_parameter("bag_dir", "/data/huitzilin_bags")
         self.declare_parameter("scenario_matrix",
                                "config/scenario_matrix.yaml")
-        self.declare_parameter("split", "test")   # train | test | all
+        self.declare_parameter("split", "test")   # train | test | tune | all
         self.declare_parameter("recall_floor", 0.95)
         self.declare_parameter("output_file", "/tmp/week3_regression.txt")
 
