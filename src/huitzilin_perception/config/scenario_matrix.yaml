@@ -44,28 +44,67 @@
 # tune set cannot be a re-run of the bags the thresholds are meant to be
 # scored against:
 #   - Speed: 6 / 11 / 17 m/s          (originals use 4 / 8 / 12 / 14)
-#   - Angle: 0, ±15°, +22°, ±35°      (originals use 0, +5, ±20/25/30)
+#   - Angle: 0, ±15°, +22°, ±35°      (originals use 0, +5, -20, -25, +30,
+#     -30, and 180 behind-camera -- not the +20/+25 the old shorthand implied)
 #   - Miss:  0.0 / 0.35 / 0.9 / 2.0 m (originals use 0.0/0.1/0.4/0.5/1.2/1.5)
 #   - Vertical: −7.5 m negative probe (original N04 uses −10.0 m)
 #   - Negatives: 4 of 14 = 29%, keeping the ≥ 25% rule above.
-# 10 positives + 4 negatives. Design rationale, arithmetic and per-scenario
-# in-ROI dwell estimates:
-#   .superpowers/sdd/this-is-what-my-streamed-steele/tune-set-design.md
+# 10 positives + 4 negatives (28.6% negative, clears the >= 25% rule above).
+# Every T-positive spawns outside roi_max_range_m (5.00) at offset_forward_m
+# 6.6-8.5 m, so its bag keeps the acquisition transient -- smallest margin is
+# 1.6 m (T01/T06/T09/T10 at 6.6 m), ~0.27 s of clean background at 6 m/s.
+# Simulated in-gate dwell at 15 Hz spans 2.8 (T08) to 5.5 (T01) depth clouds
+# per positive, against 3.4-9.0 clouds across the twelve original positives --
+# comparable, slightly harder on average. Full arithmetic (ttc and
+# closest_approach_m derivations, per-scenario dwell tables, rejected
+# alternatives) was worked out in a workspace design note that does not ship
+# with this repo; the numbers load-bearing for using this matrix are inlined
+# here and in each scenario's own notes field instead.
 #
 # Two conventions the T-entries follow that the S/N entries do not:
 #   - time_to_closest_s = offset_forward_m / speed_mps (straight-line flight
 #     time), the same arithmetic every S-entry uses. Negatives carry 0, as
 #     N01–N05 do. capture_scenario.sh does not read it, but the capture
 #     operator's stop timing does: SPAWN_LEAD (3 s) + this + ~9 s.
-#   - closest_approach_m is the TRUE crossing-geometry closest approach,
-#     |offset·sin(angle) + miss·cos(angle)|, not the nominal miss_distance_m.
+#   - closest_approach_m is the true HORIZONTAL crossing-geometry closest
+#     approach, |offset·sin(angle) + miss·cos(angle)|, not the nominal
+#     miss_distance_m -- but it EXCLUDES gravity drop and patrol egomotion,
+#     the same two things the S/N entries' nominal-miss convention excludes.
+#     Week 3 throws are flat (compensate_gravity defaults False in
+#     ballistics.py), so the recorded time_to_closest_s may not even be
+#     reached before ground impact: T01's nominal closest approach (0.0 at
+#     t*=1.10 s) never happens in flight -- the ball hits the ground at
+#     t=0.639 s, already ~3.4 m from the drone. This value also assumes a
+#     stationary drone (spawn_projectile.py calls compute_spawn with no
+#     target_vel_enu); bags captured under patrol measure closest approaches
+#     of 1.3-2.6 m for throws this field records as 0.0. It is a DIFFERENT
+#     2-D simplification, not a more truthful one -- do not read it as this
+#     split being more honest about geometry than S/N on this axis.
 #     spawn_projectile calls ballistics.compute_spawn with aim_at_drone=False,
-#     so an oblique throw does NOT close on the drone — S04 (+30°, 6 m) is
-#     labelled 0.0 but actually passes 3.0 m away. The field is informational
-#     (score_bags reads only `label` and the sidecar's detection_window_s), so
-#     recording the real number costs nothing and stops the tune set from
-#     lying about its own geometry. The S/N entries are left exactly as they
-#     were captured.
+#     so an oblique throw does NOT close on the drone -- S04 (+30°, 6 m) is
+#     labelled 0.0 but its 2-D horizontal pass is 3.0 m away. The field is
+#     informational (score_bags reads only `label` and the sidecar's
+#     detection_window_s), so recording this number costs nothing. The S/N
+#     entries are left exactly as they were captured.
+#
+# roi_max_range_m COUPLING WARNING (T-positives)
+# ------------------------------------------------
+# Every T-positive spawns outside the shipped roi_max_range_m (5.00 m), at
+# offset_forward_m 6.6-8.5 m, specifically so its bag contains the
+# acquisition transient (design requirement 5, capture_scenario.sh). Raising
+# roi_max_range_m during the retune erodes or destroys that:
+#   - at 6.5 m: T01, T06, T09, T10 (all spawn at 6.6) keep only a 0.1 m
+#     acquisition margin -- effectively no pre-acquisition background left.
+#   - at 8.0 m: T01, T02, T04, T05, T06, T08, T09, T10 (every T-positive
+#     except T03 and T07, which spawn at 8.5) start INSIDE the gate. Their
+#     bags no longer exercise acquisition at all.
+# BINDING CONSEQUENCE: these bags are captured once, over several hours, on
+# the Dell, and the retune runs after capture -- it cannot cheaply re-throw.
+# A retune that raises roi_max_range_m to 6.6 m or above MUST either
+# re-capture the affected T-positives at a larger offset_forward_m, or
+# explicitly report which cells no longer exercise acquisition at the new
+# gate. Do not silently retune past this line, and do not pretend this
+# constraint does not exist.
 #
 # ROSBAG NAMING CONVENTION
 # ------------------------
@@ -312,7 +351,7 @@ scenarios:
     size_class: medium
     closest_approach_m: 0.0
     time_to_closest_s: 0.7
-    notes: "Mid-speed anchor (7.7 / 11.0 = 0.70 s). Range gate entered at ~0.25 s; ~0.39 s usable."
+    notes: "Mid-speed anchor (7.7 / 11.0 = 0.70 s). Range gate entered at ~0.25 s; ~0.31 s usable (~4.7 clouds at 15 Hz)."
 
   - id: T03
     label: positive
@@ -324,7 +363,7 @@ scenarios:
     size_class: medium
     closest_approach_m: 0.0
     time_to_closest_s: 0.5
-    notes: "Fast anchor (8.5 / 17.0 = 0.50 s). Range gate entered at ~0.21 s, so only ~0.29 s (~4 clouds) inside the ROI — the frame-count-limited end of the tune set."
+    notes: "Fast anchor (8.5 / 17.0 = 0.50 s). Range gate entered at ~0.21 s, so only ~0.24 s (~3.6 clouds) inside the ROI — the frame-count-limited end of the tune set."
 
   # ── TUNE POSITIVES: oblique approach ─────────────────────────────────────
   - id: T04
@@ -337,7 +376,7 @@ scenarios:
     size_class: medium
     closest_approach_m: 1.99
     time_to_closest_s: 0.7
-    notes: "Crossing geometry: true closest approach 7.7*sin(15°) = 1.99 m, not 0. Leaves the 45° ROI cone before the range gate does — visible from ~0.26 s to ~0.57 s."
+    notes: "Crossing geometry: true closest approach 7.7*sin(15°) = 1.99 m, not 0. Leaves the 45° ROI cone before the range gate does — visible from ~0.26 s to ~0.53 s (~4.1 clouds at 15 Hz)."
 
   - id: T05
     label: positive
@@ -373,7 +412,7 @@ scenarios:
     size_class: medium
     closest_approach_m: 0.35
     time_to_closest_s: 0.5
-    notes: "S08 ANALOGUE. Same failure geometry as S08 (fast head-on with a small lateral offset, so the ball never crosses the boresight and stays a few-point cluster at the edge of the depth return) at a disjoint operating point: 17 m/s / 0.35 m vs S08's 14 m/s / 0.5 m. Root-cause the S08 false negative against THIS bag, never against S08 — S08 is held-out now."
+    notes: "S08 ANALOGUE -- HYPOTHESIS, NOT A GUARANTEE. S08's failure mechanism is unconfirmed: detector.yaml:92 already records the range/dwell hypothesis for S08 as refuted (\"S08's failure isn't a range/dwell issue after all\"). T07 is defensible as reproducing the one axis on which S08 differs from the PASSING S03 -- fast head-on with a small non-zero lateral miss (0.5 m), vs S03's exact 0.0 -- at a disjoint operating point: 17 m/s / 0.35 m vs S08's 14 m/s / 0.5 m. It is NOT earned as 'reproduces the failure mode'; no scenario can be certified to reproduce an unknown mechanism before a bag exists. If T07 detects cleanly at shipped thresholds, that is itself informative -- it narrows S08's failure toward something specific to the S08 capture rather than to this geometry. Root-cause the S08 false negative against THIS bag, never against S08 — S08 is held-out now."
 
   - id: T08
     label: positive
@@ -385,7 +424,7 @@ scenarios:
     size_class: medium
     closest_approach_m: 2.55
     time_to_closest_s: 0.4
-    notes: "Worst case: fast AND oblique. True closest approach 6.8*sin(22°) = 2.55 m. Inside both gates for only ~0.19 s (~3 clouds), so this is the scenario min_track_updates / cluster_min_points changes will move first. Expect it to be the tune set's own S08 if anything is."
+    notes: "Worst case: fast AND oblique. True closest approach 6.8*sin(22°) = 2.55 m. Inside both gates for only ~0.19 s (~3 clouds), so this is the scenario cluster_min_points changes will move first (min_track_updates lives in evasion.yaml / evasion_node.py, not the detector -- score_bags scores only /threat/centroid from the detector, so this split cannot referee that threshold). Expect it to be the tune set's own S08 if anything is."
 
   # ── TUNE POSITIVES: wider miss ───────────────────────────────────────────
   - id: T09
