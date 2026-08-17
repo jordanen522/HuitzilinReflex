@@ -45,8 +45,21 @@ For each scenario in the chosen split:
   5b. Attribute: decide whether each TP is a ball or background that merely
      landed inside the window, from the closure RATE of a contiguous
      closing run of in-window centroids (attribute_closing_ball). The same
-     test runs over every negative as a falsification control — a ball-free
-     bag that attributes a ball refutes the method.
+     test runs over every negative as a falsification control.
+
+     TWO KINDS OF NEGATIVE, and only one of them is a null control:
+       - GENUINELY BALL-FREE (speed_mps 0.0 — N01, N02, N05, T11, T14): no
+         spawn command is ever issued (capture_scenario.sh:47,89-102), so
+         the bag contains no projectile. Attributing a ball in one of these
+         refutes the method, full stop. This is the falsification control.
+       - BALL PRESENT, MUST NOT BE DETECTED (N03/T12 behind the camera at
+         8/11 m/s, N04/T13 spawned 10.0/7.5 m below): a projectile IS
+         spawned. They are negatives in the sense of "wrong bearing, wrong
+         elevation, the gates must suppress it", not "contains no ball".
+         Whether attribution fires on these is interesting — it is not a
+         null result either way, because there is a real ball in the bag.
+     Both kinds are scored, which is correct; the aggregate reports the
+     ball-free subset separately because only that subset can falsify.
   6. Aggregate TP/FP/TN/FN → recall, precision, FP rate.
 
 All timing uses message stamps (use_sim_time), never wall-clock.
@@ -125,9 +138,14 @@ from huitzilin_perception.score_bags_logic import (
     build_bag_play_cmd,
     clock_msg_to_sim_t,
     compute_exclude_topics,
+    count_in_window,
+    flat_throw_fall_time_s,
+    format_closure_rate,
     is_in_window_loose,
+    is_in_window_strict,
     is_in_window_symmetric_legacy,
     strict_window_bounds,
+    symmetric_window_bounds,
 )
 
 RELIABLE_QOS = QoSProfile(
@@ -386,12 +404,25 @@ class ScorerNode(Node):
         detected = len(detections) > 0
 
         # Ball speed for the attribution rate band. Positives use their own
-        # scenario's speed; a negative has no ball, so its own speed_mps
-        # would make the band empty and the control unfalsifiable by
-        # construction — negatives are therefore scored against the LIBRARY
-        # MAXIMUM band, the most permissive test any scenario gets.
+        # scenario's speed. Negatives are scored against the LIBRARY MAXIMUM
+        # band — the most permissive test any scenario gets — because the
+        # ball-free ones carry speed_mps 0.0, which would make their band
+        # empty and the control unfalsifiable by construction.
         speed_mps = float(scen.get("speed_mps") or 0.0)
         ctl_speed = LIBRARY_MAX_BALL_SPEED_MPS
+        # A negative is "ball-free" only when no projectile was spawned at
+        # all. capture_scenario.sh:47 spawns iff speed > 0, so speed_mps
+        # 0.0 IS the ball-free test. N03/N04/T12/T13 carry 8.0/8.0/11.0/11.0
+        # — a real ball, aimed where the detector must not see it.
+        ball_free = speed_mps == 0.0
+        # The flat-throw ground-impact clamp on the window's late edge only
+        # describes a throw launched level from the standard 2 m hover;
+        # flat_throw_fall_time_s returns None for the vertical-offset
+        # scenarios (N04, T13), which restores the nominal-event edge for
+        # those alone. See its docstring.
+        fall_time_s = flat_throw_fall_time_s(
+            float(scen.get("offset_vertical_m") or 0.0)
+        )
         all_ranges = [
             (t, math.sqrt(x * x + y * y + z * z))
             for (t, x, y, z) in self._detection_positions
@@ -409,16 +440,27 @@ class ScorerNode(Node):
                     "note": "sidecar missing time_to_closest_s — strict "
                             "window cannot be enforced",
                 }
-            # The window is asymmetric and floored at spawn (Task 5c
-            # CRITICAL-1): lower = max(event - window_s, bag_start +
-            # SPAWN_LEAD_S), upper = event + min(window_s,
-            # POST_EVENT_TOLERANCE_S). See strict_window_bounds().
-            lower, upper = strict_window_bounds(
-                bag_start, time_to_closest_s, window_s,
+            # The window is asymmetric, floored at spawn (Task 5c
+            # CRITICAL-1) and clamped at ground impact on the late side
+            # (fix round 1, HIGH-3): lower = max(event - window_s, bag_start
+            # + SPAWN_LEAD_S), upper = spawn + min(ttc, fall_time) +
+            # min(window_s, POST_EVENT_TOLERANCE_S). See
+            # strict_window_bounds().
+            window_kwargs = dict(
                 spawn_lead_s=SPAWN_LEAD_S,
                 post_event_s=POST_EVENT_TOLERANCE_S,
+                fall_time_s=fall_time_s,
             )
-            in_window_strict = any(lower <= t <= upper for t in detections)
+            lower, upper = strict_window_bounds(
+                bag_start, time_to_closest_s, window_s, **window_kwargs
+            )
+            # Call the tested predicate rather than re-inlining it (fix
+            # round 1, LOW-3): the comparison that decides pass/fail is the
+            # one that must carry the regression tests.
+            in_window_strict = is_in_window_strict(
+                detections, bag_start, time_to_closest_s, window_s,
+                **window_kwargs
+            )
             # Both superseded gates, computed for the artifact only so the
             # CRITICAL-1 change is visible per scenario rather than only in
             # aggregate: `sym` is Task 5b's symmetric unfloored gate, `loose`
@@ -429,6 +471,17 @@ class ScorerNode(Node):
             )
             in_window_loose = is_in_window_loose(detections, bag_start, window_s)
             passed = in_window_strict
+            # How many detections each gate ADMITS, not just whether it
+            # fires (fix round 1, MEDIUM-3). n_win/n_win_sym is the only
+            # number that answers "strict, sym and loose still agree on
+            # every positive — is the new gate doing anything at all?", and
+            # it belongs in the artifact where it can be recomputed rather
+            # than in a report's prose.
+            sym_lower, sym_upper = symmetric_window_bounds(
+                bag_start, time_to_closest_s, window_s,
+                spawn_lead_s=SPAWN_LEAD_S,
+            )
+            n_win_sym = count_in_window(detections, sym_lower, sym_upper)
 
             event_rel = SPAWN_LEAD_S + time_to_closest_s
             det_rel = sorted(round(t - bag_start, 3) for t in detections)
@@ -459,12 +512,21 @@ class ScorerNode(Node):
                 + str([(round(t - bag_start, 3), round(r, 3))
                        for (t, r) in sorted(in_window_ranges)])
             )
+            # t_last_rel makes the "POST_EVENT_TOLERANCE_S is non-binding"
+            # claim checkable from the artifact instead of from a console
+            # log nobody keeps (fix round 1, MEDIUM-2): compare it against
+            # win_rel's upper edge.
+            in_win_times = [t for t in detections if lower <= t <= upper]
+            t_last_rel = (
+                f"{max(in_win_times) - bag_start:.2f}" if in_win_times else "-"
+            )
             note = (
                 f"win_rel=[{lower - bag_start:.2f},{upper - bag_start:.2f}] "
                 f"strict={in_window_strict} sym={in_window_sym} "
                 f"loose={in_window_loose} n_det={len(detections)} "
-                f"n_win={attr['n_points']} run={attr['longest_run']} "
-                f"rate={attr['closure_rate']:.2f}m/s "
+                f"n_win={attr['n_points']} n_win_sym={n_win_sym} "
+                f"t_last_rel={t_last_rel} run={attr['longest_run']} "
+                f"rate={format_closure_rate(attr)} "
                 f"band=({attr['rate_band'][0]:.2f},{attr['rate_band'][1]:.2f}] "
                 f"attributable={attributable}"
             )
@@ -477,13 +539,21 @@ class ScorerNode(Node):
             # time to anchor to.
             passed = not detected
 
-            # NEGATIVE CONTROL (Task 5c CRITICAL-2b). These bags contain no
-            # ball and tens of live false positives each, so they are the
-            # control population an attribution test must survive. Task 5b
-            # set attributable=None here and so could never falsify its own
-            # method. Two reads, both against the most permissive band in
-            # the library (ctl_speed), i.e. the easiest test any scenario
-            # gets:
+            # NEGATIVE CONTROL (Task 5c CRITICAL-2b). Every negative carries
+            # tens of live false positives, so these are the control
+            # population an attribution test must survive. Task 5b set
+            # attributable=None here and so could never falsify its own
+            # method.
+            #
+            # READ THE `ball_free` FLAG BEFORE QUOTING ANY COUNT FROM THIS
+            # BRANCH (fix round 1, HIGH-2). Only the speed_mps 0.0 bags
+            # (N01, N02, N05, T11, T14) contain no projectile and can
+            # therefore falsify. N03/N04/T12/T13 have a real ball in them,
+            # thrown away from or below the camera; a firing there is a
+            # different and weaker finding — see the module docstring.
+            #
+            # Two reads, both against the most permissive band in the
+            # library (ctl_speed), i.e. the easiest test any scenario gets:
             #   ctl_win  — the same window rule a positive gets, with this
             #              scenario's own time_to_closest_s (0 for every
             #              negative), so the window width is comparable.
@@ -494,6 +564,7 @@ class ScorerNode(Node):
                 bag_start, float(sidecar.get("time_to_closest_s") or 0.0),
                 window_s, spawn_lead_s=SPAWN_LEAD_S,
                 post_event_s=POST_EVENT_TOLERANCE_S,
+                fall_time_s=fall_time_s,
             )
             ctl_win_ranges = [
                 (t, r) for (t, r) in all_ranges if ctl_lower <= t <= ctl_upper
@@ -503,14 +574,19 @@ class ScorerNode(Node):
             attributable = attr_all["attributable"]
             closing_run = attr_all["longest_run"]
             note = (
+                # win_rel on negatives too (fix round 1, LOW-5): ctl_win is
+                # uninterpretable without the width of the window it read.
+                f"win_rel=[{ctl_lower - bag_start:.2f},"
+                f"{ctl_upper - bag_start:.2f}] "
+                f"ball_free={ball_free} "
                 f"fp_count={len(detections)} "
                 f"n_win={attr_win['n_points']} "
                 f"ctl_win={attr_win['attributable']}"
                 f"(run={attr_win['longest_run']},"
-                f"rate={attr_win['closure_rate']:.2f}) "
+                f"rate={format_closure_rate(attr_win)}) "
                 f"ctl_all={attr_all['attributable']}"
                 f"(run={attr_all['longest_run']},"
-                f"rate={attr_all['closure_rate']:.2f}) "
+                f"rate={format_closure_rate(attr_all)}) "
                 f"band=({attr_all['rate_band'][0]:.2f},"
                 f"{attr_all['rate_band'][1]:.2f}]"
             )
@@ -532,6 +608,7 @@ class ScorerNode(Node):
             "note": note,
             "attributable": attributable,
             "closing_run": closing_run,
+            "ball_free": ball_free,
         }
 
     def _find_bag(self, sid: str) -> Optional[Path]:
@@ -699,6 +776,15 @@ class ScorerNode(Node):
         # console log that nobody can re-read six months later.
         attributed = sum(1 for r in positives if r.get("attributable"))
         ctl_hits = [r["id"] for r in negatives if r.get("attributable")]
+        # Fix round 1, HIGH-2: only the speed_mps 0.0 negatives are
+        # ball-free, and only they can falsify an attribution rule. Emitting
+        # the two counts separately is what stops the next reader repeating
+        # the error of calling all nine "ball-free" — N03/N04/T12/T13 have a
+        # projectile in them, aimed where the detector must not see it.
+        ball_free_negs = [r for r in negatives if r.get("ball_free")]
+        with_ball_negs = [r for r in negatives if not r.get("ball_free")]
+        bf_hits = [r["id"] for r in ball_free_negs if r.get("attributable")]
+        wb_hits = [r["id"] for r in with_ball_negs if r.get("attributable")]
         lines += [
             "",
             "  ─" + "─" * 55,
@@ -708,9 +794,15 @@ class ScorerNode(Node):
             f"  Precision:        {precision*100:.1f}%",
             f"  FP rate:          {fp_rate*100:.1f}%",
             f"  Attributable to a closing ball: {attributed}/{n_pos} positives",
-            f"  Negative control (ball-free bags attributed to a ball): "
+            f"  Negative control, ALL negatives attributed to a ball: "
             f"{len(ctl_hits)}/{len(negatives)}"
             + (f"  {ctl_hits}" if ctl_hits else ""),
+            f"    of which BALL-FREE (speed_mps 0.0 — the only true null): "
+            f"{len(bf_hits)}/{len(ball_free_negs)}"
+            + (f"  {bf_hits}" if bf_hits else ""),
+            f"    of which BALL PRESENT but must-not-detect (behind/below): "
+            f"{len(wb_hits)}/{len(with_ball_negs)}"
+            + (f"  {wb_hits}" if wb_hits else ""),
             "",
             f"  {verdict}",
             "═" * 60,

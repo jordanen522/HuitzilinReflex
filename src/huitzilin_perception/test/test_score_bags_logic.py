@@ -26,11 +26,18 @@ history is made of:
   positive whose ball was never detected at all.
 """
 
+import math
+import os
+import sys
+
 import pytest
 
 from huitzilin_perception.score_bags_logic import (
     DEFAULT_MIN_CLOSING_RUN,
+    FLAT_THROW_FALL_TIME_S,
     FORBIDDEN_EXCLUDE_TOPICS,
+    G_MPS2,
+    HOVER_ALTITUDE_M,
     LIBRARY_MAX_BALL_SPEED_MPS,
     MAX_DETECTION_GAP_S,
     POST_EVENT_TOLERANCE_S,
@@ -42,13 +49,29 @@ from huitzilin_perception.score_bags_logic import (
     clock_msg_to_sim_t,
     closing_runs,
     compute_exclude_topics,
+    count_in_window,
+    flat_throw_fall_time_s,
+    format_closure_rate,
     is_in_window_loose,
     is_in_window_strict,
     is_in_window_symmetric_legacy,
     longest_closing_run,
     run_closure_rate,
     strict_window_bounds,
+    symmetric_window_bounds,
 )
+
+# The Monte Carlo harness lives beside this file and is not a pytest module.
+# Imported by explicit path rather than as a sibling so the import does not
+# depend on pytest's import mode (the ROS-free CI subset runs it with a
+# PYTHONPATH, colcon runs it another way).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import null_attribution_mc  # noqa: E402
+
+# Every time_to_closest_s in the shipped library (scenario_matrix.yaml),
+# positives and negatives, originals and tune set. Several tests below are
+# properties that must hold across all of them.
+LIBRARY_TTCS = (0.0, 0.4, 0.43, 0.5, 0.7, 0.75, 0.875, 1.1, 1.25, 1.5)
 
 
 # ── compute_exclude_topics ──────────────────────────────────────────────────
@@ -174,9 +197,14 @@ def test_strict_window_is_asymmetric_about_the_event():
     # Generous before closest approach (a closing ball is legitimately
     # visible there), tight after (it has passed, or hit the ground).
     lower, upper = strict_window_bounds(100.0, 1.5, window_s=4.0)
-    event = 100.0 + SPAWN_LEAD_S + 1.5
+    spawn = 100.0 + SPAWN_LEAD_S
+    event = spawn + 1.5
     assert event - lower == pytest.approx(1.5)        # floored at spawn
-    assert upper - event == pytest.approx(POST_EVENT_TOLERANCE_S)
+    # ttc 1.5 s > the 0.639 s flat-throw fall time, so the tolerance hangs
+    # off ground impact, not off an event that never happens (HIGH-3).
+    assert upper - spawn == pytest.approx(
+        FLAT_THROW_FALL_TIME_S + POST_EVENT_TOLERANCE_S)
+    assert upper < event + POST_EVENT_TOLERANCE_S
     assert (upper - lower) < 2 * 4.0                  # narrower than 5b's 8 s
 
 
@@ -192,9 +220,91 @@ def test_strict_window_is_a_subset_of_the_symmetric_gate():
 
 def test_strict_window_upper_never_exceeds_sidecar_window():
     # A sidecar that ships a window_s TIGHTER than POST_EVENT_TOLERANCE_S
-    # still binds — min(), not a fixed 2 s.
-    _lower, upper = strict_window_bounds(100.0, 0.75, window_s=0.5)
-    assert upper == pytest.approx(100.0 + SPAWN_LEAD_S + 0.75 + 0.5)
+    # still binds — min(), not a fixed 2 s. (Vacuous for the shipped
+    # library, where every sidecar carries 4.0; kept because a sidecar is
+    # data. See strict_window_bounds' docstring.)
+    _lower, upper = strict_window_bounds(100.0, 0.5, window_s=0.25)
+    assert upper == pytest.approx(100.0 + SPAWN_LEAD_S + 0.5 + 0.25)
+
+
+# ── the late edge is clamped at ground impact (fix round 1, HIGH-3) ─────────
+
+def test_flat_throw_fall_time_is_the_documented_physics():
+    # sqrt(2h/g) from a 2 m hover, the same arithmetic scenario_matrix.yaml's
+    # own T01 note quotes. Not a tuned number: h is bridge.yaml's
+    # takeoff_alt_m and g is g.
+    assert FLAT_THROW_FALL_TIME_S == pytest.approx(
+        math.sqrt(2.0 * HOVER_ALTITUDE_M / G_MPS2))
+    assert FLAT_THROW_FALL_TIME_S == pytest.approx(0.639, abs=5e-4)
+
+
+def test_fall_time_is_none_for_the_vertical_offset_scenarios():
+    # N04 (-10.0 m) and T13 (-7.5 m) are not thrown from the standard 2 m
+    # hover at all, so the flat-throw model does not describe them and the
+    # caller must fall back rather than invent a drop height.
+    assert flat_throw_fall_time_s(-10.0) is None
+    assert flat_throw_fall_time_s(-7.5) is None
+    assert flat_throw_fall_time_s(0.0) == pytest.approx(FLAT_THROW_FALL_TIME_S)
+
+
+def test_late_edge_hangs_off_ground_impact_when_the_ball_lands_first():
+    # S01 (ttc 1.50) and S10 (1.25): the ball is on the ground at 0.639 s,
+    # so the nominal closest approach never happens and the tolerance must
+    # not be measured from it.
+    spawn = 100.0 + SPAWN_LEAD_S
+    for ttc in (1.5, 1.25, 1.1):
+        _l, upper = strict_window_bounds(100.0, ttc, window_s=4.0)
+        assert upper - spawn == pytest.approx(
+            FLAT_THROW_FALL_TIME_S + POST_EVENT_TOLERANCE_S)
+
+
+def test_late_edge_is_unchanged_when_closest_approach_precedes_impact():
+    # S03/S06/S08 (ttc 0.43) and S12 (0.50) reach closest approach while
+    # still airborne, so the clamp is inert for them — the rule is not a
+    # blanket shortening.
+    spawn = 100.0 + SPAWN_LEAD_S
+    for ttc in (0.4, 0.43, 0.5):
+        _l, upper = strict_window_bounds(100.0, ttc, window_s=4.0)
+        assert upper - spawn == pytest.approx(ttc + POST_EVENT_TOLERANCE_S)
+
+
+def test_the_new_late_edge_is_a_strict_tightening_and_must_stay_one():
+    # THE guard for HIGH-3. The corrected window must be a SUBSET of the one
+    # Task 5c originally shipped, for every scenario in the library and for
+    # anything anyone adds — a rule that could ever admit a detection the
+    # previous rule rejected would be a loosening, and a loosening cannot be
+    # justified by physics that only ever removes flight time.
+    # Fails loudly if min() is ever turned into max(), dropped, or given a
+    # larger fall time.
+    for ttc in LIBRARY_TTCS + (0.05, 2.0, 3.9, 12.0):
+        for window_s in (0.25, 1.0, 4.0, 40.0):
+            lower, upper = strict_window_bounds(100.0, ttc, window_s=window_s)
+            spawn = 100.0 + SPAWN_LEAD_S
+            previous_upper = (
+                spawn + ttc + min(window_s, POST_EVENT_TOLERANCE_S)
+            )
+            assert upper <= previous_upper + 1e-12, (
+                f"ttc={ttc} window_s={window_s}: late edge LOOSENED by "
+                f"{upper - previous_upper:.4f}s"
+            )
+            # ...and the floor and the anchor did not move with it.
+            assert lower == pytest.approx(
+                max(spawn + ttc - window_s, spawn))
+
+
+def test_fall_time_none_restores_the_nominal_event_edge():
+    # The documented per-scenario fallback: a geometry the flat-throw model
+    # does not describe gets exactly the previous rule, not a guess.
+    spawn = 100.0 + SPAWN_LEAD_S
+    _l, upper = strict_window_bounds(100.0, 1.5, window_s=4.0,
+                                     fall_time_s=None)
+    assert upper == pytest.approx(spawn + 1.5 + POST_EVENT_TOLERANCE_S)
+
+
+def test_late_clamp_never_pushes_the_upper_edge_below_the_lower():
+    for ttc in LIBRARY_TTCS:
+        lower, upper = strict_window_bounds(100.0, ttc, window_s=4.0)
+        assert upper > lower
 
 
 def test_strict_window_requires_bag_start():
@@ -321,6 +431,44 @@ def test_symmetric_legacy_gate_reproduces_task_5b_exactly():
     ) is True   # -0.57 s relative to bag start: 5b's real lower edge
 
 
+def test_symmetric_window_bounds_are_the_old_gate_written_as_an_interval():
+    lower, upper = symmetric_window_bounds(100.0, 0.43, window_s=4.0)
+    event = 100.0 + SPAWN_LEAD_S + 0.43
+    assert (lower, upper) == pytest.approx((event - 4.0, event + 4.0))
+    # 5b's real lower edge for S03/S06/S08: 0.57 s BEFORE bag start.
+    assert lower == pytest.approx(100.0 - 0.57)
+
+
+def test_count_in_window_counts_rather_than_just_deciding():
+    # MEDIUM-3: how many detections each gate ADMITS is the number that says
+    # whether the new gate is doing anything, and a boolean cannot carry it.
+    # 99.80 and 100.50 are PRE-SPAWN (spawn is at 103.0) — cold-map burst
+    # territory, which the old gate admitted and the new one floors out.
+    detections = [99.80, 100.5, 103.2, 103.6, 105.0, 109.0]
+    sym = symmetric_window_bounds(100.0, 0.75, window_s=4.0)
+    strict = strict_window_bounds(100.0, 0.75, window_s=4.0)
+    assert count_in_window(detections, *sym) == 5      # 99.80 .. 105.0
+    assert count_in_window(detections, *strict) == 3   # 103.2, 103.6, 105.0
+    assert count_in_window([], *strict) == 0
+
+
+# ── format_closure_rate (fix round 1, LOW-2) ───────────────────────────────
+
+def test_format_closure_rate_says_when_there_was_no_in_band_run():
+    # A bare "rate=0.00" reads as a measured zero closure. It is not: it is
+    # what run_closure_rate() returns for a single point, i.e. no in-band
+    # run existed at all.
+    none_in_band = attribute_closing_ball(_sequence(4.5, 2.09, 5), 8.0)
+    assert none_in_band["best_run"] < 2
+    assert none_in_band["closure_rate"] == 0.0
+    assert format_closure_rate(none_in_band) == "n/a(no in-band run)"
+
+
+def test_format_closure_rate_prints_a_real_rate_when_one_exists():
+    fired = attribute_closing_ball(_sequence(4.8, 8.0, 5), 8.0)
+    assert format_closure_rate(fired) == "8.00m/s"
+
+
 # ── closing_runs / longest_closing_run ─────────────────────────────────────
 
 def test_longest_closing_run_empty_is_zero():
@@ -366,18 +514,47 @@ def test_closing_run_is_broken_by_a_time_gap():
     assert longest_closing_run(ranges) == 2
 
 
-def test_max_gap_is_never_the_operative_constraint_on_an_in_band_step():
-    # The gap bound is derived so that it CANNOT decide an attribution: any
-    # step closing faster than the airframe maximum, between two ranges
-    # inside a roi_max_range_m-deep ROI, is necessarily shorter than it.
-    # Locking this is what stops the constant from ever being quietly
-    # retuned into a discriminator. (An earlier draft derived it from
-    # cloud_queue_depth as 0.4 s, which modelled dropped clouds rather than
-    # missed detections and WAS the operative constraint on eight of ten
-    # tune positives.)
+def test_max_detection_gap_is_still_derived_from_the_roi_and_airframe_max():
+    # Narrowed (fix round 1, LOW-4): this locks the CONSTANT against silent
+    # retuning and nothing more. The second assertion it used to carry
+    # (MAX_DETECTION_GAP_S >= 5.00 / V_AIRFRAME_MAX_MPS) was implied by the
+    # first and exercised no code at all. The property it was gesturing at
+    # — that the gap can never decide an attribution — is exercised for
+    # real in the next test.
+    # (An earlier draft derived this constant from cloud_queue_depth as
+    # 0.4 s, which modelled dropped clouds rather than missed detections and
+    # WAS the operative constraint on eight of ten tune positives.)
     assert MAX_DETECTION_GAP_S == pytest.approx(5.00 / V_AIRFRAME_MAX_MPS)
-    longest_possible_in_band_step = 5.00 / V_AIRFRAME_MAX_MPS
-    assert MAX_DETECTION_GAP_S >= longest_possible_in_band_step
+
+
+def test_max_gap_never_changes_an_attribution_verdict():
+    # The real property, exercised against attribute_closing_ball rather
+    # than asserted about the constant: any step that is IN BAND closes
+    # faster than V_AIRFRAME_MAX_MPS between two ranges inside a 5 m ROI, so
+    # it cannot span more than MAX_DETECTION_GAP_S — which means removing
+    # the gap bound entirely must not change a single verdict. If a future
+    # edit retunes the constant downward into a discriminator, these stop
+    # agreeing.
+    # Only ROI-valid sequences: every range inside [roi_min, roi_max]. That
+    # constraint is the whole argument — an in-band step closes at
+    # > 3.49 m/s over at most (5.00 - 0.30) m, so it spans at most
+    # 4.70 / 3.49 = 1.347 s, under the 1.433 s bound.
+    cases = [
+        pts for pts in (
+            _sequence(5.0, rate, n, hz=hz)
+            for rate in (2.09, 3.4, 3.6, 8.0, 11.0, 20.5, 30.0)
+            for n in (2, 3, 5, 6)
+            for hz in (15.0, 6.0, 3.5, 1.2, 0.6)
+        )
+        if all(0.30 <= r <= 5.00 for _t, r in pts)
+    ]
+    assert len(cases) > 30          # the grid must not filter itself empty
+    for points in cases:
+        bounded = attribute_closing_ball(points, ball_speed_mps=17.0)
+        unbounded = attribute_closing_ball(
+            points, ball_speed_mps=17.0, max_gap_s=float("inf"))
+        assert bounded["attributable"] == unbounded["attributable"]
+        assert bounded["best_run"] == unbounded["best_run"]
 
 
 def test_closing_runs_partitions_every_point_exactly_once():
@@ -522,9 +699,59 @@ def test_out_of_band_step_splits_a_run_instead_of_destroying_it():
     # sign and then rate-checking whole sign-runs) keeps both halves, so a
     # single bad frame in the middle of a long track cannot veto a real
     # detection.
-    first = _sequence(4.8, 8.0, 3, t0=100.0)
-    second = _sequence(2.0, 8.0, 3, t0=100.30)
-    assert attribute_closing_ball(first + second, 8.0)["attributable"] is True
+    #
+    # Fixed in fix round 1 (MEDIUM-7): the previous version's "impossible
+    # jump" (t 100.1333 -> 100.30, r 3.7333 -> 2.0) was 10.40 m/s, INSIDE
+    # the (3.49, 11.49] band, so the two halves were simply joined into one
+    # 6-point run and the assertion passed without ever exercising the
+    # behaviour it names. The joining step is now genuinely out of band, and
+    # both halves are asserted to survive AS SEPARATE RUNS.
+    first = _sequence(4.8, 8.0, 3, t0=100.0)        # ends (100.1333, 3.7333)
+    second = _sequence(2.0, 8.0, 3, t0=100.15)      # starts (100.15, 2.0)
+    joining_rate = (first[-1][1] - second[0][1]) / (second[0][0] - first[-1][0])
+    assert joining_rate > 8.0 + V_AIRFRAME_MAX_MPS   # ~104 m/s: out of band
+
+    result = attribute_closing_ball(first + second, 8.0)
+    assert result["attributable"] is True
+    # 3, not 6: the halves were kept apart, not merged. A rule that
+    # rate-checked whole sign-runs would report False here instead, because
+    # all six points form one sign-run whose end-to-end rate is out of band.
+    assert result["best_run"] == 3
+    assert result["longest_run"] == 6                # sign-only sees one run
+
+
+def test_out_of_band_step_still_fails_when_neither_half_is_long_enough():
+    # The complement, so "splits" cannot silently become "ignores": two
+    # 2-point halves either side of the same out-of-band step is 4 in-band
+    # points and still not an attribution.
+    first = _sequence(4.8, 8.0, 2, t0=100.0)
+    second = _sequence(2.0, 8.0, 2, t0=100.15)
+    result = attribute_closing_ball(first + second, 8.0)
+    assert result["attributable"] is False
+    assert result["best_run"] == 2
+
+
+# ── the null model (fix round 1, MEDIUM-5) ─────────────────────────────────
+
+def test_monte_carlo_harness_reproduces_the_published_5b_noise_rate():
+    # The harness is shipped so this number can be re-derived rather than
+    # believed. The 5b sign rule is distribution-free (it reads only the
+    # sign of successive differences), so this figure is an exact check on
+    # the harness: the Task 5b reviewer published 0.91 at n=15 over 200 000
+    # trials, and it is the number that explains 5b's "11 of 12
+    # attributable" as noise. Seeded, so this does not flake.
+    p = null_attribution_mc.p_fires(
+        null_attribution_mc.fires_sign_rule, n=15, trials=20_000)
+    assert p == pytest.approx(0.91, abs=0.015)
+
+
+def test_monte_carlo_harness_reproduces_the_published_5c_noise_rate():
+    # The replacement rule is 2.5-4x better and still not decisive: at the
+    # in-window counts this library actually produces, pure noise attributes
+    # a ball roughly a third of the time.
+    p = null_attribution_mc.p_fires(
+        null_attribution_mc.fires_rate_rule, n=15, trials=20_000)
+    assert p == pytest.approx(0.36, abs=0.03)
 
 
 def test_sign_only_run_at_airframe_speed_never_becomes_attributable():
