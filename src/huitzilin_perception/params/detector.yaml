@@ -156,6 +156,33 @@ detector:
     # primary FP gate — point-count ranges overlap, metric size does not.
     cluster_max_extent_m: 0.35
 
+    # Investigated 2026-08-17 (Task 5, Step 0/2): T11/T12/T14 (patrol-motion
+    # tune negatives) produced FP clusters through this exact gate -- e.g.
+    # (size=43, extent=0.20 m) and (size=25, extent=0.21 m) from T14 -- so the
+    # claim above ("metric size does not [overlap]") does not hold for this FP
+    # class. Root cause: the persistent background map (bg_query stage) can
+    # only flag a voxel foreground the FIRST time the translating camera sees
+    # it, so newly-explored static terrain along a patrol leg reads as a
+    # genuine (not smeared) foreground burst, concentrated in the first ~1-2 s
+    # of a scenario's own flight path (T14: bg=10643->19584 voxels over the
+    # bag, and its FPs land only in the first 1.4 s of a 45 s replay).
+    # Measured against every T01-T14 funnel line: TP cluster extent spans
+    # 0.03-0.34 m and size spans 5-73 pts; this FP class's extent
+    # (0.08-0.21 m) and size (6-43 pts) sit entirely inside that range. No
+    # single-frame extent/size/score cut in this file separates them without
+    # also cutting real (if faint) tune-set detections, so none was made --
+    # the tune split shows 0 FN with the thresholds below, and this repo's own
+    # tuning rule is no change without a tune-split FN or FP that justifies
+    # it. Discriminating "just-mapped rock" from "ball" needs cross-frame
+    # persistence (evasion_node's min_track_updates), not a per-cloud gate;
+    # score_bags only scores the raw per-cloud /threat/centroid stream, so
+    # that fix cannot move this harness's numbers even though it is the
+    # right fix for the live dodge decision. TF_OLD_DATA staleness (odom TF
+    # going stale under patrol motion) was checked and ruled OUT as the
+    # driver: it appears throughout the tune library, including 187 times in
+    # T13 (the near-zero-FP scenario), and does not track FP severity (T11
+    # logs 2x T12's TF warnings but produces 1/36th its FP count).
+
     # ── Centroid publishing ───────────────────────────────────────────
     # Minimum confidence score [0–1] to publish a centroid.
     # (Score = normalised cluster size; keeps the largest coherent blob.)
