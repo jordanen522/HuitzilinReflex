@@ -229,13 +229,63 @@ detector:
     # AND THE REPLACEMENT IS ITSELF REFUTED, by the falsification control
     # Task 5b structurally could not run. Measured 2026-08-17 over every
     # negative in the library, whole replay, against the most permissive
-    # band any scenario gets: 4 of the 5 ball-free originals (N01, N02,
-    # N03, N05; N04 emits nothing at all) and 1 of the 4 tune negatives
-    # (T12) yield a qualifying in-band closing run. N01's is three
-    # detections spanning 0.462 s at 4.51 m/s. Meanwhile 0 of the 12
-    # original positives and 1 of the 10 tune positives qualify, and that
-    # one (T03) fires 1.3 s after its 17 m/s ball has left the frame, at
-    # 7.7 m/s. THERE IS NO WORKING OFFLINE ATTRIBUTION IN THIS HARNESS.
+    # band any scenario gets.
+    #
+    # THERE ARE TWO KINDS OF NEGATIVE IN THIS LIBRARY AND ONLY ONE OF THEM
+    # IS A NULL CONTROL. Corrected 2026-08-17 (Task 5c fix round 1): an
+    # earlier version of this block called N03 and T12 "ball-free". They
+    # are not. scenario_matrix.yaml gives N03 speed_mps 8.0 (spawned behind
+    # the camera), N04 8.0 (~10 m below), T12 11.0 (behind), T13 11.0
+    # (below) -- a projectile IS spawned in all four. They are negatives in
+    # the sense of "wrong bearing, wrong elevation, the gates must suppress
+    # it", not "contains no ball". The genuinely ball-free bags are the
+    # five with speed_mps 0.0, where capture_scenario.sh issues no spawn
+    # command at all: N01, N02, N05, T11, T14.
+    #
+    # ON THE GENUINELY BALL-FREE SUBSET: of the three that emit any
+    # centroid at all -- N01 (30 FPs), N02 (36), N05 (22) -- ALL THREE
+    # yield a qualifying in-band closing run and falsely attribute a ball.
+    # 3 of 3. T11 emits nothing; T14 emits 97 detections and does not fire.
+    # N01's firing run is three detections spanning 0.462 s at ~4.5 m/s, in
+    # a bag with no projectile in it. (Re-measured 2026-08-17 under the
+    # corrected window; the FP counts drift by 1-2 per bag between runs, as
+    # the throughput note further down predicts. Every verdict reproduced.)
+    # And state the n rather than hiding it behind "9 negatives": the
+    # ball-free control is THREE emitting bags, all three from the
+    # originals' negatives. T11 and T14, the tune set's two ball-free bags,
+    # do not fire. It is a small control; it is also unanimous on every bag
+    # that produces any data.
+    # ON THE BALL-PRESENT MUST-NOT-DETECT SUBSET, reported separately
+    # because it is a different and weaker fact: N03 fires, T12 fires, N04
+    # emits nothing, T13 emits nothing. Interesting, not a null result --
+    # there is a real ball in those bags.
+    # Meanwhile 0 of the 12 original positives and 1 of the 10 tune
+    # positives qualify, and that one (T03) fires 1.3 s after its 17 m/s
+    # ball has left the frame, at 7.7 m/s.
+    # THERE IS NO WORKING OFFLINE ATTRIBUTION IN THIS HARNESS.
+    #
+    # HOW STRONG THE REFUTATION IS, stated precisely, because the earlier
+    # version of this block overstated it in two directions at once:
+    #  - AS A WHOLE-BAG TEST it is refuted outright. That is the criterion
+    #    the task set, the control (ctl_all, the whole replay) meets it
+    #    literally, and no attribution claim survives it.
+    #  - THE CONTROL IS NOT WINDOW-MATCHED. N01's firing run sits at
+    #    bag_start+0.365..0.827 s, entirely PRE-SPAWN, inside exactly the
+    #    region the scoring window's spawn floor removes from every
+    #    positive. The matched control (ctl_win) reads 0 of 5, identical to
+    #    the positives' 0 of 12. Inside the scored window the statistic is
+    #    INERT AND UNDERPOWERED at these n, which is a weaker and different
+    #    statement from "wrong". Both are true; do not quote one as the
+    #    other.
+    #  - "0 of 12 positives is below the noise floor" is fair: the null
+    #    model puts the per-scenario spurious-attribution rate at 0.10-0.36
+    #    over the measured in-window counts. But P(0 of 12 | null) ~= 0.12,
+    #    so an earlier claim here that "there is no closing-ball signal in
+    #    the in-window centroid stream at all" is NOT supported and has
+    #    been removed. The error was conservative -- it under-claimed the
+    #    detector -- but it was still an error.
+    #    The null model behind those numbers ships and is re-runnable:
+    #    src/huitzilin_perception/test/null_attribution_mc.py.
     #
     # Mechanism, so the next attempt does not repeat it: successive
     # /threat/centroid messages in this library are not one object tracked
@@ -252,6 +302,18 @@ detector:
     # evidence that the detector fired near the right time, and nothing
     # more. It is NOT evidence that the ball was detected. Recall measured
     # on this library is a window statistic.
+    #
+    # AND THE WINDOW STATISTIC IS NOT A DETECTION CLAIM EITHER, from this
+    # file's own emitted numbers. In-window centroid DENSITY (n_win per
+    # second of window, corrected-window run of 2026-08-17): the ball-free
+    # N02 carries 4.00/s, which is higher than TEN of the twelve original
+    # positives (1.14-3.79/s; only S04 at 4.17 and S10 at 4.55 exceed it).
+    # A statistic that a ball-free bag reproduces is not evidence of
+    # detection, whatever its numerator reads. The one hint pointing the
+    # other way, and it is only a hint: the median positive density
+    # (1.95/s) is about 2x the negatives' median (1.00/s) -- weak, not
+    # significant at n = 5 negatives, and NOT promotable to a detection
+    # claim. It needs more ball-free bags, not another discriminator.
     #
     # Refinement worth carrying into the re-measurement: the driver is
     # most likely a COLD map at every replay start, not steady sweeping.
