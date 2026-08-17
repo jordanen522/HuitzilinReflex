@@ -609,11 +609,31 @@ class SyntheticDepthPublisherNode(Node):
         through the /clock bridge — and a systematic offset would show up as a
         constant lead/lag in every velocity the tracker estimates, which reads
         exactly like a tuning problem.
+
+        WAITS FOR THE CLOCK GUARD, and the one-shot is not spent until it does.
+        Under use_sim_time the node's clock reads exactly 0 until the first
+        /clock message arrives, and poses routinely arrive first — Gazebo has
+        usually been up for a while before this node starts, so t_pose is
+        already tens of seconds in. Evaluating then measures the node's own
+        clock startup, not a stamp offset, and it fired on every launch:
+        `pose stamps lead/lag the node clock by -63.789 s` against a world that
+        had been running 64 s, on a stack later verified to agree to within
+        milliseconds. A check that cries wolf on every launch is a check nobody
+        reads, which is the whole failure mode CLAUDE.md's loud-startup rules
+        exist to prevent.
+
+        `ros_time_ns > 0` is exactly clock_guard.evaluate_clock's OK condition
+        for a sim-time node, so this defers to the guard rather than inventing
+        a second notion of "the clock is up". On wall time it is always true and
+        the behaviour is unchanged.
         """
         if self._checked_stamp:
             return
+        now_ns = self.get_clock().now().nanoseconds
+        if now_ns <= 0:
+            return
         self._checked_stamp = True
-        offset = self.get_clock().now().nanoseconds * 1e-9 - t_pose
+        offset = now_ns * 1e-9 - t_pose
         if abs(offset) > self._stamp_warn_s:
             self.get_logger().warn(
                 "pose stamps lead/lag the node clock by %.3f s — every cloud "

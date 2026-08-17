@@ -48,17 +48,50 @@ USAGE (Dell, after the world + SITL are up — docs/dodge_battery_runbook.md)
       with_patrol:=true detection_range_m:=26.0
 
   # Any escape or save measurement: HOVER. Patrol cannot deliver a hit at range.
-  EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6
+  EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6depth
 
-  # Fidelity gate FIRST — pin the modelled sensor to the depth detector's real
-  # reach and confirm the known results reproduce before believing any new one:
+  # Fidelity gate FIRST — see below. It needs all THREE sensor axes, not just
+  # detection_range_m:
   ros2 launch huitzilin_perception week6_synthetic_depth.launch.py \
-      with_patrol:=true detection_range_m:=3.4
+      with_patrol:=true detection_range_m:=3.4 sensor_rate_hz:=15.0 \
+      sensor_params:=$(ros2 pkg prefix huitzilin_perception)/share/\
+huitzilin_perception/params/synthetic_depth_oakd_gate.yaml
+
+THE FIDELITY GATE PINS THE SENSOR, NOT ONLY ITS REACH (measured 2026-08-16)
+--------------------------------------------------------------------------
+QUOTING detection_range_m ALONE DESCRIBES THE WRONG INSTRUMENT. "The sensor" is
+reach AND sector AND rate, and this file's shipped params model the PROPOSED
+sensor on all three: +/-13.5 x 11.0 deg at 1600x1300 and 60 Hz. The Week 4
+envelope the gate validates against was produced by the OAK-D Lite as rendered
+in models/iris_depth/model.sdf — +/-33.65 x 26.56 deg at 640x480 — driven at
+15 Hz. So `detection_range_m:=3.4` on its own presents a THIRD instrument that
+is neither sensor, and it does NOT reproduce Week 4. Measured, D11 (14 m/s) /
+D12 (8 m/s) dodge counts over 6 repeats each on patrol at reach 3.4 m:
+
+    +/-13.5x11.0, 1600x1300, 60 Hz  ->  D11 4/6  D12 6/6   (D11 over-fires)
+    +/-13.5x11.0, 1600x1300, 15 Hz  ->  D11 1/6  D12 0/6   (D12 collapses)
+    +/-33.65x26.56, 640x480, 15 Hz  ->  D11 2/6  D12 6/6   (reproduces)
+    Week 4 reference, real rendered  ->  D11 0/17 D12 78/78
+
+The two axes fail in OPPOSITE directions and cancelled at 60 Hz, which is why a
+half-matched sensor looked half-right. Rate drives over-firing at 14 m/s
+(confirmation costs 3 accepted detections: track_age_s at commit is 0.033 s at
+60 Hz against 0.136 s at 15 Hz, and a 14 m/s ball crossing 3.4 m supplies only
+0.243 s of flight). Sector drives under-firing at 8 m/s by starving the tracker
+(the narrow lens is 16.6% of the solid angle; measured 1.6 ball-bearing clouds
+per throw against 2.8, versus the 3 the tracker needs to commit).
+
+params/synthetic_depth_oakd_gate.yaml carries the matched sensor and its own
+derivation. NOTE that _sensor_node passes detection_range_m and rate_hz from
+THIS file's launch arguments in a dict AFTER the params file, so that file's
+values for those two keys are inert here and the command above must pass them
+explicitly. Everything else comes from the params file.
 
 Raising detection_range_m above ~26.7 m ALSO requires raising
 roi_max_range_m in params/synthetic_depth_detector.yaml — the ROI gate runs on
 the noised cloud and must clear the reach by 4 * sigma_depth(reach), which grows
-as the square of range. That file's header carries the rule.
+as the square of range. That file's header carries the rule, and
+_assert_roi_clears_the_reach below refuses to start on a violation.
 """
 
 from __future__ import annotations

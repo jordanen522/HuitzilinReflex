@@ -1,0 +1,184 @@
+# synthetic_depth_oakd_gate.yaml — the OAK-D Lite, modelled, FOR THE FIDELITY
+# GATE ONLY. This is NOT the proposed sensor.
+#
+# WHAT IT MODELS, AND WHY IT EXISTS
+#   The optics here are the depth camera AS RENDERED IN
+#   models/iris_depth/model.sdf — <horizontal_fov>1.1745</horizontal_fov> rad =
+#   67.3 deg over 640x480 — driven at the 15 Hz that lane actually delivers
+#   (CLAUDE.md: "Depth camera runs at 15 Hz, not 30"; ros_gz_bridge cannot
+#   sustain 30 Hz at 640x480 on the Dell). That is the instrument every Week 4
+#   number was produced with, so it is the instrument the fidelity gate has to
+#   present to the real detector.
+#
+#   Its sole purpose is step 1 of the order of operations in
+#   config/week6_depth_battery.yaml: fly D11/D12 on patrol against the sensor
+#   Week 4 flew, and confirm the lane reproduces the measured envelope
+#   (78/78 dodges at <= 8 m/s, 0/17 at 14 m/s) before any number from the
+#   proposed sensor is believed.
+#
+# IT IS NOT THE PROPOSED SENSOR. params/synthetic_depth.yaml is. That file
+# models the AR0234-class global-shutter mono + 10 mm M12 that docs/RESULTS.md
+# specifies: +/-13.5 x 11.0 deg at 1600x1300 and 60 Hz, reaching 26 m. Never
+# fly a capability measurement against THIS file, and never quote a number
+# taken through it as a statement about the proposed sensor. The two files
+# differ on exactly the four optics keys below plus reach and rate; everything
+# else is synthetic_depth.yaml unchanged, so the gate and the measurement
+# differ only in the sensor being modelled.
+#
+# WHY ALL THREE AXES ARE PINNED HERE, which is the whole point of the file.
+# "The sensor" is reach AND sector AND rate. Pinning reach alone —
+# `detection_range_m:=3.4` against the shipped +/-13.5 deg / 60 Hz — presents a
+# THIRD instrument that is neither sensor, and it does not reproduce Week 4.
+# Measured on this rig, D11 (14 m/s) / D12 (8 m/s) dodge counts over 6 repeats
+# each on patrol at reach 3.4 m:
+#
+#   +/-13.5x11.0, 1600x1300, 60 Hz  ->  D11 4/6  D12 6/6   (D11 over-fires)
+#   +/-13.5x11.0, 1600x1300, 15 Hz  ->  D11 1/6  D12 0/6   (D12 collapses)
+#   +/-33.65x26.56, 640x480, 15 Hz  ->  D11 2/6  D12 6/6   (reproduces)
+#   Week 4 reference, real rendered  ->  D11 0/17 D12 78/78
+#
+# The two axes fail in OPPOSITE directions and cancelled at 60 Hz, which is why
+# a half-matched sensor looked half-right:
+#
+#   * RATE drives over-firing at 14 m/s. Confirmation costs min_track_updates
+#     (3) accepted detections: track_age_s at commit is 0.033 s at 60 Hz
+#     against 0.136 s at 15 Hz, and a 14 m/s ball crossing a 3.4 m gate only
+#     supplies 0.243 s of flight. At 60 Hz the trigger has time to fire (to no
+#     effect — tca 0.12-0.14 s, every throw still hit); at 15 Hz it does not.
+#   * SECTOR drives under-firing at 8 m/s, by starving the tracker of frames.
+#     The narrow lens covers (13.5/33.65)x(11.0/26.56) = 16.6% of the solid
+#     angle, and a ball on a near-hit course leaves a narrow frustum early —
+#     at 1.5 m a 0.35 m lateral offset is already 13.1 deg. Measured from the
+#     publisher's own _n_with_ball counter over the same 12 throws at the same
+#     15 Hz: 1.6 ball-bearing clouds per throw narrow, 2.8 wide, against the 3
+#     the tracker needs to commit.
+#
+# THE LAUNCH FILE OVERRIDES TWO OF THE THREE — READ THIS BEFORE USING THE FILE.
+# week6_synthetic_depth.launch.py passes detection_range_m and rate_hz from its
+# OWN launch arguments (detection_range_m, sensor_rate_hz) in a dict AFTER this
+# params file, so under that launch file the two values below are inert and its
+# defaults (26.0 m, 60.0 Hz) win unless overridden on the command line. The
+# gate command must therefore carry all three axes explicitly:
+#
+#   ros2 launch huitzilin_perception week6_synthetic_depth.launch.py \
+#       with_patrol:=true detection_range_m:=3.4 sensor_rate_hz:=15.0 \
+#       sensor_params:=$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/params/synthetic_depth_oakd_gate.yaml
+#
+# They are still set to the gate's values below so that a direct
+# `ros2 run huitzilin_perception synthetic_depth_publisher --ros-args
+# --params-file <this>` reproduces the gate sensor without a second lookup, and
+# so the file is self-describing rather than half a specification.
+#
+# THE SLOW-BALL FLOOR IS DIFFERENT HERE, and it is why the gate can fly B01-like
+# speeds that the proposed sensor cannot. v_min = diff_threshold_m x
+# delivered_rate_hz = 0.10 x 15 = 1.5 m/s, against 6.0 m/s at 60 Hz. That is the
+# same floor the real rendered lane always had, which is why Week 4 could score
+# B01 at 4 m/s at all. The publisher prints the computed floor as a startup WARN
+# — quote the one it prints, never the one you expected.
+#
+# Sim-only by construction (it reads /gz/dynamic_poses), so there is no hw_
+# overlay and there must never be one.
+
+synthetic_depth_publisher:
+  ros__parameters:
+    poses_topic: "/gz/dynamic_poses"
+    odom_topic: "/huitzilin/odom"
+
+    # HARD-CODED in detector_node.py (not a parameter there), so this must stay
+    # /oak/points.
+    cloud_topic: "/oak/points"
+
+    # What the real ros_gz_bridge stamps on the depth cloud. Points go out in
+    # the gz sensor BODY convention (FLU: x forward, y left, z up) under this
+    # frame name, because <optical_frame_id> in the SDF renames the header
+    # without rotating the data — which is why the detector params carry
+    # cloud_convention: "gz_flu". Publishing optical-convention points here
+    # would silently mirror the cloud and nothing would clear the ROI.
+    cloud_frame_id: "camera_optical_frame"
+
+    # Must match the detector's cloud_reliable / cloud_queue_depth. A
+    # reliability mismatch means the subscription never connects at all.
+    cloud_reliable: true
+    cloud_queue_depth: 5
+
+    drone_model: "iris_depth"
+    # BOTH spawner conventions: spawn_projectile names its ball
+    # projectile_<scenario>_<epoch>, dodge_battery names its own
+    # ball_<run>_r<rep>_<epoch>. Must stay a non-empty list of strings.
+    ball_name_prefixes: ["ball_", "projectile_"]
+
+    # base_link -> camera_link, and it MUST equal the static TF the launch file
+    # publishes (both are driven from the same camera_link_x/y/z arguments).
+    camera_offset_xyz_m: [0.10, 0.0, 0.02]
+
+    # 80 mm ball — models/projectile/model.sdf.
+    ball_radius_m: 0.04
+
+    # ── The OAK-D Lite as rendered, all three axes ───────────────────────────
+    # AXIS 1 — REACH. 3.4 m is the real depth detector's MEASURED reach, not a
+    # design figure: it is what the rendered pipeline actually delivered, and it
+    # is the number CLAUDE.md quotes when it says the aircraft as built is
+    # capped at ~3.2 m/s. Overridden by the launch file — see the header.
+    detection_range_m: 3.4
+    min_range_m: 0.30            # mirrors the detector's roi_min_range_m
+
+    # AXIS 2 — SECTOR. models/iris_depth/model.sdf:85 gives
+    # <horizontal_fov>1.1745</horizontal_fov> rad = 67.30 deg, so the half-angle
+    # is 33.65 deg. Gazebo derives the vertical FOV from the aspect ratio:
+    # atan(tan(33.65 deg) * 480/640) = 26.56 deg. These are the numbers that
+    # make the gate like-for-like, and getting them wrong is what produced cell
+    # A. Do not "round" them toward the proposed sensor.
+    fov_half_h_deg: 33.65
+    fov_half_v_deg: 26.56
+
+    # The rendered sensor's real pixel count, and it is load-bearing twice: it
+    # sets the angular resolution that decides how many returns land on the
+    # ball, and it is what makes an 80 mm ball at 26 m sub-pixel (0.176 deg
+    # against 0.105 deg/px) — the fact that forces a truth source in the first
+    # place. At the gate's 3.4 m the same arithmetic gives ~122 returns, far
+    # above the detector's cluster_min_points of 5.
+    image_width_px: 640
+    image_height_px: 480
+
+    # Cost ceiling only; it may only ever REMOVE returns. At this resolution it
+    # never binds at any range the gate flies.
+    max_points_per_ball: 5000
+
+    # ── Depth error ──────────────────────────────────────────────────────────
+    # Unchanged from synthetic_depth.yaml on purpose. sigma_depth(z) =
+    # depth_sigma_m * (z / depth_sigma_ref_range_m)^2 applied along each
+    # return's own bearing ray. At the gate's 3.4 m this collapses to
+    # 0.30 * (3.4/26)^2 = 0.005 m, so depth noise is not a variable the gate
+    # exercises — which is the point: the gate isolates optics and rate.
+    depth_sigma_m: 0.30
+    depth_sigma_ref_range_m: 26.0
+
+    # 0.0 = the ball's patch has ONE disparity solution, so the returns keep the
+    # ball's physical 80 mm extent and the error lands on the centroid. Making
+    # it 1.0 smears the ball past cluster_max_extent_m and scores zero with
+    # every upstream stage healthy. Change only deliberately.
+    per_point_depth_frac: 0.0
+
+    # ── AXIS 3 — RATE ────────────────────────────────────────────────────────
+    # 15 Hz, because that is what the rendered lane delivers and therefore what
+    # Week 4 measured. Delivered rate is 60/ceil(60/requested), so 15.0 is
+    # exact. Overridden by the launch file's sensor_rate_hz — see the header.
+    # The floor this buys is v_min = 0.10 x 15 = 1.5 m/s.
+    rate_hz: 15.0
+
+    # A MIRROR of the detector's diff_threshold_m, used for nothing but
+    # computing and logging the slow-ball floor. week6_synthetic_depth.launch.py
+    # overrides it from the detector params file it is actually launching, so
+    # the two cannot drift apart.
+    bg_diff_threshold_m: 0.10
+
+    # 0.0 = OFF, matching the zero-latency oracle every recorded result was
+    # flown against, so the lanes stay comparable.
+    detection_delay_s: 0.0
+
+    # Zero-width cloud as a heartbeat between throws; detector_node early-outs
+    # on it before touching its background model, so it costs nothing.
+    publish_empty_clouds: true
+
+    seed: 0                      # 0 = entropy; set non-zero to replay a battery
+    stamp_offset_warn_s: 0.05

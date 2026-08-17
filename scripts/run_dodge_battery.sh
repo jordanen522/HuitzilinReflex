@@ -14,16 +14,33 @@
 #
 # week6 mode requires week6_oracle.launch.py, NOT week4_evasion: its rows
 # assume /threat/centroid comes from oracle_detector at a configured range.
-# Run the fidelity gate first (detection_range_m:=3.4) — see the header of
+# Run the fidelity gate first — see the header of
 # config/week6_synthetic_battery.yaml.
+#
+# A FIDELITY GATE MUST PIN THE SENSOR, NOT ONLY ITS REACH. Quoting
+# detection_range_m alone describes the wrong instrument: "the sensor" is reach
+# AND sector AND rate, and a gate that matches one axis while leaving the other
+# two at some other sensor's values does not reproduce the reference. Measured
+# on the depth lane 2026-08-16 — at reach 3.4 m the shipped sector and rate gave
+# D11 4/6 and D12 6/6, the shipped sector at 15 Hz gave 1/6 and 0/6, and only
+# the fully matched sensor returned 2/6 and 6/6 against a Week 4 reference of
+# 0/17 and 78/78. For week6depth the three axes are detection_range_m,
+# sensor_params (params/synthetic_depth_oakd_gate.yaml) and sensor_rate_hz; the
+# full command is in that file's header and in week6_synthetic_depth.launch.py.
+# For week6 they are detection_range_m, oracle_rate_hz, and fov_half_angle_deg
+# via oracle_params — but note the oracle models sector as a SINGLE CONE
+# half-angle, so it cannot express the rendered camera's rectangular frustum at
+# all; the depth lane's gate is the one that can.
 #
 # week6depth mode requires week6_synthetic_depth.launch.py, and NEITHER of the
 # other two: its rows assume /threat/centroid is COMPUTED by the real,
 # unmodified detector from a synthetic cloud on /oak/points. The two week6
 # lanes are mutually exclusive — both ends reach /threat/centroid. It is a
-# separate mode rather than an EXTRA_ARGS override of battery_config because
-# an override would append a SECOND `-p battery_config:=` after the first and
-# rest on undefined last-wins behaviour. Fidelity gate first, then hover:
+# separate mode rather than an EXTRA_ARGS override of battery_config because an
+# override would pass battery_config TWICE, so which config the run actually
+# used would depend on argument-parsing order rather than being visible in this
+# script. A named mode keeps it explicit, matching the week6 precedent above.
+# Fidelity gate first, then hover:
 #   EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6depth
 set -euo pipefail
 

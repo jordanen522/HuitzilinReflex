@@ -31,14 +31,25 @@
 #   NOTHING is detected at any range, silently, with every stage upstream
 #   healthy. Every row here is at 8 m/s or above, deliberately.
 #
-# WHAT A RESULT FROM THIS FILE MEANS. It is conditional on the launched
-# detection_range_m, which is an INPUT, read once in the publisher's __init__
-# with no parameter callback (`ros2 param set` is accepted and ignored — every
-# range change needs a full stack restart, and it must be passed as a float:
-# `detection_range_m:=26` is inferred as an integer and rejected). "28/30 at
+# WHAT A RESULT FROM THIS FILE MEANS. It is conditional on the WHOLE LAUNCHED
+# SENSOR — reach AND sector AND rate — every one of which is an INPUT and none
+# of which is a result. Naming only detection_range_m describes the wrong
+# instrument, which is exactly the defect that cost the first fidelity gate:
+#
+#   detection_range_m   reach, from the launch argument (default 26.0)
+#   fov_half_h/v_deg    sector, from the sensor params file (+/-13.5 x 11.0)
+#   image_width/height  angular resolution, and therefore returns on the ball
+#   rate_hz             from sensor_rate_hz; quote the DELIVERED rate the node
+#                       logs, which is 60/ceil(60/requested)
+#
+# All of them are read once in the publisher's __init__ with no parameter
+# callback (`ros2 param set` is accepted and ignored — every change needs a full
+# stack restart), and the two scalars must be passed as floats:
+# `detection_range_m:=26` is inferred as an integer and rejected. So "28/30 at
 # 20 m/s" is a claim about the perception pipeline, tracker, trigger and
-# airframe GIVEN a 26 m sensor — never a claim that the hardware can see 26 m.
-# Quote the range beside every number.
+# airframe GIVEN a 26 m, +/-13.5 x 11.0 deg, 60 Hz sensor — never a claim that
+# the hardware can see 26 m. Quote all three beside every number; the reach
+# alone is not the sensor.
 #
 # NO FALSE-POSITIVE NUMBER LIVES HERE. The cloud contains the ball and nothing
 # else: no ground, no runway, no background return. detector_node's
@@ -53,8 +64,25 @@
 #
 # ORDER OF OPERATIONS (do not skip):
 #   1. Fidelity gate. Run D11/D12 on PATROL with the modelled sensor pinned to
-#      the real rendered detector's measured reach, `detection_range_m:=3.4`,
-#      and confirm D11 reproduces the measured 0/17 shape at 14 m/s and D12 the
+#      the OAK-D Lite Week 4 actually flew — ALL THREE AXES, not reach alone:
+#
+#        ros2 launch huitzilin_perception week6_synthetic_depth.launch.py \
+#            with_patrol:=true detection_range_m:=3.4 sensor_rate_hz:=15.0 \
+#            sensor_params:=$(ros2 pkg prefix huitzilin_perception)/share/\
+#      huitzilin_perception/params/synthetic_depth_oakd_gate.yaml
+#
+#      QUOTING detection_range_m ALONE DESCRIBES THE WRONG INSTRUMENT and does
+#      NOT reproduce Week 4 (measured 2026-08-16): the shipped params model the
+#      PROPOSED sensor's sector and rate (+/-13.5x11.0 deg, 60 Hz) while Week 4
+#      ran +/-33.65x26.56 deg at 15 Hz, so pinning reach alone presents a third
+#      instrument that is neither. At 60 Hz D11 over-fires 4/6; at 15 Hz with
+#      the narrow lens D12 collapses to 0/6; only the fully matched sensor
+#      returns D11 2/6 and D12 6/6. The launch file overrides detection_range_m
+#      and rate_hz from its own arguments, so the command must carry them even
+#      though the gate params file also sets them — see that file's header for
+#      the full derivation and the per-axis mechanism.
+#
+#      Confirm D11 reproduces the measured 0/17 shape at 14 m/s and D12 the
 #      78/78 shape at 8 m/s. Score that gate on `dodged`, not on the
 #      counterfactual: the Week 4 reference is itself a patrol dodge count, and
 #      under patrol 0 of 98 throws have ever arrived inside 0.109 m, so a
@@ -72,6 +100,17 @@
 #      AND `actual_min_m` > 0.30 m. Report saves / on-course. A fire count and a
 #      save rate are different numbers, and a cell with no on-course throws
 #      measured NOTHING — never report it as 0/N.
+#
+#      `counterfactual_min_m` IS NOT A dodge_battery COLUMN. It comes from
+#      scripts/hz_counterfactual.py, a passive scorer that must already be
+#      RUNNING when the battery throws — it reconstructs "what if the drone had
+#      kept cruising" from /gz/dynamic_poses and /threat/evade_event, and it
+#      cannot be recovered afterwards from the battery CSV. Start it first:
+#
+#        python3 scripts/hz_counterfactual.py --out /tmp/week6_depth_cf.csv &
+#
+#      Join it back to the battery rows on its `scenario` and `rep` columns,
+#      which it parses out of the ball's model name.
 #
 # HOVER IS NOT OPTIONAL for D08-D10. It is the only configuration that has ever
 # put a ball on a hit course: under patrol 0 of 98 throws arrived inside
