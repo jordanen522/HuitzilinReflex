@@ -78,7 +78,7 @@ missing *sidecar* silently drops the scenario from the recall math.
 
 Same bring-up as above; scenario IDs come from `scenario_matrix.yaml`'s T01–T14 rows (see
 the SPLITS block at the bottom of that file). All 14 were captured non-interactively over
-ssh (no TTY) — the four points below are load-bearing for anyone repeating this without a
+ssh (no TTY) — the points below are load-bearing for anyone repeating this without a
 controlling terminal.
 
 ### The SIGINT-over-ssh pattern (and the two ways it silently breaks)
@@ -109,55 +109,84 @@ control is on, and `capture_scenario.sh`'s own `exec ros2 bag record` preserves 
 recorder's real PID. To verify live: `kill -INT $PID; sleep 1; grep SigIgn /proc/$PID/status`
 should show the SIGINT bit clear before you rely on it for anything.
 
-### The wrench-bridge gap — `week3_perception.launch.py` needs it added by hand
+### Spawn-OK log-polling is what makes a throw capture land — not a fixed wait
 
-`spawn_projectile.py`'s fast throw path (`WrenchThrower`: one-step launch impulse + gravity
-restore, landed on the same physics step) needs `/world/<world>/wrench` and
-`/world/<world>/wrench/persistent` bridged ROS→gz. **Only `week4_evasion.launch.py` brings
-that bridge up** (its `_wrench_bridge` OpaqueFunction) — `week3_perception.launch.py`, the
-launch file this runbook and the T-set capture brief both prescribe, does not. Without it,
-every throw falls back to the `gz` CLI path, which:
+Do not derive the post-spawn wait from a fixed formula (e.g. `3 + time_to_closest_s + 9`
+sim-seconds off `SPAWN_LEAD`). **On this launch file, every throw goes through
+`spawn_projectile.py`'s `gz` CLI path** (see the next section for why that's correct, not a
+bug), which costs on the order of 15–20 s of *wall* time between the spawn command firing
+and the projectile actually getting its impulse. That shows up in the log as
+`wrench bridge never connected — falling back to the CLI throw`, followed a few seconds
+later by `Spawn OK`. **That warning line is expected and benign on `week3_perception.launch.py`
+— it fires on essentially every throw captured through this launch file, including every
+correctly-captured bag in the original 17-bag library, and is not itself a symptom of
+anything broken.** The bug is trusting a fixed timer across that gap, not the gap existing.
 
-- costs **~15–20 s of wall time** waiting for a wrench-bridge connection that will never
-  arrive, then a further ~2 s for the CLI throw itself (logged as `wrench bridge never
-  connected`, then `Spawn OK` from the CLI fallback);
-- is not intermittent — it happened on **11/11** spawn scenarios captured before this was
-  diagnosed, with the CLI throw's actual impulse landing, in every case, **after** a
-  fixed-duration recording window had already stopped (`Recording stopped` preceded `Spawn
-  OK` by 7–10 s in all 11 logs, checked directly). Every one of those first-pass bags
-  contained a ball sitting motionless at its spawn point for the whole recording — not the
-  scenario it was supposed to capture, and for the T-set negatives specifically, a static
-  new object sitting in frame while patrol flies past it is a capture-artifact false
-  positive, not a measurement of whether the detector suppresses the labeled scenario.
-
-**Fix, applied for this capture session:** bring up the same bridge `week4_evasion` uses,
-as a standalone extra node alongside `week3_perception.launch.py` — no launch-file edits,
-no detector/matrix changes:
+The fix — and the one that actually rescued T01–T10 of this batch — is to poll the capture
+log for the literal string `Spawn OK` before starting any post-throw countdown:
 
 ```bash
-ros2 run ros_gz_bridge parameter_bridge \
-  "/world/huitzilin_runway/wrench@ros_gz_interfaces/msg/EntityWrench]gz.msgs.EntityWrench" \
-  "/world/huitzilin_runway/wrench/persistent@ros_gz_interfaces/msg/EntityWrench]gz.msgs.EntityWrench"
+until grep -q 'Spawn OK' "$LOG"; do sleep 1; done
+sleep "$((TTC_S + 9))"        # THEN start the post-throw buffer
+kill -INT "$PID"
 ```
 
-Once it's up, `spawn_projectile.py`'s own `WrenchThrower.wait_for_bridge()` finds it and
-uses the fast path automatically (logged as `thrown via warm bridge`) — no argument or env
-var to pass. **Bring this up before the first spawn scenario**, not after discovering the
-slow path the hard way.
+Checked directly against every first-pass log before this fix was applied: `Recording
+stopped` preceded `Spawn OK` by 7–10 s in **11 of 11** spawn scenarios captured under a
+fixed-timing wait — every one of them recorded a ball sitting motionless at its spawn point
+for the whole bag, not the scenario it was supposed to capture, and (for the T-set
+negatives specifically) a static new object sitting in frame while patrol flies past it is
+a capture-artifact false positive, not a measurement of whether the detector suppresses the
+labeled scenario. Re-capturing with the poll above — same CLI throw path, just an honest
+wait — is what fixed all 11; **no bridge was involved in that fix** (see next section).
 
-Even with the fast path, do not assume `SPAWN_LEAD` (3 s, fixed inside
-`capture_scenario.sh`) is when the ball actually moves. **Poll the capture log for the
-literal string `Spawn OK` before starting any post-throw countdown**, rather than trusting
-a fixed formula — the fast path normally lands a couple of seconds past `SPAWN_LEAD`, but
-was seen to miss a generous 40 s poll window entirely (T09, first retry) and need a second
-retry at 60 s. A scenario that needs multiple tries at this stage is a capture-timing
-problem, not a scenario problem — don't read anything into it about the geometry.
+T09 needed at least one re-capture for this same spawn-timing reason during this batch.
+The specific claim that its first retry missed a 40 s poll window and a second retry
+succeeded at 60 s **cannot be verified after the fact** — the driver logs to a fixed
+per-scenario path (`/tmp/t4_capture_T09.log`) and each retry overwrites the previous
+attempt's log, so the evidence for that exact two-step timeline no longer exists. Treat T09
+as "needed at least one re-capture for a spawn-timing reason," not as a confirmed sequence,
+and budget a generous poll timeout (60 s+) up front rather than tuning it per-scenario.
+
+### The CLI throw path is canonical for this bag library — do not bridge wrench topics into `week3_perception.launch.py`
+
+It's tempting to read `wrench bridge never connected` as a missing feature and wire
+`week4_evasion.launch.py`'s wrench bridge (`ros_gz_bridge parameter_bridge` on
+`/world/<world>/wrench` and `/world/<world>/wrench/persistent`) into
+`week3_perception.launch.py` so throws use the fast, same-physics-step `WrenchThrower` path
+instead of the CLI fallback. **Don't — this was considered and ruled against.** The
+original 17 bags (S01–S12, N01–N05) were captured 2026-07-15, **eleven days before
+`WrenchThrower` existed** (`37e0d34`, 2026-07-26); they went through the CLI-only path by
+construction, not by omission. T01–T10 of this batch went through the same CLI path (see
+above). **The CLI throw is what the entire 31-bag library currently shares, and that shared
+mechanism is exactly what keeps the tune and test splits comparable to each other and to
+the historical train/test split.** Bridging wrench topics into the capture launch file
+would make every *future* capture use a different throw mechanism (a true same-step impulse
+vs. a two-call CLI sequence that restores gravity ~0.25 s late and flattens the trajectory
+— see `spawn_projectile.py`'s own docstrings) than every bag currently in the library,
+trading one documented, benign log line for a fresh, silent comparability hazard.
+`week3_perception.launch.py` deliberately does not bridge the wrench topics — leave it that
+way, and read `wrench bridge never connected` as confirmation the canonical path is being
+used, not as something to fix.
+
+**Exception, disclosed:** T12 and T13 in this batch *did* go through the fast bridge path
+(`thrown via warm bridge` in their logs). The bridge was brought up standalone — outside
+the launch file, as a bare extra `ros2 run` process, never wired into
+`week3_perception.launch.py` itself — partway through this session, to shorten a long
+pre-throw static-object window that was inflating T12's false-positive count (see below).
+It was left running for T13. **T12 and T13 are therefore the only 2 of 31 bags in the whole
+library captured via a different throw mechanism than every other bag**, including the
+other 12 in this same batch. Both are otherwise valid captures and were not re-flown
+CLI-only, since re-flying T12 costs a live patrol-motion window and T13 costs a full
+altitude excursion — but Task 5 should treat T12/T13's throw kinematics (gravity-restore
+timing in particular) as not directly comparable to any other single bag in the library,
+and should not extend this exception to future captures.
 
 ### T13 needs altitude, and it must come back down
 
 T13 (`offset_vertical_m: -7.5`) needs the drone flying ≥ 8.0 m before the throw, or
 `capture_scenario.sh` aborts (`spawn would be at z=... < 0.5 m`). Same shape as N04's
-existing procedure, with three things worth spelling out because they cost real time here:
+existing procedure, with four things worth spelling out because they cost real time here:
 
 - **`mav_bridge_node` reads `takeoff_alt_m` once at construction**, into a plain attribute
   — there is no parameter callback, so `ros2 param set .../takeoff_alt_m` is accepted and
@@ -183,6 +212,20 @@ existing procedure, with three things worth spelling out because they cost real 
   T3 → arm → takeoff → start-patrol before capturing anything else.
   `git diff -- src/huitzilin_sim/params/bridge.yaml` must be empty before committing.
 
+T13's own post-throw window in this batch came out short (~2.2 s observed, against a ~10 s
+buffer the capture driver was asked for) because it **skipped the Spawn-OK-anchored polling
+described above.** T13's extra pre-recording step (the vertical-offset/altitude check) adds
+latency before `capture_scenario.sh` writes its `spawn=yes` label line; the driver's short,
+fixed pre-poll delay raced that write and lost, so the driver's branch check found no
+`spawn=yes` yet, fell through to a flat un-anchored sleep instead of polling for `Spawn OK`,
+and sent SIGINT on that flat timer instead. The throw itself is still confirmed genuine
+(ball spawned at the expected z = drone altitude − 7.5 m, thrown via the warm bridge, well
+before the recording stopped, zero false triggers), so the bag is usable — but the short
+window is a capture-driver race condition, not an unexplained anomaly. Give the pre-poll
+delay enough margin for scenario-specific startup latency (T13's altitude check in
+particular), or check for the label line rather than sleeping a fixed amount before the
+first `Spawn OK` check.
+
 ### T11 needs a commanded climb, not just an idle hover
 
 T11 (vertical-egomotion negative) has no spawn — its notes call for "a window spanning a
@@ -201,6 +244,30 @@ ros2 topic pub -r 10 /huitzilin/cmd_vel geometry_msgs/msg/Twist '{linear: {z: -1
 process ends — no explicit stop command needed. Resume patrol (`data: true`) once the bag
 is closed.
 
+### `/threat/centroid` counts are not a detection signal — read this before Task 5 retunes
+
+Every T-bag in this batch shows substantial `/threat/centroid` traffic, including the
+negatives — several rows show dozens to ~100 messages, not the near-zero expected of a
+working detector on a held-out negative or during a positive's dead time. On direct
+cross-reference against the point clouds (checked on T03 and T08), the large majority of
+this traffic — on the order of 98% — is ambient noise, not the labeled throw, and this
+pattern is present across **every** T-bag, not only the highest-count rows. **A raw
+`/threat/centroid` message count is not a detection indicator by itself and must not be
+read as ground truth** for whether a scenario was "detected" — score against the labeled
+window and actual cluster geometry, not the message count.
+
+More importantly: **the false-positive rate correlates with patrol motion, across the whole
+tune set, not as an isolated fluke.** T14 (~100 messages, patrol running throughout, zero
+spawns, 45 s) against T11 (1 message, patrol *paused* for the whole capture, zero spawns,
+~14 s) is the cleanest read of this — same "nothing thrown" condition, the only structural
+difference is whether the drone is patrolling. **This is a structural, patrol-motion-
+correlated false-positive property of the detector as currently tuned, and it needs to be
+root-caused *before* Task 5 fits new thresholds against these bags — not discovered
+after.** Heavy, motion-correlated FPs on the negatives will pull any recall/precision
+tradeoff in a specific, hard-to-diagnose-after-the-fact direction if a retune is fit blind
+to the cause. This is a handoff for Task 5, not a fix made here — `detector.yaml` was
+explicitly out of scope for the capture task.
+
 ### Hz gate — judge every bag, not just the throw
 
 `/oak/points` under 15 Hz sim is normal on this Dell under depth rendering (see CLAUDE.md),
@@ -208,9 +275,11 @@ but a bag needs enough density to prove the scenario, not just to exist. Compute
 rate from `ros2 bag info` (`/oak/points` message count ÷ bag duration) for every capture —
 a live `ros2 topic hz` sample taken before or after the recording can read very differently
 from what the bag itself contains, and isn't a substitute. T01–T14 all landed at
-10.2–13.4 Hz this session; treat anything under ~10 Hz as a failed capture and re-fly it,
-most urgently the short-`ttc` scenarios (T03/T07/T08), which have the least frame budget
-to lose.
+11.5–13.4 Hz this session; treat anything under ~10 Hz as a failed capture and re-fly it,
+most urgently the short-`ttc` scenarios (T03/T07/T08), which have the least frame budget to
+lose. Hz measures whether a bag has enough data to *contain* the scenario — it says nothing
+about `/threat/centroid` quality; see the note above before drawing any detection
+conclusion from a bag that passes this gate.
 
 ## Tuning + regression
 
