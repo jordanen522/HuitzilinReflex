@@ -167,12 +167,26 @@ detector:
     # T01-T10 carry 75-99 messages, T11 1, T12 31, T13 0, T14 99 -- and
     # score_bags._replay_bag passes no --exclude-topics, so `ros2 bag play`
     # republishes them and _centroid_cb counts them as detections of the
-    # detector under test. Corrected LIVE FP counts are 0 (T11), 5 (T12),
-    # 0 (T13), 8 (T14) -- not the 1/36/0/107 the block below reasons from.
-    # Worse: T05 and T10 were scored TP while the detector under test
-    # published NOTHING. Those are two real tune-split false negatives --
-    # exactly the evidence a retune is supposed to be driven by -- so the
-    # conclusion "no threshold change is defensible" does not stand.
+    # detector under test. Proven empirically, not just by reading the code:
+    # replaying T14's /threat/centroid with NO detector running delivers
+    # exactly 99 messages to a RELIABLE subscriber (the bag records the topic
+    # with offered reliability=reliable, so it is QoS-compatible).
+    #
+    # Do NOT try to recover the old numbers by subtracting the recorded count
+    # from the buggy total. That subtraction was tried and is unsound: it
+    # predicts 8 live FPs on T14, while the fixed harness measures 97. Two
+    # publishers bursting into one depth-limited RELIABLE queue lose
+    # messages, so the contaminated totals are not the sum of anything.
+    # Task 5b re-measured with the recorded track excluded; those are the
+    # only trustworthy counts (tune: T11 0, T12 35, T13 0, T14 97).
+    #
+    # Also corrected: an earlier revision of this header claimed T05 and T10
+    # were scored TP while the detector published nothing, i.e. two hidden
+    # false negatives. That was wrong. Under the fixed harness both pass the
+    # anchored window on genuine closing-range detections (T05 run of 3, T10
+    # run of 5). The claim traced to a funnel log read at
+    # debug_funnel_throttle_s: 1.0, which collapses a whole throw to one
+    # line -- absence of a log line was mistaken for absence of a detection.
     #
     # Two claims below DO survive, both re-checked against the code:
     #  - bg_query genuinely reports first-sight terrain as foreground
@@ -182,20 +196,28 @@ detector:
     #    quoted ranges are not: a funnel line lists EVERY ball-sized
     #    cluster in a frame, not the ball, so the "TP population" above
     #    already contains the FP class it is compared against. Attribution
-    #    needs debug_dump_dir's cl_centroid against /gz/dynamic_poses.
+    #    cannot use debug_dump_dir's cl_centroid against /gz/dynamic_poses:
+    #    the bags do not record that topic. Task 5b attributes instead by
+    #    requiring a run of >=3 in-window detections of strictly decreasing
+    #    range -- a closing ball -- which terrain noise does not produce.
     #
     # Refinement worth carrying into the re-measurement: the driver is
     # most likely a COLD map at every replay start, not steady sweeping.
     # insert() clears the map when stamps go backwards, so each replay
-    # starts empty and warms up (T14: ~13 new voxels/frame in steady state
-    # vs thousands during warm-up). That also predicts the T05/T10 FNs --
-    # at capture the map was warm from continuous flight, while on replay a
-    # ball arriving early meets a cold map that cannot difference it. A
-    # live flight pays that warm-up once at takeoff; per-bag scoring pays
-    # it 31 times.
+    # starts empty and warms up. A live flight pays that warm-up once at
+    # takeoff; per-bag scoring pays it 31 times. Task 5b's per-frame funnel
+    # confirms the scale is far worse than the block below says: frames of
+    # bg=506 fg=4892 and bg=1013 fg=4159 -- both just UNDER the current
+    # fg_max_points: 5000 -- pass through and yield ball-sized clusters
+    # (best=7, extent=0.21 m). So fg_max_points is the live candidate lever.
+    # It is NOT yet safe to lower: nobody has checked whether a true
+    # acquisition frame also spikes into that range, and cutting one would
+    # cost real detections. That check needs its own tune-split runs.
     #
     # Re-score with the recorded topic excluded BEFORE deriving anything
-    # from this block.
+    # from this block. Note FP counts are also throughput-sensitive
+    # (cloud_queue_depth: 5 drops clouds under load), so an FP count is only
+    # comparable against another run on a comparably loaded machine.
     # ###################################################################
     # Investigated 2026-08-17 (Task 5, Step 0/2): T11/T12/T14 (patrol-motion
     # tune negatives) produced FP clusters through this exact gate -- e.g.
