@@ -174,19 +174,28 @@ detector:
     #
     # Do NOT try to recover the old numbers by subtracting the recorded count
     # from the buggy total. That subtraction was tried and is unsound: it
-    # predicts 8 live FPs on T14, while the fixed harness measures 97. Two
-    # publishers bursting into one depth-limited RELIABLE queue lose
-    # messages, so the contaminated totals are not the sum of anything.
-    # Task 5b re-measured with the recorded track excluded; those are the
-    # only trustworthy counts (tune: T11 0, T12 35, T13 0, T14 97).
+    # predicts 8 live FPs on T14, while the fixed harness measures 97. The
+    # leading explanation is message loss -- two publishers bursting into one
+    # depth-limited RELIABLE queue -- but that mechanism is a HYPOTHESIS and
+    # has not been verified; a plainer rival is that FP counts are
+    # throughput-sensitive (cloud_queue_depth: 5, below) and the contaminated
+    # and clean runs carried different loads. Either way a contaminated total
+    # is not the sum of anything: measure, never subtract. The trustworthy
+    # counts are the ones measured with the recorded track excluded, on the
+    # Dell, at that load (tune: T11 0, T12 35, T13 0, T14 97).
     #
     # Also corrected: an earlier revision of this header claimed T05 and T10
     # were scored TP while the detector published nothing, i.e. two hidden
-    # false negatives. That was wrong. Under the fixed harness both pass the
-    # anchored window on genuine closing-range detections (T05 run of 3, T10
-    # run of 5). The claim traced to a funnel log read at
-    # debug_funnel_throttle_s: 1.0, which collapses a whole throw to one
-    # line -- absence of a log line was mistaken for absence of a detection.
+    # false negatives. That was wrong -- under the fixed harness both pass
+    # the anchored window. The MECHANISM that produced the false claim was
+    # never established: a later revision of this block attributed it to a
+    # funnel log read at debug_funnel_throttle_s: 1.0, but nothing in the
+    # code, the diff or the Task 5b report substantiates that, and the only
+    # account of the incident that exists names two different candidates --
+    # the missing SPAWN_LEAD_S anchor and the `ros2 bag play --clock`
+    # wall-clock-synthesis trap, each of which independently produces the
+    # symptom "the detector looks like it published nothing near the
+    # expected time". Recorded here as unresolved rather than guessed.
     #
     # Two claims below DO survive, both re-checked against the code:
     #  - bg_query genuinely reports first-sight terrain as foreground
@@ -197,9 +206,52 @@ detector:
     #    cluster in a frame, not the ball, so the "TP population" above
     #    already contains the FP class it is compared against. Attribution
     #    cannot use debug_dump_dir's cl_centroid against /gz/dynamic_poses:
-    #    the bags do not record that topic. Task 5b attributes instead by
-    #    requiring a run of >=3 in-window detections of strictly decreasing
-    #    range -- a closing ball -- which terrain noise does not produce.
+    #    the bags do not record that topic.
+    #
+    # RETRACTED 2026-08-17 (Task 5c): this block used to end "Task 5b
+    # attributes instead by requiring a run of >=3 in-window detections of
+    # strictly decreasing range -- a closing ball -- which terrain noise
+    # does not produce." That last clause is FALSE, and it is refuted 25
+    # lines below by this file's own account of the FP mechanism. A run of
+    # strictly decreasing base_link range is exactly what a patrolling drone
+    # translating TOWARD newly-explored static terrain produces, frame after
+    # frame. A sign-only test therefore selects FOR this library's dominant
+    # FP class, and over 200 000 iid-noise trials per point it fires at
+    # P=0.77 (n=10), 0.91 (n=15), 0.97 (n=20) detections in the window --
+    # which is where the "11 of 12 attributable" figure came from. The
+    # replacement uses the closure RATE the sign test discarded: a run only
+    # counts when every step closes faster than the airframe's own measured
+    # rolling-max ground speed (3.49 m/s) and no faster than that scenario's
+    # ball speed plus the same figure. See score_bags_logic
+    # .attribute_closing_ball. Do not re-derive any attribution claim from
+    # a run length alone.
+    #
+    # AND THE REPLACEMENT IS ITSELF REFUTED, by the falsification control
+    # Task 5b structurally could not run. Measured 2026-08-17 over every
+    # negative in the library, whole replay, against the most permissive
+    # band any scenario gets: 4 of the 5 ball-free originals (N01, N02,
+    # N03, N05; N04 emits nothing at all) and 1 of the 4 tune negatives
+    # (T12) yield a qualifying in-band closing run. N01's is three
+    # detections spanning 0.462 s at 4.51 m/s. Meanwhile 0 of the 12
+    # original positives and 1 of the 10 tune positives qualify, and that
+    # one (T03) fires 1.3 s after its 17 m/s ball has left the frame, at
+    # 7.7 m/s. THERE IS NO WORKING OFFLINE ATTRIBUTION IN THIS HARNESS.
+    #
+    # Mechanism, so the next attempt does not repeat it: successive
+    # /threat/centroid messages in this library are not one object tracked
+    # frame to frame. They are unrelated terrain patches at unrelated
+    # depths, so their apparent closure rate is arbitrary and lands inside
+    # any physically plausible band often enough to be useless. Range alone
+    # cannot establish object identity between frames. The next thing to
+    # try is the full base_link (x, y, z) the centroid already carries --
+    # bound the 3-D step displacement, not just the radial one -- but that
+    # is untested and must be validated on the tune split and against this
+    # same negative control BEFORE any attribution claim is made from it.
+    #
+    # Until then: a /threat/centroid inside the detection window is
+    # evidence that the detector fired near the right time, and nothing
+    # more. It is NOT evidence that the ball was detected. Recall measured
+    # on this library is a window statistic.
     #
     # Refinement worth carrying into the re-measurement: the driver is
     # most likely a COLD map at every replay start, not steady sweeping.

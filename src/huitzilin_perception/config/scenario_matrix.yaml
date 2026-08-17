@@ -64,8 +64,12 @@
 # Two conventions the T-entries follow that the S/N entries do not:
 #   - time_to_closest_s = offset_forward_m / speed_mps (straight-line flight
 #     time), the same arithmetic every S-entry uses. Negatives carry 0, as
-#     N01–N05 do. capture_scenario.sh does not read it, but the capture
-#     operator's stop timing does: SPAWN_LEAD (3 s) + this + ~9 s.
+#     N01–N05 do. capture_scenario.sh DOES read it (:46 as TTC, :81 into the
+#     label sidecar) — the note here used to say it did not, which predates
+#     the sidecar-writing version of the script and is now actively
+#     misleading, because score_bags' strict detection window is anchored on
+#     exactly this field. The capture operator's stop timing uses it too:
+#     SPAWN_LEAD (3 s) + this + ~9 s.
 #   - closest_approach_m is the true HORIZONTAL crossing-geometry closest
 #     approach, |offset·sin(angle) + miss·cos(angle)|, not the nominal
 #     miss_distance_m -- but it EXCLUDES gravity drop and patrol egomotion,
