@@ -20,10 +20,14 @@ USAGE (Dell, after the world + SITL are up — docs/dodge_battery_runbook.md)
   # then, in another terminal:
   ./scripts/run_dodge_battery.sh week6        # the 20 m/s battery
 
-  # fidelity gate FIRST — pin the oracle to the depth detector's real reach
-  # and confirm the known results reproduce before believing any new one:
+  # fidelity gate FIRST — pin the oracle to the depth detector's real SENSOR
+  # (reach AND sector AND rate, not reach alone) and confirm the known results
+  # reproduce before believing any new one. Reach-only under-specifies: a gate
+  # pinned to 3.4 m still failed once because it flew the proposed optics and
+  # rate against a reference flown on different ones. `oracle_rate_hz` and
+  # `fov_half_angle_deg` (params/oracle_detector.yaml) default silently.
   ros2 launch huitzilin_perception week6_oracle.launch.py \
-      with_patrol:=true detection_range_m:=3.4
+      with_patrol:=true detection_range_m:=3.4 oracle_rate_hz:=14.5
 
 THE SUPERVISOR IS PINNED OFF, not merely defaulted off — see the include
 below. supervisor.yaml watches /oak/points, which this file never publishes,

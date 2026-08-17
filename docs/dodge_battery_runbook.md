@@ -116,6 +116,16 @@ ros2 launch huitzilin_perception week6_oracle.launch.py \
 - **`detection_range_m` is an INPUT, not a result.** A dodge scored under the oracle is a
   claim about the tracker, trigger and airframe *given* a sensor with that reach — never
   evidence such a sensor exists. Quote the range beside every number.
+- **A sensor is reach, sector AND rate.** The command above pins reach only;
+  `oracle_rate_hz` (default 14.5) and `fov_half_angle_deg` (in
+  `params/oracle_detector.yaml`, default 45.0) take their defaults silently. Pinning one
+  axis describes a different instrument — a gate pinned to the real detector's 3.4 m reach
+  still failed because it flew the wrong optics and rate against its reference. Quote all
+  three beside every number.
+- **`counterfactual_min_m` is blank on `NO_DODGE` rows.** Joining on it naively drops every
+  no-fire out of the denominator and reports a save rate over only the throws that fired —
+  it turned a true 21/30 into 21/21 once. Substitute `counterfactual_min_m := actual_min_m`
+  on those rows and score a `NO_DODGE` inside the hit radius as a loss.
 - **Run the fidelity gate first**, in the **same mode** as the run it validates.
   `detection_range_m:=3.4` must reproduce the measured shape before anything the oracle
   says about 20 m/s is believable. B11/B12 are patrol and geometrically identical to

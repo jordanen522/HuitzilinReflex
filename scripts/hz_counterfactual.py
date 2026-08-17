@@ -33,6 +33,21 @@ Verdicts, against hit_radius:
     DODGE_HURT         counterfactual  > R >= actual    (made it worse)
     NO_DODGE           no dodge fired; actual is the whole story
 
+SCORING TRAP -- READ THIS BEFORE COMPUTING ANY SAVE RATE.
+`counterfactual_min_m` is emitted BLANK on NO_DODGE rows (there is no dodge to
+counterfactualise). Join naively on that column and every blank drops out, which
+silently deletes each no-fire from the DENOMINATOR and reports a save rate over
+only the throws that fired. That is not a save rate. On the 26 m / 20 m/s D08
+cell it turned a true 21/30 (70%) into a flattering 21/21 (100%) -- better than
+the oracle's own 28/29, and entirely an artifact of a blank cell.
+
+The rule: on a NO_DODGE row the drone never deviated, so the actual path IS the
+counterfactual path. Those rows are fully scoreable -- substitute
+`counterfactual_min_m := actual_min_m` -- and a NO_DODGE row inside the hit
+radius is a LOSS, not missing data. The blank stays blank here on purpose, so
+the recorded CSVs stay byte-reproducible against the runs that produced them;
+the substitution belongs in whatever scores them.
+
 BALL NAMES. Both spawner conventions are matched, because this repo has two and
 they disagree: dodge_battery names its ball ball_<rid>_r<rep>_<epoch> and
 spawn_projectile names its own projectile_<scenario>_<epoch>. Matching only the
@@ -206,6 +221,12 @@ class Counterfactual(Node):
         dodge = next(((i, td) for i, (td, _) in enumerate(self._dodges)
                       if t_start - 0.5 <= td <= t_end + 0.5), None)
         if dodge is None:
+            # The blank counterfactual here is the SCORING TRAP in the module
+            # docstring: no dodge fired, so the actual path IS the
+            # counterfactual. Whoever scores this must substitute
+            # `counterfactual_min_m := actual_min_m` on these rows. Dropping
+            # them as missing data deletes every no-fire from the denominator
+            # and reports 100% where the truth was 70%.
             self._emit(name, sid, rep, "", actual, "", "", "NO_DODGE",
                        "", 0, len(track))
             return
