@@ -156,6 +156,47 @@ detector:
     # primary FP gate — point-count ranges overlap, metric size does not.
     cluster_max_extent_m: 0.35
 
+    # ###################################################################
+    # INVALIDATED 2026-08-17, THE SAME DAY IT WAS WRITTEN. DO NOT CITE THE
+    # NUMBERS IN THE BLOCK BELOW. They came from replays that scored a
+    # RECORDED /threat/centroid track instead of the detector under test,
+    # so they measure the wrong detector.
+    #
+    # Task 4 captured the T-bags with a live perception stack running, so
+    # each T-bag CONTAINS that stack's own /threat/centroid output --
+    # T01-T10 carry 75-99 messages, T11 1, T12 31, T13 0, T14 99 -- and
+    # score_bags._replay_bag passes no --exclude-topics, so `ros2 bag play`
+    # republishes them and _centroid_cb counts them as detections of the
+    # detector under test. Corrected LIVE FP counts are 0 (T11), 5 (T12),
+    # 0 (T13), 8 (T14) -- not the 1/36/0/107 the block below reasons from.
+    # Worse: T05 and T10 were scored TP while the detector under test
+    # published NOTHING. Those are two real tune-split false negatives --
+    # exactly the evidence a retune is supposed to be driven by -- so the
+    # conclusion "no threshold change is defensible" does not stand.
+    #
+    # Two claims below DO survive, both re-checked against the code:
+    #  - bg_query genuinely reports first-sight terrain as foreground
+    #    (background_map.py foreground(): a point is foreground only when
+    #    its own voxel and all 26 neighbours are unobserved).
+    #  - the ball/terrain geometric overlap is directionally real, but the
+    #    quoted ranges are not: a funnel line lists EVERY ball-sized
+    #    cluster in a frame, not the ball, so the "TP population" above
+    #    already contains the FP class it is compared against. Attribution
+    #    needs debug_dump_dir's cl_centroid against /gz/dynamic_poses.
+    #
+    # Refinement worth carrying into the re-measurement: the driver is
+    # most likely a COLD map at every replay start, not steady sweeping.
+    # insert() clears the map when stamps go backwards, so each replay
+    # starts empty and warms up (T14: ~13 new voxels/frame in steady state
+    # vs thousands during warm-up). That also predicts the T05/T10 FNs --
+    # at capture the map was warm from continuous flight, while on replay a
+    # ball arriving early meets a cold map that cannot difference it. A
+    # live flight pays that warm-up once at takeoff; per-bag scoring pays
+    # it 31 times.
+    #
+    # Re-score with the recorded topic excluded BEFORE deriving anything
+    # from this block.
+    # ###################################################################
     # Investigated 2026-08-17 (Task 5, Step 0/2): T11/T12/T14 (patrol-motion
     # tune negatives) produced FP clusters through this exact gate -- e.g.
     # (size=43, extent=0.20 m) and (size=25, extent=0.21 m) from T14 -- so the
