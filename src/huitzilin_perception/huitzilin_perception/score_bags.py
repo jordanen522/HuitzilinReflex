@@ -35,11 +35,18 @@ For each scenario in the chosen split:
      silently.
   4. Listen on /threat/centroid for the duration of the bag.
   5. Score:
-     - Positive scenario: centroid published within detection_window_s of
-       the ball's own closest-approach time (bag_start + SPAWN_LEAD_S +
-       time_to_closest_s — all three required — see Defect 2 below) → TP
-       else FN
+     - Positive scenario: centroid published inside the strict window
+       [max(event - detection_window_s, bag_start + SPAWN_LEAD_S),
+        event + min(detection_window_s, POST_EVENT_TOLERANCE_S)],
+       event = bag_start + SPAWN_LEAD_S + time_to_closest_s (all three
+       required — see Defect 2 below and score_bags_logic's
+       strict_window_bounds) → TP else FN
      - Negative scenario: centroid published at any point → FP else TN
+  5b. Attribute: decide whether each TP is a ball or background that merely
+     landed inside the window, from the closure RATE of a contiguous
+     closing run of in-window centroids (attribute_closing_ball). The same
+     test runs over every negative as a falsification control — a ball-free
+     bag that attributes a ball refutes the method.
   6. Aggregate TP/FP/TN/FN → recall, precision, FP rate.
 
 All timing uses message stamps (use_sim_time), never wall-clock.
@@ -110,13 +117,17 @@ from rclpy.serialization import deserialize_message
 from rosgraph_msgs.msg import Clock
 
 from huitzilin_perception.score_bags_logic import (
+    LIBRARY_MAX_BALL_SPEED_MPS,
+    POST_EVENT_TOLERANCE_S,
+    REQUIRED_EXCLUDE_TOPICS,
     SPAWN_LEAD_S,
+    attribute_closing_ball,
     build_bag_play_cmd,
+    clock_msg_to_sim_t,
     compute_exclude_topics,
-    is_attributable_to_ball,
     is_in_window_loose,
-    is_in_window_strict,
-    longest_closing_run,
+    is_in_window_symmetric_legacy,
+    strict_window_bounds,
 )
 
 RELIABLE_QOS = QoSProfile(
@@ -289,6 +300,17 @@ class ScorerNode(Node):
         RuntimeError — never returns an empty list — only once every retry
         is exhausted: run() treats that as fatal rather than silently
         scoring with no exclusion at all.
+
+        Task 5c HIGH-1: the loop used to break on the first NON-EMPTY
+        result. rclpy creates /parameter_events and /rosout inside
+        Node.__init__, i.e. before detector_node.py creates
+        /threat/centroid, and DDS propagates endpoints asynchronously — so
+        a graph read of ['/parameter_events', '/rosout'] is a real
+        intermediate state, it satisfied every guard, and it produced an
+        exclusion list without the one topic that matters. That silently
+        restored Defect 1 in full. The break now requires the topic the
+        harness actually subscribes to; compute_exclude_topics is the
+        second, load-bearing check on the same condition.
         """
         last_seen: list[str] = []
         last_exc: Optional[Exception] = None
@@ -299,8 +321,15 @@ class ScorerNode(Node):
                 )
                 last_seen = [name for name, _types in pubs]
                 last_exc = None
-                if last_seen:
+                if REQUIRED_EXCLUDE_TOPICS.issubset(set(last_seen)):
                     break
+                if last_seen:
+                    self.get_logger().warn(
+                        f"partial publisher list for "
+                        f"'{self._detector_node_name}' on attempt "
+                        f"{attempt + 1}: {sorted(last_seen)} — still waiting "
+                        f"for {sorted(REQUIRED_EXCLUDE_TOPICS)}"
+                    )
             except Exception as e:  # node not yet visible in this graph cache
                 last_exc = e
                 last_seen = []
@@ -356,6 +385,18 @@ class ScorerNode(Node):
 
         detected = len(detections) > 0
 
+        # Ball speed for the attribution rate band. Positives use their own
+        # scenario's speed; a negative has no ball, so its own speed_mps
+        # would make the band empty and the control unfalsifiable by
+        # construction — negatives are therefore scored against the LIBRARY
+        # MAXIMUM band, the most permissive test any scenario gets.
+        speed_mps = float(scen.get("speed_mps") or 0.0)
+        ctl_speed = LIBRARY_MAX_BALL_SPEED_MPS
+        all_ranges = [
+            (t, math.sqrt(x * x + y * y + z * z))
+            for (t, x, y, z) in self._detection_positions
+        ]
+
         if label == "positive":
             time_to_closest_s = sidecar.get("time_to_closest_s")
             if time_to_closest_s is None:
@@ -368,69 +409,120 @@ class ScorerNode(Node):
                     "note": "sidecar missing time_to_closest_s — strict "
                             "window cannot be enforced",
                 }
-            # spawn_lead_s: the projectile does not exist until SPAWN_LEAD_S
-            # seconds into the recording (capture_scenario.sh), and
-            # time_to_closest_s is defined relative to SPAWN, not bag start
-            # (scenario_matrix.yaml:18) — see SPAWN_LEAD_S's docstring in
-            # score_bags_logic.py for the empirical validation.
-            in_window_strict = is_in_window_strict(
+            # The window is asymmetric and floored at spawn (Task 5c
+            # CRITICAL-1): lower = max(event - window_s, bag_start +
+            # SPAWN_LEAD_S), upper = event + min(window_s,
+            # POST_EVENT_TOLERANCE_S). See strict_window_bounds().
+            lower, upper = strict_window_bounds(
+                bag_start, time_to_closest_s, window_s,
+                spawn_lead_s=SPAWN_LEAD_S,
+                post_event_s=POST_EVENT_TOLERANCE_S,
+            )
+            in_window_strict = any(lower <= t <= upper for t in detections)
+            # Both superseded gates, computed for the artifact only so the
+            # CRITICAL-1 change is visible per scenario rather than only in
+            # aggregate: `sym` is Task 5b's symmetric unfloored gate, `loose`
+            # is the pre-5b "anywhere in the first window_s" gate.
+            in_window_sym = is_in_window_symmetric_legacy(
                 detections, bag_start, time_to_closest_s, window_s,
                 spawn_lead_s=SPAWN_LEAD_S,
             )
             in_window_loose = is_in_window_loose(detections, bag_start, window_s)
-            # Strict (anchored to the ball's own closest-approach time) is
-            # the authoritative gate — "within window_s of bag start" is weak
-            # on a ~20 s bag (task-5b-brief). Loose is reported alongside it
-            # for comparison only; it is never what decides pass/fail.
             passed = in_window_strict
-            note = (
-                f"window={window_s:.1f}s lead={SPAWN_LEAD_S:.1f}s "
-                f"strict={in_window_strict} loose={in_window_loose}"
-            )
-            # Detection audit trail: every FN root-cause investigation this
-            # task has done needed raw detection times relative to bag_start
-            # (see task-5b-report.md) — logging them unconditionally here
-            # means a future FN never needs a special diagnostic run to see
-            # WHERE the detector actually fired vs. the strict window.
+
             event_rel = SPAWN_LEAD_S + time_to_closest_s
             det_rel = sorted(round(t - bag_start, 3) for t in detections)
             self.get_logger().info(
-                f"    {sid} detections_rel_s={det_rel} event_rel_s={event_rel:.3f} "
-                f"window=[{event_rel - window_s:.3f}, {event_rel + window_s:.3f}]"
+                f"    {sid} detections_rel_s={det_rel} "
+                f"event_rel_s={event_rel:.3f} "
+                f"strict_window_rel=[{lower - bag_start:.3f}, "
+                f"{upper - bag_start:.3f}]"
             )
 
-            # Attribution (Task 5b): is this TP a real ball, or a background
-            # detection that merely landed inside the (generous) strict
-            # window? The bags carry no ground-truth ball pose, so the only
-            # available discriminator is a CLOSING RUN — consecutive
-            # in-window detections whose range from the sensor decreases —
-            # vs. sporadic non-closing ones. Restricted to detections
-            # actually inside the strict window: a closing run elsewhere in
-            # a 20-45 s bag says nothing about THIS TP.
-            attributable = None
-            closing_run = 0
-            if passed:
-                event_t = bag_start + event_rel
-                in_window_ranges = [
-                    (t, math.sqrt(x * x + y * y + z * z))
-                    for (t, x, y, z) in self._detection_positions
-                    if abs(t - event_t) <= window_s
-                ]
-                closing_run = longest_closing_run(in_window_ranges)
-                attributable = is_attributable_to_ball(in_window_ranges)
-                self.get_logger().info(
-                    f"    {sid} attributable_to_ball={attributable} "
-                    f"(longest_closing_run={closing_run}, "
-                    f"n_in_window={len(in_window_ranges)})"
-                )
+            # Attribution (Task 5c CRITICAL-2): is this TP a real ball, or
+            # background that merely landed inside the window? Restricted to
+            # detections actually inside the strict window — a closing run
+            # elsewhere in a 20-45 s bag says nothing about THIS TP.
+            in_window_ranges = [
+                (t, r) for (t, r) in all_ranges if lower <= t <= upper
+            ]
+            attr = attribute_closing_ball(in_window_ranges, speed_mps)
+            attributable = attr["attributable"]
+            closing_run = attr["longest_run"]
+            # Raw evidence behind the verdict. Task 5c HIGH-2 is about the
+            # artifact, but the (time, range) pairs themselves are what let
+            # an attribution verdict be re-derived offline without another
+            # ~13-minute Dell run — which is exactly what was needed to
+            # catch a mis-derived constant in this very function.
+            self.get_logger().info(
+                f"    {sid} in_window_t_range="
+                + str([(round(t - bag_start, 3), round(r, 3))
+                       for (t, r) in sorted(in_window_ranges)])
+            )
+            note = (
+                f"win_rel=[{lower - bag_start:.2f},{upper - bag_start:.2f}] "
+                f"strict={in_window_strict} sym={in_window_sym} "
+                f"loose={in_window_loose} n_det={len(detections)} "
+                f"n_win={attr['n_points']} run={attr['longest_run']} "
+                f"rate={attr['closure_rate']:.2f}m/s "
+                f"band=({attr['rate_band'][0]:.2f},{attr['rate_band'][1]:.2f}] "
+                f"attributable={attributable}"
+            )
+            self.get_logger().info(
+                f"    {sid} attributable={attributable} {attr['reason']}"
+            )
         else:  # negative
             # TN: no centroid at all, anywhere in the replay. Unaffected by
             # the window logic above — a negative has no closest-approach
-            # time to anchor to. Attribution does not apply to negatives.
+            # time to anchor to.
             passed = not detected
-            note = f"fp_count={len(detections)}"
-            attributable = None
-            closing_run = 0
+
+            # NEGATIVE CONTROL (Task 5c CRITICAL-2b). These bags contain no
+            # ball and tens of live false positives each, so they are the
+            # control population an attribution test must survive. Task 5b
+            # set attributable=None here and so could never falsify its own
+            # method. Two reads, both against the most permissive band in
+            # the library (ctl_speed), i.e. the easiest test any scenario
+            # gets:
+            #   ctl_win  — the same window rule a positive gets, with this
+            #              scenario's own time_to_closest_s (0 for every
+            #              negative), so the window width is comparable.
+            #   ctl_all  — EVERY detection in the whole replay. This is the
+            #              decisive one: if the rule attributes a ball
+            #              anywhere in a ball-free bag, it is refuted.
+            ctl_lower, ctl_upper = strict_window_bounds(
+                bag_start, float(sidecar.get("time_to_closest_s") or 0.0),
+                window_s, spawn_lead_s=SPAWN_LEAD_S,
+                post_event_s=POST_EVENT_TOLERANCE_S,
+            )
+            ctl_win_ranges = [
+                (t, r) for (t, r) in all_ranges if ctl_lower <= t <= ctl_upper
+            ]
+            attr_win = attribute_closing_ball(ctl_win_ranges, ctl_speed)
+            attr_all = attribute_closing_ball(all_ranges, ctl_speed)
+            attributable = attr_all["attributable"]
+            closing_run = attr_all["longest_run"]
+            note = (
+                f"fp_count={len(detections)} "
+                f"n_win={attr_win['n_points']} "
+                f"ctl_win={attr_win['attributable']}"
+                f"(run={attr_win['longest_run']},"
+                f"rate={attr_win['closure_rate']:.2f}) "
+                f"ctl_all={attr_all['attributable']}"
+                f"(run={attr_all['longest_run']},"
+                f"rate={attr_all['closure_rate']:.2f}) "
+                f"band=({attr_all['rate_band'][0]:.2f},"
+                f"{attr_all['rate_band'][1]:.2f}]"
+            )
+            self.get_logger().info(
+                f"    {sid} NEGATIVE CONTROL ctl_all="
+                f"{attr_all['attributable']} {attr_all['reason']}"
+            )
+            self.get_logger().info(
+                f"    {sid} all_t_range="
+                + str([(round(t - bag_start, 3), round(r, 3))
+                       for (t, r) in sorted(all_ranges)])
+            )
 
         return {
             "id": sid, "label": label,
@@ -482,10 +574,17 @@ class ScorerNode(Node):
         stamps are copied from the incoming cloud's own header.stamp
         (detector_node.py), which IS the bag's original recorded Gazebo
         sim-time payload — only bag_start needed this fix.
+
+        Task 5c MEDIUM-4: storage_id is left empty so rosbag2 reads it from
+        the bag's own metadata.yaml. It used to be hardcoded "mcap" while
+        _find_bag will happily return a DIRECTORY bag, so a directory bag
+        with sqlite3 storage failed the whole run on a bag `ros2 bag play`
+        would have replayed perfectly. The reader is also closed explicitly
+        rather than left to refcounting (31 opens per run), and the
+        sec/nanosec arithmetic moved to score_bags_logic.clock_msg_to_sim_t
+        so it is covered by the ROS-free test suite.
         """
-        storage_options = rosbag2_py.StorageOptions(
-            uri=str(bag_path), storage_id="mcap"
-        )
+        storage_options = rosbag2_py.StorageOptions(uri=str(bag_path))
         converter_options = rosbag2_py.ConverterOptions(
             input_serialization_format="cdr", output_serialization_format="cdr"
         )
@@ -496,12 +595,18 @@ class ScorerNode(Node):
             self.get_logger().error(f"could not open {bag_path} for bag_start "
                                     f"read: {e}")
             return None
-        reader.set_filter(rosbag2_py.StorageFilter(topics=["/clock"]))
-        if not reader.has_next():
-            return None
-        _topic, data, _t = reader.read_next()
-        msg = deserialize_message(data, Clock)
-        return msg.clock.sec + msg.clock.nanosec * 1e-9
+        try:
+            reader.set_filter(rosbag2_py.StorageFilter(topics=["/clock"]))
+            if not reader.has_next():
+                return None
+            _topic, data, _t = reader.read_next()
+            msg = deserialize_message(data, Clock)
+            return clock_msg_to_sim_t(msg.clock.sec, msg.clock.nanosec)
+        finally:
+            try:
+                reader.close()
+            except Exception:
+                pass
 
     def _replay_bag(self, bag_path: Path) -> float:
         """
@@ -568,18 +673,44 @@ class ScorerNode(Node):
         passed = recall >= self._floor and not errors
         verdict = "PASS ✓"
         if errors:
-            verdict = f"FAIL ✗ — {len(errors)} bag(s) missing (excluded from metrics)"
+            # Task 5c MEDIUM-3: name the actual errors. The old string
+            # hardcoded "bag(s) missing" for all three error conditions, so
+            # a sidecar with no time_to_closest_s produced a verdict that
+            # misdirected the investigation to a bag that was never missing.
+            detail = "; ".join(f"{r['id']}: {r.get('note','')}" for r in errors)
+            verdict = (
+                f"FAIL ✗ — {len(errors)} scenario(s) excluded from metrics "
+                f"[{detail}]"
+            )
         elif not passed:
             verdict = "FAIL ✗ — recall below floor"
+        # Task 5c MEDIUM-3: always print the denominator. "Recall: 100.0%"
+        # over a shrunken positive set, with no denominator, is copyable
+        # straight out of the artifact as an overstatement.
+        n_pos = len(positives)
+        n_excluded_pos = sum(1 for r in errors if r["label"] == "positive")
+        recall_line = (
+            f"  Recall (TP rate): {recall*100:.1f}%  ({tp}/{n_pos} positives "
+            f"scored"
+            + (f", {n_excluded_pos} excluded" if n_excluded_pos else "")
+            + f")  (floor: {self._floor*100:.0f}%)"
+        )
+        # Task 5c HIGH-2: attribution belongs in the artifact, not only in a
+        # console log that nobody can re-read six months later.
+        attributed = sum(1 for r in positives if r.get("attributable"))
+        ctl_hits = [r["id"] for r in negatives if r.get("attributable")]
         lines += [
             "",
             "  ─" + "─" * 55,
             f"  TP={tp}  FN={fn}  TN={tn}  FP={fp}"
-            + (f"  MISSING={len(errors)}" if errors else ""),
-            f"  Recall (TP rate): {recall*100:.1f}%  "
-            f"(floor: {self._floor*100:.0f}%)",
+            + (f"  EXCLUDED={len(errors)}" if errors else ""),
+            recall_line,
             f"  Precision:        {precision*100:.1f}%",
             f"  FP rate:          {fp_rate*100:.1f}%",
+            f"  Attributable to a closing ball: {attributed}/{n_pos} positives",
+            f"  Negative control (ball-free bags attributed to a ball): "
+            f"{len(ctl_hits)}/{len(negatives)}"
+            + (f"  {ctl_hits}" if ctl_hits else ""),
             "",
             f"  {verdict}",
             "═" * 60,
