@@ -872,8 +872,16 @@ class ScorerNode(Node):
         ]
 
         report = "\n".join(lines)
-        print(report)
-
+        # ARTIFACT FIRST, CONSOLE SECOND (Task 5c fix round 4, MEDIUM-A).
+        # print() used to run HERE, ahead of the write and outside any
+        # try. On a non-UTF-8 stdout (Windows cp1252, or LANG=C) the
+        # report's box-drawing characters raise UnicodeEncodeError out of
+        # _report(), so run() aborted and the artifact was never created
+        # at all -- the same shape as MEDIUM-1 (an exception escaping
+        # run() before the artifact is written) and strictly worse than
+        # the zero-byte file round 3 fixed. The write below is already
+        # guarded and already pins its encoding, so ordering it first
+        # costs nothing and cannot itself lose the artifact.
         try:
             self._out_file.parent.mkdir(parents=True, exist_ok=True)
             # encoding pinned (Task 5c fix round 3): the report ALWAYS
@@ -887,6 +895,30 @@ class ScorerNode(Node):
             self.get_logger().info(f"Report written → {self._out_file}")
         except Exception as e:
             self.get_logger().warn(f"Could not write report: {e}")
+
+        # The console is the SECONDARY sink, so it may not veto the
+        # verdict. The exit code IS the scoring result and
+        # run_regression.sh/CI gate on it; letting an encoding failure
+        # propagate turns a PASS into a non-zero exit plus a traceback
+        # (main() catches it and returns 1) -- a manufactured FAIL on a
+        # run that passed. Guarded, but NOT silenced: the report is
+        # re-printed with the unmappable glyphs substituted (every number
+        # and the verdict are ASCII; only the rules and ticks are lost)
+        # and the substitution is logged. The exact text is on disk.
+        try:
+            print(report)
+        except UnicodeEncodeError as e:
+            enc = getattr(sys.stdout, "encoding", None) or "ascii"
+            print(
+                report.encode(enc, errors="replace").decode(
+                    enc, errors="replace"
+                )
+            )
+            self.get_logger().warn(
+                f"console encoding {enc} cannot render the report; "
+                f"printed it with substitutions ({e}). The artifact at "
+                f"{self._out_file} is exact."
+            )
 
         return 0 if passed else 1
 
