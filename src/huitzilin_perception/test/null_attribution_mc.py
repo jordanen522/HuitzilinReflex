@@ -11,8 +11,10 @@ standalone to reproduce the whole table:
 Shipped because two load-bearing claims rest on it (Task 5c fix round 1,
 MEDIUM-5): "the reimplementation of the 5b rule reproduces the reviewer's
 published table", and "at the measured in-window counts the 5c rule's noise
-attribution rate is 0.10-0.36, so 0 of 12 is below the noise floor". Neither
-could be re-run by anyone before this file existed.
+attribution rate is <interval>, so 0 of 12 is below the noise floor". Neither
+could be re-run by anyone before this file existed -- and the first time
+anyone did re-run the second one, in fix round 2, the shipped interval turned
+out to be wrong (see MEASURED_N_WIN below). Running this file prints both.
 
 THE NULL MODEL
 --------------
@@ -68,6 +70,36 @@ ROI_MAX_RANGE_M = 5.00   # detector.yaml
 DEFAULT_TRIALS = 200_000
 DEFAULT_SEED = 20260817
 
+# ── the published figures, and the measurement they were computed FROM ──────
+#
+# Task 5c fix round 2, HIGH (F2-1). The three null-model figures quoted in
+# detector.yaml were computed at ONE PARTICULAR n_win vector and then went
+# stale when the fix round 1 window change moved that vector -- the previous
+# round's (13, 3, 8, 11, 5, 4, 3, 7, 4, 16, 4, 5) became the one below, and
+# nobody recomputed. The published interval's floor of 0.10 was in fact never
+# right at EITHER vector; the true floor sits at n = 3 (S02 and S07).
+#
+# So the vector lives here, in code, next to the figures it produces, and
+# test_score_bags_logic.py recomputes the figures from it and asserts they
+# still match. A future window change now has to move all three together or
+# fail a test -- which is what the earlier version of this block was supposed
+# to guarantee and could not, being prose.
+#
+# PROVENANCE: n_win per original positive, S01..S12, from the corrected-window
+# scoring run of 2026-08-17 (Dell artifacts week3_regression_20260817_163942
+# train + _164822 test, tabulated in task-5c-fix1-report.md section 9). These
+# are MEASURED counts, an input to the null model and not an output of it.
+MEASURED_N_WIN = (10, 3, 8, 11, 5, 4, 3, 7, 4, 12, 4, 5)
+MEASURED_N_WIN_IDS = ("S01", "S02", "S03", "S04", "S05", "S06",
+                      "S07", "S08", "S09", "S10", "S11", "S12")
+
+# What null_summary(MEASURED_N_WIN) returns at DEFAULT_TRIALS, and therefore
+# what detector.yaml is allowed to say. Recompute, do not edit to taste.
+PUBLISHED_RATE_MIN = 0.038      # at n = 3 (S02, S07)
+PUBLISHED_RATE_MAX = 0.291      # at n = 12 (S10)
+PUBLISHED_P_NONE = 0.160        # P(0 of 12 attributions | null)
+PUBLISHED_EXPECTED = 1.64       # E[attributions | null]
+
 
 def null_stream(
     n: int,
@@ -120,5 +152,50 @@ def table(ns=(5, 10, 15, 20, 30, 50), trials: int = DEFAULT_TRIALS) -> None:
               f"{p_fires(fires_rate_rule, n, trials):>16.4f}")
 
 
+def null_summary(n_win=MEASURED_N_WIN, trials: int = DEFAULT_TRIALS) -> dict:
+    """
+    The three figures detector.yaml quotes, computed from ONE n_win vector.
+
+    Returns {"n_win", "rates", "rate_min", "rate_max", "p_none", "expected"}.
+
+      rates    -- P(the 5c rate rule fires | null) per scenario, in n_win order
+      p_none   -- P(zero of the len(n_win) positives attributes | null),
+                  the scenarios treated as independent draws
+      expected -- E[number of attributions | null] = sum(rates)
+
+    p_none is the probability the OBSERVED 0-of-12 arises from pure noise, so
+    it is the number that says how decisive 0/12 is. It is NOT a small number.
+    """
+    rates = [p_fires(fires_rate_rule, n, trials) for n in n_win]
+    p_none = 1.0
+    for r in rates:
+        p_none *= (1.0 - r)
+    return {
+        "n_win": tuple(n_win),
+        "rates": rates,
+        "rate_min": min(rates),
+        "rate_max": max(rates),
+        "p_none": p_none,
+        "expected": sum(rates),
+    }
+
+
+def summary_table(n_win=MEASURED_N_WIN, trials: int = DEFAULT_TRIALS) -> None:
+    s = null_summary(n_win, trials)
+    print(f"\nper-scenario null attribution rate at the MEASURED n_win, "
+          f"{trials} trials/point")
+    print("  n_win vector: " + ", ".join(
+        f"{i}={n}" for i, n in zip(MEASURED_N_WIN_IDS, s["n_win"])))
+    print("  rates sorted: " + " ".join(f"{r:.3f}"
+                                        for r in sorted(s["rates"])))
+    print(f"  range              : {s['rate_min']:.3f} - {s['rate_max']:.3f}")
+    print(f"  P(0 of {len(s['n_win'])} | null) : {s['p_none']:.3f}")
+    print(f"  E[attributions]    : {s['expected']:.2f}")
+    print("  ^ these three are what detector.yaml quotes. If they no longer "
+          "match it,\n    the n_win vector moved and the yaml is stale — "
+          "recompute, do not edit.")
+
+
 if __name__ == "__main__":
     table()
+    summary_table()

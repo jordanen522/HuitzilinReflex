@@ -278,8 +278,23 @@ def test_the_new_late_edge_is_a_strict_tightening_and_must_stay_one():
     # larger fall time.
     for ttc in LIBRARY_TTCS + (0.05, 2.0, 3.9, 12.0):
         for window_s in (0.25, 1.0, 4.0, 40.0):
-            lower, upper = strict_window_bounds(100.0, ttc, window_s=window_s)
             spawn = 100.0 + SPAWN_LEAD_S
+            try:
+                lower, upper = strict_window_bounds(
+                    100.0, ttc, window_s=window_s)
+            except ValueError:
+                # An inverted window is now refused outright (fix round 2,
+                # MEDIUM-2). Refusing admits nothing, so it cannot possibly
+                # be a loosening — but assert independently that it only
+                # happens where the un-guarded arithmetic really does
+                # invert, so a raise can never become a way to hide a bug.
+                assert (min(ttc, FLAT_THROW_FALL_TIME_S)
+                        + min(window_s, POST_EVENT_TOLERANCE_S)
+                        < max(ttc - window_s, 0.0)), (
+                    f"ttc={ttc} window_s={window_s}: raised, but the window "
+                    f"is not inverted"
+                )
+                continue
             previous_upper = (
                 spawn + ttc + min(window_s, POST_EVENT_TOLERANCE_S)
             )
@@ -302,9 +317,93 @@ def test_fall_time_none_restores_the_nominal_event_edge():
 
 
 def test_late_clamp_never_pushes_the_upper_edge_below_the_lower():
+    # Fix round 2, MEDIUM-2: this test used to sweep ttc at window_s = 4.0
+    # ONLY, so it asserted a property over a grid on which the property is
+    # unconditionally true and passed without ever visiting the region where
+    # it is false. Same shape as the M-7/F-5 defect. The grid now sweeps
+    # window_s down through the crossover.
+    #
+    # The property below the crossover is NOT "the window is still ordered";
+    # it is "the function refuses, loudly". Anything else — an empty
+    # interval, a degenerate point — scores the positive FN with no error.
+    exercised_a_raise = False
+    for ttc in LIBRARY_TTCS:
+        for window_s in (0.1, 0.2, 0.25, 0.3, 0.43, 0.5, 1.0, 2.0, 4.0):
+            inverts = (min(ttc, FLAT_THROW_FALL_TIME_S)
+                       + min(window_s, POST_EVENT_TOLERANCE_S)
+                       < max(ttc - window_s, 0.0))
+            if inverts:
+                exercised_a_raise = True
+                with pytest.raises(ValueError):
+                    strict_window_bounds(100.0, ttc, window_s=window_s)
+                continue
+            lower, upper = strict_window_bounds(100.0, ttc,
+                                                window_s=window_s)
+            assert upper >= lower, f"ttc={ttc} window_s={window_s}"
+    # The grid must actually reach the region where the property can fail —
+    # otherwise this test degrades back into the vacuous one it replaced.
+    assert exercised_a_raise
+
+
+def test_an_inverted_strict_window_raises_instead_of_admitting_nothing():
+    # The concrete case from the fix round 1 review, verified on this box:
+    #   strict_window_bounds(100.0, 1.5, window_s=0.25)
+    #     -> lower = +4.250, upper = +3.889   (width -0.361 s)
+    # The old (pre-clamp) rule could not produce it: both of its edges hung
+    # off the same event_t. An empty window admits no detection, so a
+    # positive scored against it would read FN with no error anywhere.
+    with pytest.raises(ValueError, match="INVERTED"):
+        strict_window_bounds(100.0, 1.5, window_s=0.25)
+    # ...and it propagates through the production predicate rather than
+    # being swallowed into a quiet False.
+    with pytest.raises(ValueError, match="INVERTED"):
+        is_in_window_strict([104.0], bag_start=100.0,
+                            time_to_closest_s=1.5, window_s=0.25)
+
+
+def test_a_large_time_to_closest_also_inverts_the_window():
+    # The SECOND route, found by running the guard rather than reading the
+    # algebra (fix round 2). Once min(window_s, post_event_s) saturates at
+    # post_event_s, the late edge stops growing with window_s while the
+    # floor keeps reaching forward, so a large enough ttc inverts the window
+    # at the SHIPPED window_s = 4.0:
+    #   ttc > fall_time_s + POST_EVENT_TOLERANCE_S + window_s  ->  6.639 s
+    # The fix round 1 review characterised the hazard as "small window_s"
+    # only; it is a surface, not a single crossover.
+    threshold = FLAT_THROW_FALL_TIME_S + POST_EVENT_TOLERANCE_S + 4.0
+    assert threshold == pytest.approx(6.639, abs=1e-3)
+    lower, upper = strict_window_bounds(100.0, threshold - 0.01,
+                                        window_s=4.0)
+    assert upper >= lower
+    with pytest.raises(ValueError, match="INVERTED"):
+        strict_window_bounds(100.0, threshold + 0.01, window_s=4.0)
+
+
+def test_the_window_inversion_crossover_is_where_the_physics_puts_it():
+    # (ttc - min(ttc, fall)) / 2 — not a tuned bound, just where the floor
+    # reaching forward from the event overtakes the late edge reaching back
+    # from ground impact. At the library's largest ttc that is ~0.4307 s.
+    ttc = 1.5
+    crossover = (ttc - min(ttc, FLAT_THROW_FALL_TIME_S)) / 2.0
+    assert crossover == pytest.approx(0.4307, abs=1e-3)
+    lower, upper = strict_window_bounds(100.0, ttc,
+                                        window_s=crossover + 1e-3)
+    assert upper >= lower
+    with pytest.raises(ValueError):
+        strict_window_bounds(100.0, ttc, window_s=crossover - 1e-3)
+
+
+def test_the_shipped_library_never_reaches_the_inversion():
+    # Why this is a latent hazard and not a live bug: capture_scenario.sh:82
+    # writes detection_window_s: 4.0 into every sidecar, and the largest
+    # time_to_closest_s in scenario_matrix.yaml is 1.5 s. Nothing in the
+    # shipped library is near EITHER route into the inversion.
     for ttc in LIBRARY_TTCS:
         lower, upper = strict_window_bounds(100.0, ttc, window_s=4.0)
-        assert upper > lower
+        # 2.0 s exactly at ttc = 0.0 (every negative); 2.639 s at ttc >= fall.
+        assert upper - lower >= POST_EVENT_TOLERANCE_S
+        assert ttc < FLAT_THROW_FALL_TIME_S + POST_EVENT_TOLERANCE_S + 4.0
+        assert 4.0 > (ttc - min(ttc, FLAT_THROW_FALL_TIME_S)) / 2.0
 
 
 def test_strict_window_requires_bag_start():
@@ -387,10 +486,17 @@ def test_strict_window_false_far_from_closest_approach_but_inside_loose_window()
     # The discriminator the 5b brief asked for: a detection that passes the
     # loose (bag-start-anchored) gate but is nowhere near when the ball was
     # actually present must fail the strict gate.
+    # ttc is the library MAXIMUM (S01, 1.5 s). It used to be 8.0 here, which
+    # is four times anything scenario_matrix.yaml contains and — as fix round
+    # 2's inversion guard now shows — is not merely unrealistic but an
+    # inverted window under the clamped late edge (see
+    # test_an_inverted_strict_window_raises_instead_of_admitting_nothing).
+    # A real library value makes this discriminator STRONGER, not weaker: it
+    # demonstrates the property at a ttc the harness actually scores.
     detections = [100.5]  # 0.5s after bag_start=100 -> loose passes trivially
     assert is_in_window_loose(detections, bag_start=100.0, window_s=4.0) is True
     assert is_in_window_strict(
-        detections, bag_start=100.0, time_to_closest_s=8.0, window_s=4.0
+        detections, bag_start=100.0, time_to_closest_s=1.5, window_s=4.0
     ) is False
 
 
@@ -752,6 +858,53 @@ def test_monte_carlo_harness_reproduces_the_published_5c_noise_rate():
     p = null_attribution_mc.p_fires(
         null_attribution_mc.fires_rate_rule, n=15, trials=20_000)
     assert p == pytest.approx(0.36, abs=0.03)
+
+
+def test_the_published_null_figures_still_match_the_measured_n_win():
+    # THE STALENESS GUARD (fix round 2, F2-1). The defect this catches is not
+    # arithmetic — it is that detector.yaml's three null figures were computed
+    # at one n_win vector, the fix round 1 window change moved that vector,
+    # and nothing anywhere noticed. The figures were prose; prose cannot fail.
+    #
+    # Recomputed here from null_attribution_mc.MEASURED_N_WIN, so any future
+    # change to those counts that does not also move the published figures
+    # fails THIS test instead of shipping a stale claim into the yaml.
+    #
+    # Reduced trials (20 000 vs the published 200 000) with tolerances wide
+    # enough for the sampling error and no wider. Seeded, so it does not flake.
+    s = null_attribution_mc.null_summary(trials=20_000)
+    assert s["rate_min"] == pytest.approx(
+        null_attribution_mc.PUBLISHED_RATE_MIN, abs=0.01)
+    assert s["rate_max"] == pytest.approx(
+        null_attribution_mc.PUBLISHED_RATE_MAX, abs=0.01)
+    assert s["p_none"] == pytest.approx(
+        null_attribution_mc.PUBLISHED_P_NONE, abs=0.015)
+    assert s["expected"] == pytest.approx(
+        null_attribution_mc.PUBLISHED_EXPECTED, abs=0.06)
+
+
+def test_the_null_figures_move_when_the_n_win_vector_does():
+    # The guard above is only worth having if it is sensitive. The PREVIOUS
+    # round's vector — S01 13 not 10, S10 16 not 12 — must produce figures
+    # that visibly fail the published pins, otherwise the staleness it exists
+    # to catch would slip through it too.
+    stale = null_attribution_mc.null_summary(
+        n_win=(13, 3, 8, 11, 5, 4, 3, 7, 4, 16, 4, 5), trials=20_000)
+    assert stale["rate_max"] > null_attribution_mc.PUBLISHED_RATE_MAX + 0.01
+    assert stale["p_none"] < null_attribution_mc.PUBLISHED_P_NONE - 0.015
+    assert stale["expected"] > null_attribution_mc.PUBLISHED_EXPECTED + 0.06
+
+
+def test_the_null_floor_sits_at_the_smallest_in_window_count():
+    # The interval detector.yaml used to ship opened at 0.10, which was never
+    # right at either vector. The floor is set by the SMALLEST n_win in the
+    # library — n = 3, S02 and S07 — and is a third of what was published.
+    assert min(null_attribution_mc.MEASURED_N_WIN) == 3
+    p3 = null_attribution_mc.p_fires(
+        null_attribution_mc.fires_rate_rule, n=3, trials=20_000)
+    assert p3 == pytest.approx(null_attribution_mc.PUBLISHED_RATE_MIN,
+                               abs=0.01)
+    assert p3 < 0.10
 
 
 def test_sign_only_run_at_airframe_speed_never_becomes_attributable():

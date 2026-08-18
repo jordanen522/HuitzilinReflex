@@ -326,6 +326,36 @@ def strict_window_bounds(
         Task 5b shipped AND of the one Task 5c originally shipped -- recall
         measured under it can only fall or stay equal, never rise.
 
+        RAISES on an inverted window (Task 5c fix round 2, MEDIUM-2). The
+        two edges move in OPPOSITE directions -- the floor reaches FORWARD
+        from the event, the clamped late edge reaches BACK from ground
+        impact -- so the pair can cross and leave an empty interval. The old
+        (pre-clamp) rule could never do that: its upper edge hung off the
+        same event_t the floor did. An empty window admits no detection, so
+        the positive would have scored FN with no error raised anywhere.
+
+        The exact condition is
+
+            min(ttc, fall_time_s) + min(window_s, post_event_s)
+                < max(ttc - window_s, 0)
+
+        which is a SURFACE, not a single crossover -- two independent routes
+        reach it, and fix round 2 found the second one by running the guard
+        rather than by reading the algebra:
+
+          - small window_s: below (ttc - min(ttc, fall_time_s)) / 2. At
+            ttc = 1.5 s that is 0.4307 s, and window_s = 0.25 s gives
+            lower = spawn+4.250, upper = spawn+3.889, width -0.361 s.
+          - large ttc: above fall_time_s + post_event_s + window_s, once
+            min(window_s, post_event_s) has saturated at post_event_s. At
+            the shipped window_s = 4.0 that is ttc > 6.639 s.
+
+        The shipped library reaches neither: capture_scenario.sh:82 writes
+        detection_window_s: 4.0 into every sidecar and scenario_matrix.yaml's
+        largest time_to_closest_s is 1.5 s. Both routes become reachable for
+        a future capture -- the first via a tighter sidecar, which is exactly
+        the eventuality the retained min(window_s, ...) exists for.
+
     event_t = bag_start + spawn_lead_s + time_to_closest_s is UNCHANGED and
     deliberately so: it was independently verified across every historical
     revision of capture_scenario.sh, and breaking a correct anchor while
@@ -352,6 +382,28 @@ def strict_window_bounds(
     )
     lower = max(event_t - window_s, spawn_t)
     upper = spawn_t + last_airborne_s + min(window_s, post_event_s)
+    if upper < lower:
+        raise ValueError(
+            "strict detection window is INVERTED "
+            f"(lower={lower - bag_start:+.4f}s upper={upper - bag_start:+.4f}s "
+            f"relative to bag_start, width={upper - lower:+.4f}s) for "
+            f"time_to_closest_s={time_to_closest_s} window_s={window_s} "
+            f"post_event_s={post_event_s} fall_time_s={fall_time_s}. "
+            "An inverted window admits nothing, so the positive would score "
+            "FN with no error at all — the exact silent failure this gate "
+            "exists to prevent. The condition is "
+            "min(ttc, fall_time_s) + min(window_s, post_event_s) "
+            "< max(ttc - window_s, 0): the floor reaching FORWARD from the "
+            "event overtakes the late edge reaching BACK from ground "
+            "impact. Two routes reach it — a small window_s (below "
+            "(ttc - min(ttc, fall_time_s)) / 2, i.e. ~0.43 s at ttc = 1.5 s) "
+            "or a large ttc (above fall_time_s + post_event_s + window_s, "
+            "i.e. ~6.6 s at the shipped window_s = 4.0). The shipped library "
+            "reaches neither: every sidecar carries detection_window_s: 4.0 "
+            "and scenario_matrix.yaml's largest time_to_closest_s is 1.5 s. "
+            "Fix the sidecar, or widen window_s; do NOT paper over this by "
+            "clamping the edges together."
+        )
     return lower, upper
 
 
