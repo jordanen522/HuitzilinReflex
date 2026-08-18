@@ -277,15 +277,38 @@ detector:
     #    INERT AND UNDERPOWERED at these n, which is a weaker and different
     #    statement from "wrong". Both are true; do not quote one as the
     #    other.
-    #  - "0 of 12 positives is below the noise floor" is fair: the null
-    #    model puts the per-scenario spurious-attribution rate at 0.10-0.36
-    #    over the measured in-window counts. But P(0 of 12 | null) ~= 0.12,
-    #    so an earlier claim here that "there is no closing-ball signal in
-    #    the in-window centroid stream at all" is NOT supported and has
-    #    been removed. The error was conservative -- it under-claimed the
-    #    detector -- but it was still an error.
-    #    The null model behind those numbers ships and is re-runnable:
-    #    src/huitzilin_perception/test/null_attribution_mc.py.
+    #  - "0 of 12 positives is below the noise floor" is fair, but only
+    #    barely, and the figures below are the ones that say so. The null
+    #    model puts the per-scenario spurious-attribution rate at
+    #    0.038-0.291, P(0 of 12 | null) = 0.160, and the null EXPECTATION
+    #    at 1.64 attributions. So an earlier claim here that "there is no
+    #    closing-ball signal in the in-window centroid stream at all" is
+    #    NOT supported and has been removed: a null that produces 0/12 one
+    #    time in six is not a floor anything is decisively below.
+    #
+    #    ^ COMPUTED FROM THIS n_win VECTOR, AND ONLY VALID AT IT:
+    #      S01=10 S02=3 S03=8 S04=11 S05=5 S06=4
+    #      S07=3  S08=7 S09=4 S10=12 S11=4 S12=5
+    #    (the measured in-window counts, corrected-window run 2026-08-17).
+    #    IF THOSE COUNTS CHANGE, ALL THREE FIGURES ABOVE ARE STALE. That is
+    #    not hypothetical: the previous version of this block shipped
+    #    "0.10-0.36 / P ~= 0.12", interpolated at the PREVIOUS window's
+    #    counts (S01=13, S10=16) and never recomputed when the fix round 1
+    #    window change moved them. Recomputed exactly, that older vector
+    #    gives 0.038-0.383 / P = 0.126 / E = 1.81 -- so the shipped floor
+    #    of 0.10 was wrong at BOTH vectors. The true floor is set by the
+    #    smallest count, n = 3 (S02 and S07), not by an eyeballed interval.
+    #    Every error here was conservative -- it under-claimed the detector
+    #    and over-claimed how decisive 0/12 is -- and they were still errors.
+    #
+    #    The null model behind those numbers ships, is re-runnable, and now
+    #    prints the vector beside the figures:
+    #      PYTHONPATH=src/huitzilin_perception \
+    #        python3 src/huitzilin_perception/test/null_attribution_mc.py
+    #    The vector and the three figures are pinned against each other by
+    #    test_the_published_null_figures_still_match_the_measured_n_win, so
+    #    a future window change that moves the counts now fails a test
+    #    instead of silently invalidating this block again.
     #
     # Mechanism, so the next attempt does not repeat it: successive
     # /threat/centroid messages in this library are not one object tracked
@@ -314,6 +337,26 @@ detector:
     # (1.95/s) is about 2x the negatives' median (1.00/s) -- weak, not
     # significant at n = 5 negatives, and NOT promotable to a detection
     # claim. It needs more ball-free bags, not another discriminator.
+    #
+    # AND THAT "2x" IS FRAGILE ENOUGH THAT IT SHOULD NOT BE QUOTED WITHOUT
+    # THIS PARAGRAPH. The five negative densities are {0, 0, 1, 1, 4}/s.
+    # The median of five values, three of which are 0 or 1, is decided by
+    # ONE detection in ONE bag: N03 carried 1 in-window detection in the
+    # previous run and 2 in this one, which alone moved the negatives'
+    # median 0.50 -> 1.00 and the ratio 3.8x -> 1.95x. Revert that single
+    # detection and the ratio returns to ~3.9x. At n = 5 the lead is
+    # noise-dominated; the honest statement is neither "4x" nor "2x" but
+    # "a single false positive in a single bag moves it by a factor of two".
+    #
+    # A CAUSAL NOTE, because the first two attempts at this got it wrong:
+    # the shrinkage is NOT the window tightening removing more from the
+    # positives. The positives' median density did not fall at all --
+    # 1.909 -> 1.947/s, it rose slightly. And the negatives' windows are
+    # byte-identical under both rules by construction: every negative
+    # carries time_to_closest_s: 0, so min(0, fall_time) = 0 and their
+    # window is [spawn, spawn+2.0] before and after. The window fix could
+    # not have touched them. The entire change is the run-to-run false
+    # positive drift documented above (N02 35->36, N03 54->56, N05 21->22).
     #
     # Refinement worth carrying into the re-measurement: the driver is
     # most likely a COLD map at every replay start, not steady sweeping.
