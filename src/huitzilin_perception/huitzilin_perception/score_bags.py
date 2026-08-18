@@ -362,6 +362,48 @@ class ScorerNode(Node):
                 f"{TOPIC_DISCOVERY_RETRIES} attempts{detail}: {e}"
             ) from e
 
+    def _unusable_window_row(
+        self, sid: str, label: str, detected: bool,
+        window_s, time_to_closest_s, exc: Exception,
+    ) -> dict:
+        """
+        Turn a refused detection window into a per-bag error row.
+
+        Task 5c fix round 3, MEDIUM-1. strict_window_bounds() raises on an
+        inverted window (fix round 2) and that raise is CORRECT and stays:
+        an inverted window admits nothing, so scoring under it would post a
+        silent FN — the exact failure the gate exists to prevent. What was
+        wrong was the blast radius. The raise reached run()'s scenario loop
+        unguarded, so ONE broken sidecar aborted the entire run: _report()
+        was never reached, so no artifact was written even for the bags
+        already scored, and every later bag went unreplayed.
+
+        A refused window is the same kind of thing as the three conditions
+        already guarded in _score_one — a broken input, discovered per bag,
+        at scoring time. So it gets the same treatment: error=True, which
+        _report() partitions out of TP/FN/TN/FP and out of recall before it
+        computes anything, and which forces a FAIL verdict naming this
+        scenario. It must NOT enter the confusion matrix (counting a harness
+        error as a detection result is what once put "FP rate 25%" on a run
+        with zero actual false positives).
+
+        The note is deliberately compact — it lands in a fixed-width table
+        row AND in the verdict line — so the exception's full text (which
+        names both inversion routes and the arithmetic) goes to the log
+        instead. The two numbers a reader needs to act are in the row.
+        """
+        self.get_logger().error(f"    {sid} strict window refused: {exc}")
+        return {
+            "id": sid, "label": label, "detected": detected,
+            "pass": False, "error": True,
+            "note": (
+                f"STRICT WINDOW REFUSED — detection_window_s={window_s} "
+                f"time_to_closest_s={time_to_closest_s} give an empty "
+                f"window; fix the sidecar or widen the window (full "
+                f"condition in the node log)"
+            ),
+        }
+
     def _score_one(self, scen: dict) -> dict:
         sid = scen["id"]
         label = scen["label"]
@@ -451,16 +493,23 @@ class ScorerNode(Node):
                 post_event_s=POST_EVENT_TOLERANCE_S,
                 fall_time_s=fall_time_s,
             )
-            lower, upper = strict_window_bounds(
-                bag_start, time_to_closest_s, window_s, **window_kwargs
-            )
-            # Call the tested predicate rather than re-inlining it (fix
-            # round 1, LOW-3): the comparison that decides pass/fail is the
-            # one that must carry the regression tests.
-            in_window_strict = is_in_window_strict(
-                detections, bag_start, time_to_closest_s, window_s,
-                **window_kwargs
-            )
+            try:
+                lower, upper = strict_window_bounds(
+                    bag_start, time_to_closest_s, window_s, **window_kwargs
+                )
+                # Call the tested predicate rather than re-inlining it (fix
+                # round 1, LOW-3): the comparison that decides pass/fail is
+                # the one that must carry the regression tests.
+                in_window_strict = is_in_window_strict(
+                    detections, bag_start, time_to_closest_s, window_s,
+                    **window_kwargs
+                )
+            except ValueError as e:
+                # NARROW on purpose: only the two calls that can refuse a
+                # window are inside the try. See _unusable_window_row.
+                return self._unusable_window_row(
+                    sid, label, detected, window_s, time_to_closest_s, e
+                )
             # Both superseded gates, computed for the artifact only so the
             # CRITICAL-1 change is visible per scenario rather than only in
             # aggregate: `sym` is Task 5b's symmetric unfloored gate, `loose`
@@ -560,12 +609,25 @@ class ScorerNode(Node):
             #   ctl_all  — EVERY detection in the whole replay. This is the
             #              decisive one: if the rule attributes a ball
             #              anywhere in a ball-free bag, it is refuted.
-            ctl_lower, ctl_upper = strict_window_bounds(
-                bag_start, float(sidecar.get("time_to_closest_s") or 0.0),
-                window_s, spawn_lead_s=SPAWN_LEAD_S,
-                post_event_s=POST_EVENT_TOLERANCE_S,
-                fall_time_s=fall_time_s,
-            )
+            ctl_ttc = float(sidecar.get("time_to_closest_s") or 0.0)
+            try:
+                ctl_lower, ctl_upper = strict_window_bounds(
+                    bag_start, ctl_ttc,
+                    window_s, spawn_lead_s=SPAWN_LEAD_S,
+                    post_event_s=POST_EVENT_TOLERANCE_S,
+                    fall_time_s=fall_time_s,
+                )
+            except ValueError as e:
+                # Guarded too, though it needs a worse sidecar to reach: at
+                # the ttc = 0.0 every negative carries, the window inverts
+                # only for a NEGATIVE detection_window_s (lower = spawn +
+                # |window_s|, upper = spawn + window_s). Nothing validates
+                # that field, so the route is real, and an unguarded raise
+                # here would take the whole run down exactly as the positive
+                # one did.
+                return self._unusable_window_row(
+                    sid, label, detected, window_s, ctl_ttc, e
+                )
             ctl_win_ranges = [
                 (t, r) for (t, r) in all_ranges if ctl_lower <= t <= ctl_upper
             ]
@@ -814,7 +876,14 @@ class ScorerNode(Node):
 
         try:
             self._out_file.parent.mkdir(parents=True, exist_ok=True)
-            self._out_file.write_text(report)
+            # encoding pinned (Task 5c fix round 3): the report ALWAYS
+            # contains box-drawing characters and em-dashes, so write_text's
+            # locale default silently truncates the artifact to zero bytes
+            # under any non-UTF-8 locale (Windows cp1252, or a container
+            # with LANG=C) — the file is opened and truncated before the
+            # encode fails, and the only trace is a warn. Same class of
+            # defect as the guard above: the artifact must survive.
+            self._out_file.write_text(report, encoding="utf-8")
             self.get_logger().info(f"Report written → {self._out_file}")
         except Exception as e:
             self.get_logger().warn(f"Could not write report: {e}")
