@@ -4,11 +4,14 @@ Runs without ROS (numpy + scipy only), so it works on any dev box:
 
     python3 -m pytest src/huitzilin_perception/test/test_depth_noise.py
 
-WHY THIS FILE EXISTS. A Gazebo depth camera returns EXACT geometric depth. A
-real stereo pair does not. Scoring a rendered lane without a noise stage would
-make the simulated sensor strictly better than the part it stands for, and
-every save rate taken through it would be an overstatement. These tests pin the
-noise stage hard enough that it cannot quietly degrade into "no noise".
+WHY THIS FILE EXISTS. A Gazebo depth camera reports very nearly exact
+geometry: `iris_depth` declares a 1 cm per-pixel gaussian, and the optics probe
+world declared none at all. Either way the error is ~30x too small at 26 m --
+where the real figure is 0.30 m -- and independent per pixel where the real one
+is correlated. Scoring a rendered lane on that would make the simulated sensor
+strictly better than the part it stands for, and every save rate taken through
+it would be an overstatement. These tests pin the noise stage hard enough that
+it cannot quietly degrade into "no noise".
 
 The load-bearing property is the one in `test_small_patch_moves_coherently`:
 the ball must receive a near-COMMON-MODE error, so the error lands on its

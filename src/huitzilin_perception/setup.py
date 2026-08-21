@@ -30,6 +30,7 @@ setup(
     entry_points={
         "console_scripts": [
             "detector = huitzilin_perception.detector_node:main",
+            "depth_noise = huitzilin_perception.depth_noise_node:main",
             "oracle_detector = huitzilin_perception.oracle_detector_node:main",
             "synthetic_depth_publisher = "
             "huitzilin_perception.synthetic_depth_publisher_node:main",

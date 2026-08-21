@@ -101,11 +101,15 @@ RTF 0.926, which keeps battery throughput close to the current lane.
 
 - **It is static.** Stationary camera, stationary ball, no flight dynamics, no
   motion blur, no attitude change during the throw. It measures optics only.
-- **It is noise-free.** A Gazebo depth camera returns exact geometric depth. A
-  real stereo pair does not: `synthetic_depth.py` models σ = 0.30 m at 26 m,
-  growing as z², and *common-mode* across the ball, so the error lands on the
-  centroid. A rendered lane without that noise is **better than the real
-  sensor** and must not be scored as if it were the real one.
+- **It is noise-free.** The probe world declares no sensor noise at all, which
+  is correct for a *reach* probe — the question was whether the geometry
+  resolves — but it means these counts are an upper bound. The shipped
+  `iris_depth` is barely different: a 1 cm per-pixel gaussian, ~30× too small at
+  26 m and independent where the real error is correlated. A real stereo pair
+  has σ = 0.30 m at 26 m, growing as z² and *common-mode* across the ball, so
+  the error lands on the centroid. A rendered lane without that is **better
+  than the real sensor** and must not be scored as if it were the real one.
+  `depth_noise.py` and `iris_ar0234` were built to close exactly this gap.
 - **It says nothing about detection, tracking, or dodging** — only that enough
   points exist for clustering to be possible.
 - **It is not evidence about the physical part.** That a simulated 27.0° camera
