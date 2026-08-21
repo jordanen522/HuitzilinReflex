@@ -46,6 +46,7 @@ class BallNoiseProbe(Node):
         self._target = frames
         self._ranges: list[float] = []
         self._counts: list[int] = []
+        self._centroids: list[np.ndarray] = []
         qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             history=QoSHistoryPolicy.KEEP_LAST,
@@ -65,6 +66,7 @@ class BallNoiseProbe(Node):
             return
         centroid = finite.mean(axis=0)
         self._ranges.append(float(np.linalg.norm(centroid)))
+        self._centroids.append(centroid)
         self._counts.append(int(finite.shape[0]))
 
     @property
@@ -83,6 +85,13 @@ class BallNoiseProbe(Node):
         print(f"centroid range mean {r.mean():.4f} m")
         print(f"centroid range std  {r.std(ddof=1):.4f} m")
         print(f"centroid range p2p  {r.max() - r.min():.4f} m")
+        # Per-axis, because WHICH axis carries the range decides whether the
+        # noise stage is even looking at the right number. Gazebo's
+        # PointCloudPacked stays in the sensor BODY frame (X-forward, Y-left,
+        # Z-up); an optical-frame assumption (Z-forward) would read a boresight
+        # ball's depth as ~0 and scale it by nothing.
+        m = self._centroids[-1]
+        print(f"last centroid xyz   {m[0]:+.4f} {m[1]:+.4f} {m[2]:+.4f}")
         return 0
 
 
