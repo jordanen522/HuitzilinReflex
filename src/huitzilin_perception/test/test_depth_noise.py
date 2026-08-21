@@ -38,6 +38,7 @@ import pytest
 from huitzilin_perception.depth_noise import (
     BALL_PATCH_P2P_SIGMAS,
     DEFAULT_CORRELATION_PX,
+    DEPTH_AXIS_BY_CONVENTION,
     apply_image_depth_noise,
     correlated_unit_field,
     required_cluster_max_extent_m,
@@ -381,6 +382,76 @@ def test_required_gate_admits_the_ball_it_was_derived_for():
     # ...and it must not balloon the gate at short range, where a loose gate
     # would start admitting background clutter the 0.35 m value keeps out.
     assert required_cluster_max_extent_m(5.0) < _CLUSTER_MAX_EXTENT_M
+
+
+# ── which column is depth ────────────────────────────────────────────────────
+
+def _gz_flu_ball_cloud(height, width, depth_m, span=_BALL_SPAN_PX,
+                       fov_deg=27.0):
+    """A REAL rendered cloud's shape: no-returns everywhere, a small boresight
+    ball, all in Gazebo's sensor body frame (X-forward, Y-left, Z-up).
+
+    The probe's actual cloud was 24 finite returns out of 520000, which is what
+    makes the wrong-axis bug invisible: near boresight the body-frame Z is
+    ~0, so `sigma(z)` collapses and the returns barely move. A full-frame wall
+    does NOT reproduce this -- away from the centre row its body-frame Z is
+    metres, and the bug does not show.
+    """
+    optical = _flat_wall(height, width, depth_m, fov_deg)
+    body = np.stack([optical[..., 2], -optical[..., 0], -optical[..., 1]],
+                    axis=-1)
+    cloud = np.full((height, width, 3), np.inf)
+    r0, c0 = (height - span) // 2, (width - span) // 2
+    cloud[r0:r0 + span, c0:c0 + span] = body[r0:r0 + span, c0:c0 + span]
+    return cloud
+
+
+def _centroid_depth_sigma(cloud, axis, draws=300, seed=41):
+    rng = np.random.default_rng(seed)
+    out = []
+    for _ in range(draws):
+        noised = apply_image_depth_noise(cloud, rng, depth_axis=axis)
+        finite = noised[np.isfinite(noised).all(axis=-1)]
+        out.append(float(np.linalg.norm(finite.mean(axis=0))))
+    return float(np.std(out))
+
+
+def test_gz_flu_clouds_need_depth_axis_zero():
+    """THE REGRESSION TEST. This bug shipped and no unit test above could see it.
+
+    Gazebo's PointCloudPacked stays in the sensor body frame, where depth is X.
+    Run with the optical default, a boresight ball's body-frame Z is ~0, so
+    sigma(z) collapses to nothing and the returns barely move: the cloud comes
+    back all but unchanged and the lane publishes a NOISELESS sensor.
+    `run_noise_probe.sh` measured exactly that -- centroid range std 0.0000 m
+    at sigma_ref_m 0.30, centroid at (+25.98, -0.00, +0.00), p2p 0.0002 m.
+
+    Every test above passed throughout, because they all build their clouds
+    with the same z-is-depth assumption the code had.
+    """
+    z = 26.0
+    cloud = _gz_flu_ball_cloud(64, 64, z)
+    expected = float(depth_sigma_m(z))
+
+    wrong = _centroid_depth_sigma(cloud, axis=2)
+    assert wrong < 0.01 * expected, (
+        f"reading depth off the wrong axis must collapse the noise to "
+        f"nothing; got {wrong:.5f} m against sigma {expected:.3f} m")
+
+    right = _centroid_depth_sigma(cloud, axis=0)
+    assert right == pytest.approx(expected, rel=0.25), (
+        f"depth_axis=0 must deliver the calibrated sigma; got {right:.4f} m")
+
+
+def test_the_convention_map_matches_the_detector_vocabulary():
+    """Same two names `detector.yaml` already uses, so there is one concept."""
+    assert DEPTH_AXIS_BY_CONVENTION == {"gz_flu": 0, "optical": 2}
+
+
+def test_a_bad_depth_axis_is_refused():
+    with pytest.raises(ValueError, match="depth_axis"):
+        apply_image_depth_noise(
+            _flat_wall(8, 8, 5.0), np.random.default_rng(0), depth_axis=3)
 
 
 # ── no-return pixels ─────────────────────────────────────────────────────────

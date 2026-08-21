@@ -4,10 +4,12 @@ WHAT THIS IS FOR. `scripts/optics_probe` established that a rendered Gazebo
 depth camera at the proposed AR0234 optics resolves the 80 mm ball at 26 m
 (24 returns at 800x650 / 27.0 deg, against `cluster_min_points: 5`). That
 unblocks a lane whose GEOMETRY is genuinely rendered rather than fabricated by
-`synthetic_depth.py`. But a rendered depth camera returns EXACT geometric
-depth, and a real stereo pair does not. Scoring the rendered lane as it comes
-out of Gazebo would make the simulated sensor strictly better than the $89 part
-it stands for, and every save rate taken through it would be an overstatement.
+`synthetic_depth.py`. But a rendered depth camera reports very nearly exact
+geometry -- `iris_depth` declares a 1 cm per-pixel gaussian, the probe world
+none at all -- where a real stereo pair is off by 0.30 m at 26 m, and
+correlated rather than independent. Scoring the rendered lane as it comes out
+of Gazebo would make the simulated sensor strictly better than the $89 part it
+stands for, and every save rate taken through it would be an overstatement.
 
 This module supplies the missing error, so the pipeline is:
 
@@ -42,11 +44,14 @@ makes the ball hold together better, so it cannot be tuned toward whatever
 score is wanted. It is set from the matcher's support window and stated as a
 modelling assumption, with that sensitivity on the record.
 
-What IS robust is the quantity the tca law actually consumes: the CENTROID
-error carries the full sigma(z) at every correlation length, because smoothing
-moves error between the within-patch and common-mode parts without creating or
-destroying any. So the tracker sees the same measurement noise regardless, and
-only the cluster's apparent size depends on `correlation_px`.
+What IS stable is the quantity the tca law actually consumes, PROVIDED the
+correlation length covers the ball: once one cell spans its ~5 px the patch
+shares a single disparity solution and its CENTROID carries the full sigma(z),
+unchanged from 5 px to 20 px. Below that it is not stable at all -- in the
+white-noise limit the ball's returns average down as 1/sqrt(N) and the centroid
+looks ~5x MORE accurate than the sensor is specified at, which is why the
+independent limit is not the conservative choice it appears to be. Both are
+pinned in `test_depth_noise.py`.
 
 The sigma law itself is NOT re-derived here: `depth_sigma_m` is imported from
 `synthetic_depth`, so both lanes are calibrated to the same measured 0.30 m at
@@ -75,6 +80,7 @@ from huitzilin_perception.synthetic_depth import (
 
 __all__ = [
     "BALL_PATCH_P2P_SIGMAS",
+    "DEPTH_AXIS_BY_CONVENTION",
     "DEFAULT_BALL_EXTENT_M",
     "DEFAULT_CORRELATION_PX",
     "apply_image_depth_noise",
@@ -188,19 +194,38 @@ def correlated_unit_field(height: int,
         float(correlation_px), int(height), int(width))
 
 
+# Which column of an (H, W, 3) cloud holds depth, by the same vocabulary
+# `detector.yaml` already uses for `cloud_convention`. Gazebo's
+# PointCloudPacked stays in the sensor BODY frame, so the optical axis is X;
+# a real OAK-D via DepthAI delivers Z-forward optical points.
+DEPTH_AXIS_BY_CONVENTION = {"gz_flu": 0, "optical": 2}
+
+
 def apply_image_depth_noise(points_hw3,
                             rng_gen: np.random.Generator,
                             *,
                             sigma_ref_m: float = DEFAULT_DEPTH_SIGMA_M,
                             ref_range_m: float = DEFAULT_DEPTH_SIGMA_REF_RANGE_M,
                             correlation_px: float = DEFAULT_CORRELATION_PX,
+                            depth_axis: int = 2,
                             ) -> np.ndarray:
     """Perturb an ORGANIZED (H, W, 3) camera-frame cloud. Returns a new array.
 
-    The perturbation is a DISPARITY error: depth z moves by dz, and x and y
-    follow proportionally, because x = z*(u-cx)/f. The point therefore slides
-    along its own ray and its bearing is untouched -- a stereo pair is wrong
-    about range, not about direction.
+    The perturbation is a DISPARITY error: depth moves by dz, and the other two
+    axes follow proportionally, because x = z*(u-cx)/f. The point therefore
+    slides along its own ray and its bearing is untouched -- a stereo pair is
+    wrong about range, not about direction.
+
+    `depth_axis` SAYS WHICH COLUMN IS DEPTH, and getting it wrong is silent.
+    The default 2 is the optical convention (Z-forward). Gazebo's
+    PointCloudPacked is NOT that: it stays in the sensor body frame (X-forward,
+    Y-left, Z-up), where depth is column 0 -- `detector.yaml` handles the same
+    thing with `cloud_convention: "gz_flu"`. Pointed at the wrong column, a
+    boresight ball reads a depth of ~0, every return is skipped as unusable,
+    and the cloud is republished untouched: a sensor with no error at all,
+    reported as a clean run. That happened, and `run_noise_probe.sh` is what
+    caught it -- no unit test on a synthetic array could, because the array
+    was built with the same assumption as the code.
 
     Non-finite returns (a depth camera reports "no return" as NaN or as +/-inf,
     and both occur) are passed through EXACTLY. Turning one into a number would
@@ -221,10 +246,12 @@ def apply_image_depth_noise(points_hw3,
     if sigma_ref_m <= 0.0:
         return pts.copy()
 
+    if depth_axis not in (0, 1, 2):
+        raise ValueError("depth_axis must be 0, 1 or 2, got %r" % (depth_axis,))
     height, width, _ = pts.shape
     field = correlated_unit_field(height, width, rng_gen, correlation_px)
 
-    depth = pts[:, :, 2]
+    depth = pts[:, :, depth_axis]
     # A point is usable only if all three coordinates are finite AND it has a
     # depth to scale: z == 0 has no ray, and dividing by it would manufacture
     # an infinity out of a legitimate return.

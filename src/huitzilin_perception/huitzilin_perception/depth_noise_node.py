@@ -54,6 +54,7 @@ from sensor_msgs_py import point_cloud2 as pc2
 
 from huitzilin_perception.depth_noise import (
     DEFAULT_CORRELATION_PX,
+    DEPTH_AXIS_BY_CONVENTION,
     apply_image_depth_noise,
     required_cluster_max_extent_m,
 )
@@ -89,11 +90,21 @@ class DepthNoiseNode(Node):
         self.declare_parameter("ref_range_m", DEFAULT_DEPTH_SIGMA_REF_RANGE_M)
         self.declare_parameter("correlation_px", DEFAULT_CORRELATION_PX)
         self.declare_parameter("seed", 0)
+        # Same vocabulary as detector.yaml. Gazebo's PointCloudPacked stays in
+        # the sensor BODY frame, so gz_flu -- not optical -- is the sim default.
+        self.declare_parameter("cloud_convention", "gz_flu")
 
         self._sigma_ref_m = float(self._p("sigma_ref_m"))
         self._ref_range_m = float(self._p("ref_range_m"))
         self._correlation_px = float(self._p("correlation_px"))
         self._rng = np.random.default_rng(int(self._p("seed")))
+        convention = str(self._p("cloud_convention"))
+        if convention not in DEPTH_AXIS_BY_CONVENTION:
+            raise ValueError(
+                f"cloud_convention must be one of "
+                f"{sorted(DEPTH_AXIS_BY_CONVENTION)}, got {convention!r}")
+        self._depth_axis = DEPTH_AXIS_BY_CONVENTION[convention]
+        self._convention = convention
 
         # Warn-once latches. A per-frame warning at 23 Hz would bury the log
         # and hide whatever else went wrong in the same run.
@@ -111,7 +122,8 @@ class DepthNoiseNode(Node):
             f"depth_noise: {in_topic} -> {out_topic} | "
             f"sigma_ref={self._sigma_ref_m:.3f} m at {self._ref_range_m:.1f} m, "
             f"correlation={self._correlation_px:.1f} px, "
-            f"seed={int(self._p('seed'))}"
+            f"convention={self._convention} (depth axis "
+            f"{self._depth_axis}), seed={int(self._p('seed'))}"
             + ("  [DISABLED: sigma_ref_m=0, cloud passes through exactly]"
                if self._sigma_ref_m <= 0.0 else ""))
         if self._sigma_ref_m > 0.0:
@@ -145,7 +157,8 @@ class DepthNoiseNode(Node):
             organized, self._rng,
             sigma_ref_m=self._sigma_ref_m,
             ref_range_m=self._ref_range_m,
-            correlation_px=self._correlation_px)
+            correlation_px=self._correlation_px,
+            depth_axis=self._depth_axis)
 
         if not self._logged_shape:
             self._logged_shape = True
@@ -153,9 +166,43 @@ class DepthNoiseNode(Node):
             self.get_logger().info(
                 f"depth_noise: first cloud {width}x{height}, "
                 f"{finite} finite returns of {height * width}")
+            self._check_the_noise_did_something(organized, noised, finite)
 
         self._frames += 1
         self._pub.publish(self._pack(msg, noised))
+
+    def _check_the_noise_did_something(self, before, after, finite) -> None:
+        """Fail loudly if the first cloud came out unchanged.
+
+        Pointed at the wrong depth axis, every return reads a depth of ~0, is
+        skipped as unusable, and the cloud is republished EXACTLY as it
+        arrived -- a sensor with no error at all, reported as a clean run. That
+        is precisely the too-good sensor this node exists to prevent, and it is
+        invisible downstream: the cloud is well formed, the point count is
+        right, and the detector is perfectly happy. It happened once already,
+        with `cloud_convention` defaulted to optical against a gz_flu cloud.
+        """
+        if self._sigma_ref_m <= 0.0:
+            return
+        if finite == 0:
+            self.get_logger().warning(
+                "depth_noise: first cloud carried NO finite returns; cannot "
+                "confirm the noise stage is doing anything yet.")
+            return
+        moved = float(np.nanmax(np.abs(np.nan_to_num(
+            after - before, nan=0.0, posinf=0.0, neginf=0.0))))
+        if moved <= 0.0:
+            self.get_logger().error(
+                f"depth_noise: sigma_ref_m={self._sigma_ref_m} but the cloud "
+                f"came out IDENTICAL. Almost certainly cloud_convention="
+                f"{self._convention!r} is wrong for this cloud: depth is being "
+                f"read from axis {self._depth_axis}, and a boresight target "
+                "there reads a depth of ~0, so every return is skipped. This "
+                "lane is publishing a NOISELESS sensor -- do not score it.")
+        else:
+            self.get_logger().info(
+                f"depth_noise: noise confirmed active, max displacement "
+                f"{moved:.4f} m on the first cloud")
 
     @staticmethod
     def _pack(src: PointCloud2, points_hw3: np.ndarray) -> PointCloud2:
