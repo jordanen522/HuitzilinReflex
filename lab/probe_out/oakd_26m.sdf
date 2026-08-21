@@ -1,0 +1,79 @@
+<?xml version="1.0" ?>
+<!--
+  Optics probe world. Deliberately has NO ground plane: the only geometry in
+  front of the camera is the ball, so every finite point in /probe/points is a
+  ball return and the count needs no spatial filtering to be exact.
+
+  Generated from this template by run_probe.sh. Do not edit the generated copy.
+-->
+<sdf version="1.9">
+  <world name="probe">
+
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>1 1 1 1</diffuse>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Camera under test. Static: this probe measures optics, not flight. -->
+    <model name="probe_cam">
+      <static>true</static>
+      <pose>0 0 2 0 0 0</pose>
+      <link name="camera_link">
+        <sensor name="probe_depth" type="depth_camera">
+          <pose>0 0 0 0 0 0</pose>
+          <always_on>1</always_on>
+          <update_rate>15</update_rate>
+          <camera name="depth">
+            <horizontal_fov>1.174607</horizontal_fov>
+            <image>
+              <width>640</width>
+              <height>480</height>
+              <format>R_FLOAT32</format>
+            </image>
+            <clip>
+              <near>0.2</near>
+              <far>30.0</far>
+            </clip>
+            <optical_frame_id>camera_optical_frame</optical_frame_id>
+          </camera>
+          <topic>/gz/probe/depth</topic>
+          <gz_frame_id>camera_optical_frame</gz_frame_id>
+        </sensor>
+      </link>
+    </model>
+
+    <!-- 80 mm ball (radius 0.040), matching models/projectile, on the axis. -->
+    <model name="ball">
+      <static>true</static>
+      <pose>26.0 0 2 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>0.040</radius></sphere>
+          </geometry>
+          <material>
+            <ambient>1 0.2 0.1 1</ambient>
+            <diffuse>1 0.2 0.1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

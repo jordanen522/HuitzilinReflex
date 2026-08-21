@@ -115,3 +115,51 @@ RTF 0.926, which keeps battery throughput close to the current lane.
 - **It is not evidence about the physical part.** That a simulated 27.0° camera
   at 800×650 resolves the ball at 26 m is not evidence that a $89 AR0234 with a
   10 mm M12 lens detects an 80 mm ball at 26 m in daylight.
+
+---
+
+## Noise-stage validation (2026-08-21)
+
+The probe above answers the *reach* question. It leaves the sensor better than
+the real part, because the rendered cloud carries essentially no depth error.
+`depth_noise_node.py` closes that gap, and this is the measurement that it
+works — end to end, through the bridge, not against a synthetic array.
+
+Rig: `scripts/optics_probe/run_noise_probe.sh`, pinned to the `iris_ar0234`
+optics (800×650, 27.0° HFOV, far 35 m), ball parked at a known range, 120
+frames. Reported quantity is the spread of the ball centroid's **range**.
+
+| Run | Ball | σ_ref | Points/frame | Centroid range mean | **std** |
+|---|---|---|---|---|---|
+| `noise_off_26m` | 26 m | 0.0 | 24 | 25.9784 m | **0.0000 m** |
+| `noise_on_26m` | 26 m | 0.30 | 24 | 25.9724 m | **0.2859 m** |
+| `noise_on_13m` | 13 m | 0.30 | 80 | 12.9714 m | **0.0665 m** |
+
+Three things this establishes:
+
+1. **The noise is applied and lands on the centroid.** 0.2859 m against the
+   0.30 m spec, inside the ~6.5 % standard error of a std from 120 samples.
+2. **The control is a true control.** `sigma_ref_m: 0.0` gives std and
+   peak-to-peak of *exactly* zero — no randomness consumed, so an A/B differs
+   only in the noise and not in the seed.
+3. **The z² law holds in situ.** 0.2859 / 0.0665 = 4.30 against the ideal 4.0.
+   The 13 m arm reads ~11 % below its predicted 0.075 m, in the predicted
+   direction: the ball spans ~10 px there (80 returns) against a 7 px
+   correlation cell, so the centroid partially averages. At 26 m it spans ~5 px
+   and gets a single disparity solution, which is the regime that matters.
+
+### What this cost, and why the probe exists
+
+The first run of this A/B returned **std 0.0000 m on the noised arm** — the
+stage was publishing a noiseless sensor while reporting a clean run. Gazebo's
+`PointCloudPacked` stays in the sensor **body** frame (X-forward), and the node
+read depth from column 2; near boresight the body-frame Z is ~0, so σ(z)
+collapsed and every return moved by ~0.0001 m. The cloud was well formed, the
+point count was right, and the detector would have been perfectly happy.
+
+Every unit test passed throughout, because they all built their clouds with the
+same z-is-depth assumption as the code under test. **No unit test on a
+synthetic array could have caught this.** `depth_noise_node` now selects the
+axis from `cloud_convention` (`detector.yaml`'s existing `gz_flu | optical`
+vocabulary) and logs an ERROR naming the parameter if the first cloud comes
+back unchanged.

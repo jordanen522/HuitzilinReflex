@@ -1,0 +1,10 @@
+config              800x650 @27.0deg far=35.0m rate=30Hz
+ball_x_m            26.0
+sigma_ref_m         0.30   (at ref_range_m 26.0)
+correlation_px      7.0
+frames              120
+points/frame        min 24  median 24  max 24
+centroid range mean 25.9724 m
+centroid range std  0.2859 m
+centroid range p2p  1.4983 m
+last centroid xyz   +25.9764 -0.0000 -0.0000
