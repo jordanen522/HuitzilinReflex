@@ -1,0 +1,5 @@
+frames         12
+points/frame   min=4 median=4 max=4
+delivered_hz   13.89
+rtf            0.998
+raw_counts     [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]

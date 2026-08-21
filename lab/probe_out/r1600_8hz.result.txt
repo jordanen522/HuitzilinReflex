@@ -1,0 +1,5 @@
+frames         20
+points/frame   min=80 median=80 max=80
+delivered_hz   5.43
+rtf            0.682
+raw_counts     [80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80]
