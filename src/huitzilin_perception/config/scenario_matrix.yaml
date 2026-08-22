@@ -909,6 +909,173 @@ scenarios:
     time_to_closest_s: 1.550
     notes: "HOVER. 5.5 deg off-axis, so the ball IS in sector and SHOULD be detected: those detections are MATCHED and are not false positives. What this row measures is whether a real object at a wide miss also generates unmatched clutter. Its dodge-side meaning - trigger discrimination - belongs to the battery, not here."
 
+  # ===== RENDERED-LANE TUNE SET (RT01–RT10, added 2026-08-22) ================
+  # docs/perception_eval.md section 2.2 is explicit: retuning the rendered
+  # detector (params/rendered_detector.yaml) must be validated against "a tune
+  # split captured in the same world, analogous to T01-T14" -- NOT against
+  # T01-T14 itself, which is the OAK-D/week3 world and the wrong sensor
+  # entirely, and NOT against the H-set, which section 2.2 keeps closed until
+  # this retuning work is finished and re-frozen. This split did not exist
+  # when the range-adaptive background-map fix (bg_map_far_leaf_m /
+  # bg_map_range_split_m) was designed; it is added now to satisfy that rule
+  # before the fix can be considered validated, let alone before any fresh
+  # H-set capture.
+  #
+  # Coverage mirrors the H-set's structure (world, camera, hover flight,
+  # compensate_gravity:true for the throw to reach at range) but at every
+  # numeric value DISJOINT from H01-H18/HN01-HN06, so this split is not simply
+  # a relabelling of held-out data -- same discipline S/T and H already
+  # follow. Deliberately smaller than the 18+6 H-set: six positives spanning
+  # near (RT01, under the z=15.0 m crossover the fix targets), the crossover
+  # itself (RT02/RT03, straddling it), and far (RT04-RT06, up to 28.0 m, near
+  # the 28.00 m ROI ceiling) plus four negatives -- two structural
+  # (patrol/hover clean-scene FP floors, which exercise the SAME far-range
+  # terrain the fix touches, since background clutter beyond 15 m is in frame
+  # regardless of where or whether a ball spawns), one receding-ball, one
+  # off-axis-at-range (tests sector rejection is not disturbed by the coarser
+  # far-map leaf). closest_approach_m/time_to_closest_s follow the H-set's own
+  # convention: ttc = offset_forward_m / speed_mps, closest = offset_forward_m
+  # * sin(angle) [+ miss_distance_m where both are given].
+  - id: RT01
+    label: positive
+    description: "10 m/s head-on, 0.00 m miss, 8.0 m standoff - hover (near, under crossover)"
+    speed_mps: 10.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 8.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 0.800
+    notes: "HOVER. Near-range anchor, exercises only the unmodified bg_map_leaf_m=0.10 near map -- this is the fix's near-band no-op path, disjoint from H01/H04/H07's 3.5/6.0/13.0 m standoffs."
+
+  - id: RT02
+    label: positive
+    description: "15 m/s from right +6 deg, 0.00 m miss, 14.5 m standoff - hover (just under crossover)"
+    speed_mps: 15.0
+    approach_angle_deg: 6.0
+    miss_distance_m: 0.00
+    offset_forward_m: 14.5
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 1.515
+    time_to_closest_s: 0.967
+    notes: "HOVER. 14.5 m sits just inside the z=15.0 m crossover -- still the near map, but close enough to probe the boundary from the near side."
+
+  - id: RT03
+    label: positive
+    description: "15 m/s head-on, 0.00 m miss, 15.5 m standoff - hover (just over crossover)"
+    speed_mps: 15.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 15.5
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 1.033
+    notes: "HOVER. 15.5 m sits just past the z=15.0 m crossover -- the first standoff routed to bg_map_far. Directly probes whether the split boundary itself is clean."
+
+  - id: RT04
+    label: positive
+    description: "17 m/s from left -6 deg, 0.00 m miss, 22.0 m standoff - hover (far)"
+    speed_mps: 17.0
+    approach_angle_deg: -6.0
+    miss_distance_m: 0.00
+    offset_forward_m: 22.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 2.299
+    time_to_closest_s: 1.294
+    notes: "HOVER. Far-map regime, disjoint from H10/H11/H12's 20.0 m and H13/H14/H15's 25.0 m standoffs."
+
+  - id: RT05
+    label: positive
+    description: "19 m/s head-on, 0.00 m miss, 28.0 m standoff - hover (far, near ROI ceiling)"
+    speed_mps: 19.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 28.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 1.474
+    notes: "HOVER. 28.0 m is roi_max_range_m's own ceiling (rendered_detector.yaml) -- the longest reach this lane admits at all, disjoint from H16-H18's 31.0 m (which sits past the ROI and is only ever seen inbound)."
+
+  - id: RT06
+    label: positive
+    description: "19 m/s from right +6 deg, 1.50 m miss, 28.0 m standoff - hover (far, oblique wide)"
+    speed_mps: 19.0
+    approach_angle_deg: 6.0
+    miss_distance_m: 1.50
+    offset_forward_m: 28.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 4.425
+    time_to_closest_s: 1.474
+    notes: "HOVER. Far + oblique + wide miss together -- the combination most likely to fragment or miss a cluster if the coarser far-leaf hurts localisation precision."
+
+  - id: RT07
+    label: negative
+    description: "clean straight-leg patrol, no spawn (rendered-lane tune floor)"
+    speed_mps: 0.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 0.0
+    offset_vertical_m: 0.0
+    compensate_gravity: false
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 0.000
+    notes: "PATROL. Tune-split analogue of HN01. Terrain beyond 15 m is in frame regardless of ball spawn, so this exercises the far map's own false-positive behaviour on real background clutter, not just the near map."
+
+  - id: RT08
+    label: negative
+    description: "clean hover, no spawn (rendered-lane tune floor)"
+    speed_mps: 0.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 0.0
+    offset_vertical_m: 0.0
+    compensate_gravity: false
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 0.000
+    notes: "HOVER. Tune-split analogue of HN02 -- the floor under the same flight mode the positives fly, so a false positive here cannot be blamed on patrol egomotion."
+
+  - id: RT09
+    label: negative
+    description: "ball thrown AWAY from the drone - receding, not closing"
+    speed_mps: 12.0
+    approach_angle_deg: 180.0
+    miss_distance_m: 0.00
+    offset_forward_m: 10.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 0.833
+    notes: "HOVER. Tune-split analogue of HN04, disjoint speed/offset (12 m/s / 10.0 m vs HN04's 13 m/s / 13.0 m)."
+
+  - id: RT10
+    label: negative
+    description: "ball passing ~22.3 deg off-axis at range - OUTSIDE the +/-13.5 deg sector"
+    speed_mps: 18.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 11.50
+    offset_forward_m: 28.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 11.500
+    time_to_closest_s: 1.556
+    notes: "HOVER. atan(11.5/28.0) = 22.3 deg, outside the horizontal sector for the whole flight, at the far-map's own range -- tests that sector rejection still holds when the far map is the one running."
+
 # ── SPLITS ────────────────────────────────────────────────────────────────────
 # tune  : T01–T14. The ONLY split detector thresholds may be fitted against.
 #         Added 2026-08-16 for exactly that purpose; no threshold has been
@@ -933,6 +1100,8 @@ split:
   train: [S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, N01, N02, N03, N04]
   test:  [S11, S12, N05]
   tune:  [T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T11, T12, T13, T14]
+  tune_rendered:
+    [RT01, RT02, RT03, RT04, RT05, RT06, RT07, RT08, RT09, RT10]
   heldout:
     [H01, H02, H03, H04, H05, H06, H07, H08, H09, H10, H11, H12, H13,
      H14, H15, H16, H17, H18,
