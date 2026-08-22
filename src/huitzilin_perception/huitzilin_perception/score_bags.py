@@ -293,7 +293,20 @@ class ScorerNode(Node):
         if self._split == "all":
             split_ids = [s["id"] for s in matrix["scenarios"]]
         else:
-            split_ids = matrix.get("split", {}).get(self._split, [])
+            splits = matrix.get("split", {})
+            if self._split not in splits:
+                # A typo scored ZERO scenarios and reported a clean run: the
+                # loop below simply never executed, and the artifact came out
+                # with an empty table and no error anywhere. That is the same
+                # silent-empty failure class as the exclusion-topic bug this
+                # module already guards, and it matters more now that there
+                # is a `heldout` split whose whole value is being scored once.
+                raise ValueError(
+                    f"split {self._split!r} is not in "
+                    f"{self._matrix_f} — known splits are "
+                    f"{sorted(splits)} plus the literal 'all'. Scoring an "
+                    "unknown split would report an empty run as a clean one.")
+            split_ids = splits[self._split]
 
         scenarios = {s["id"]: s for s in matrix["scenarios"]}
         results: list[dict] = []
