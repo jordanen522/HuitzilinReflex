@@ -52,6 +52,18 @@ as it ships (`repeats: 3` × 5 scenarios × 5 batteries = 75, not 78): battery c
 drifted across the five runs. These are measured results — do not "correct" them to match
 the yaml, and do not re-derive the yaml from them.
 
+Reproducibility note: no per-throw raw CSV for this table survives in the tree or in git
+history — only a 20-row reference subset does (`git show 3cf0bbb:lab/results/ref_week4_battery.csv`,
+covering B01–B03 partially, used for regression comparison, not the full 95-throw source data).
+The full per-battery breakdown (78/78, 0/17, 0/12; per-battery on-target 12/15, 13/16, 14/17,
+13/16; latency 15/59 dodges over the 150 ms budget, tail 282 ms) is recorded in prose, not a
+spreadsheet, in `git show 8e7bde3:docs/JOURNAL.md` (2026-07-27 night entry). An auditor can
+verify the *methodology and definition of a trial* from that entry and the still-present
+`week4_battery.yaml` / `week4_evasion.launch.py`, and can reproduce a fresh battery of the same
+kind with `./scripts/run_dodge_battery.sh week4`, but cannot re-derive these exact 95 rows from
+committed data — treat this table as documented-but-not-archived, distinct from the 310-throw
+oracle/hover dataset above, whose raw CSVs do survive in git history.
+
 ## Build & run (WSL or native Ubuntu)
 
 ```bash

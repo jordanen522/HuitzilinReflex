@@ -45,6 +45,8 @@ setup(
             "huitzilin_perception.mono_flash_detector_node:main",
             "spawn_projectile = huitzilin_perception.spawn_projectile:main",
             "score_bags = huitzilin_perception.score_bags:main",
+            "truth_score_heldout = "
+            "huitzilin_perception.truth_score_heldout:main",
             "evasion = huitzilin_perception.evasion_node:main",
             "dodge_battery = huitzilin_perception.dodge_battery:main",
             "gz_pose_bridge = huitzilin_perception.gz_pose_bridge:main",
