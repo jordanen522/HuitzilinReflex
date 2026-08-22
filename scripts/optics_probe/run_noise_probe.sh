@@ -16,6 +16,13 @@
 # reach AND sector AND rate: all three are fixed here on purpose, so the only
 # thing varying between arms is the noise.
 #
+# cloud_reliable is pinned FALSE here and nowhere else. The node now defaults to
+# RELIABLE, because /oak/points at multi-MB loses ~75% of its frames to UDP
+# fragmentation under BEST_EFFORT (params/detector.yaml carries the measurement).
+# This probe was run under BEST_EFFORT before that default changed, so pinning it
+# keeps lab/probe_out reproducible rather than silently re-running a different
+# configuration under the old filenames. The flight lane must NOT copy this line.
+#
 # Source ROS BEFORE running this: `set -u` here would break setup.bash.
 set -euo pipefail
 set -m   # job control, so signals reach the children (see bag_capture_runbook)
@@ -69,7 +76,7 @@ ros2 run huitzilin_perception depth_noise --ros-args \
   -p cloud_out_topic:=/oak/points \
   -p sigma_ref_m:="$SIGMA" \
   -p ref_range_m:=26.0 \
-  -p correlation_px:="$CORR" \
+  -p correlation_px:="$CORR"   -p cloud_reliable:=false \
   > "$OUT/${NAME}.noise.log" 2>&1 &
 NOISE_PID=$!
 sleep 5

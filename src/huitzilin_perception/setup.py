@@ -16,6 +16,13 @@ setup(
         (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
         (os.path.join("share", package_name, "models", "iris_depth"),
          glob("models/iris_depth/*")),
+        # iris_ar0234 is its own entry rather than a models/* glob so that
+        # adding a model directory stays a deliberate act. Omitting it is
+        # SILENT in the worst way: Gazebo logs "Unable to find uri" once and
+        # then starts the world with no drone in it, which reads downstream as
+        # a total detection failure rather than a missing install.
+        (os.path.join("share", package_name, "models", "iris_ar0234"),
+         glob("models/iris_ar0234/*")),
         (os.path.join("share", package_name, "models", "projectile"),
          glob("models/projectile/*")),
         (os.path.join("share", package_name, "worlds"), glob("worlds/*.sdf")),

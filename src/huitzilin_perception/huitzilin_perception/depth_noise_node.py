@@ -70,13 +70,36 @@ _XYZ_FIELDS = [
 ]
 _POINT_STEP = 12
 
-# Depth clouds are a sensor stream: a late frame is worthless, so drop rather
-# than queue. Matches how the detector subscribes to /oak/points.
-_SENSOR_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.BEST_EFFORT,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    depth=1,
-)
+# RELIABLE BY DEFAULT, AND THAT IS A MEASUREMENT, NOT A PREFERENCE.
+# A depth cloud is a sensor stream, so the instinct is BEST_EFFORT with depth 1
+# -- a late frame is worthless, drop rather than queue -- and that is what this
+# node shipped with. It is wrong for THIS topic at THIS size. params/detector.yaml
+# records the measurement that settles it: /oak/points is a 7.37 MB sample and
+# BEST_EFFORT lost ~75 % of it to UDP fragmentation (3.99 Hz delivered against
+# 14.43 Hz reliable on the same topic, with the detector itself down to 1.25 Hz).
+# At that rate a ball is seen once per throw and no dodge can ever trigger, so a
+# BEST_EFFORT default here would fail the fidelity gate for a TRANSPORT reason
+# while reading as a perception limit. The 800x650 cloud this node republishes is
+# ~6.2 MB, the same regime.
+#
+# Both ends must agree: this default is pinned against rendered_detector.yaml's
+# cloud_reliable by test_rendered_lane.py, because a reliability mismatch leaves
+# the subscription unconnected while the topic still lists a publisher.
+#
+# Set cloud_reliable false for a real OAK-D, where DepthAI publishes best-effort
+# -- the same exception detector.yaml carries.
+DEFAULT_CLOUD_RELIABLE = True
+DEFAULT_CLOUD_QUEUE_DEPTH = 5
+
+
+def sensor_qos(reliable: bool, queue_depth: int) -> QoSProfile:
+    """Cloud QoS for both ends of this node. See DEFAULT_CLOUD_RELIABLE."""
+    return QoSProfile(
+        reliability=(QoSReliabilityPolicy.RELIABLE if reliable
+                     else QoSReliabilityPolicy.BEST_EFFORT),
+        history=QoSHistoryPolicy.KEEP_LAST,
+        depth=int(queue_depth),
+    )
 
 
 class DepthNoiseNode(Node):
@@ -93,6 +116,11 @@ class DepthNoiseNode(Node):
         # Same vocabulary as detector.yaml. Gazebo's PointCloudPacked stays in
         # the sensor BODY frame, so gz_flu -- not optical -- is the sim default.
         self.declare_parameter("cloud_convention", "gz_flu")
+        # Same vocabulary as detector.yaml again, and for the same reason: this
+        # node sits between the bridge and the detector, so it has to be able to
+        # speak whatever that pairing needs. See DEFAULT_CLOUD_RELIABLE.
+        self.declare_parameter("cloud_reliable", DEFAULT_CLOUD_RELIABLE)
+        self.declare_parameter("cloud_queue_depth", DEFAULT_CLOUD_QUEUE_DEPTH)
 
         self._sigma_ref_m = float(self._p("sigma_ref_m"))
         self._ref_range_m = float(self._p("ref_range_m"))
@@ -114,16 +142,20 @@ class DepthNoiseNode(Node):
 
         out_topic = str(self._p("cloud_out_topic"))
         in_topic = str(self._p("cloud_in_topic"))
-        self._pub = self.create_publisher(PointCloud2, out_topic, _SENSOR_QOS)
+        reliable = bool(self._p("cloud_reliable"))
+        queue_depth = int(self._p("cloud_queue_depth"))
+        qos = sensor_qos(reliable, queue_depth)
+        self._pub = self.create_publisher(PointCloud2, out_topic, qos)
         self._sub = self.create_subscription(
-            PointCloud2, in_topic, self._on_cloud, _SENSOR_QOS)
+            PointCloud2, in_topic, self._on_cloud, qos)
 
         self.get_logger().info(
             f"depth_noise: {in_topic} -> {out_topic} | "
             f"sigma_ref={self._sigma_ref_m:.3f} m at {self._ref_range_m:.1f} m, "
             f"correlation={self._correlation_px:.1f} px, "
             f"convention={self._convention} (depth axis "
-            f"{self._depth_axis}), seed={int(self._p('seed'))}"
+            f"{self._depth_axis}), seed={int(self._p('seed'))}, "
+            f"qos={'RELIABLE' if reliable else 'BEST_EFFORT'}/{queue_depth}"
             + ("  [DISABLED: sigma_ref_m=0, cloud passes through exactly]"
                if self._sigma_ref_m <= 0.0 else ""))
         if self._sigma_ref_m > 0.0:
