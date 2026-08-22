@@ -130,6 +130,17 @@ class DetectorNode(Node):
         self.declare_parameter("bg_map_leaf_m", 0.10)      # match diff_threshold_m
         self.declare_parameter("bg_map_ttl_s", 20.0)
         self.declare_parameter("bg_map_max_voxels", 400000)
+        # Range-adaptive second map (2026-08-22). bg_map_leaf_m's dilation
+        # tolerance (leaf..leaf*sqrt(3)) is a FIXED metres value, while modelled
+        # stereo depth error grows as range^2 (see depth_sigma_m). Beyond the
+        # range where sigma(z) exceeds that tolerance, a static surface point's
+        # frame-to-frame jitter exceeds the dilation radius and it reads as
+        # foreground every frame -- confirmed live via debug_funnel on
+        # heldout_H16 (up to 176k foreground points, most frames skipped by
+        # fg_max_points). 0.0/0.0 = disabled: falls back to the single map
+        # below, UNCHANGED for every lane that does not opt in explicitly.
+        self.declare_parameter("bg_map_far_leaf_m", 0.0)
+        self.declare_parameter("bg_map_range_split_m", 0.0)
         # Tighter linkage radius used to re-cluster an oversized blob once.
         # Must sit above voxel_leaf_m (below it, a surface shatters into
         # ball-sized fragments — measured) and below the ball's standoff.
@@ -194,6 +205,13 @@ class DetectorNode(Node):
             ttl_s=self._p["bg_map_ttl_s"],
             max_voxels=self._p["bg_map_max_voxels"],
         )
+        self._bg_map_far: Optional[VoxelBackgroundMap] = None
+        if self._p["bg_map_far_leaf_m"] > 0.0 and self._p["bg_map_range_split_m"] > 0.0:
+            self._bg_map_far = VoxelBackgroundMap(
+                leaf_m=self._p["bg_map_far_leaf_m"],
+                ttl_s=self._p["bg_map_ttl_s"],
+                max_voxels=self._p["bg_map_max_voxels"],
+            )
 
         # ── Egomotion compensation state (W3-13) ─────────────────────────────
         # Odom is folded into the tf buffer (odom -> base_link) so clouds can
@@ -314,6 +332,8 @@ class DetectorNode(Node):
             "bg_map_leaf_m":      self.get_parameter("bg_map_leaf_m").value,
             "bg_map_ttl_s":       self.get_parameter("bg_map_ttl_s").value,
             "bg_map_max_voxels":  self.get_parameter("bg_map_max_voxels").value,
+            "bg_map_far_leaf_m":  self.get_parameter("bg_map_far_leaf_m").value,
+            "bg_map_range_split_m": self.get_parameter("bg_map_range_split_m").value,
             "cluster_split_tol_m": self.get_parameter("cluster_split_tol_m").value,
             "cluster_split_max_points": self.get_parameter("cluster_split_max_points").value,
         }
@@ -496,10 +516,17 @@ class DetectorNode(Node):
             # Never mix frames inside one background model.
             self._bg_buffer.clear()
             self._bg_map.clear()
+            if self._bg_map_far is not None:
+                self._bg_map_far.clear()
             self.get_logger().info(
                 f"differencing frame -> {mode} "
                 f"({'odom TF available' if mode == 'fixed' else 'no odom TF — uncompensated'})")
             self._bg_mode = mode
+        # Camera-frame depth (Z-forward), captured before the fixed-frame
+        # transform below — this is what depth_sigma_m(range) is defined
+        # against, and apply_transform re-expresses X/Y/Z into odom so pts[:,2]
+        # stops meaning "range" the instant the transform runs.
+        range_m = pts[:, 2]
         if mode == "fixed":
             with prof.stage("ego_transform"):
                 pts = apply_transform(T_fixed_cam, pts)
@@ -508,14 +535,30 @@ class DetectorNode(Node):
         use_map = bool(self._p["use_persistent_bg"]) and mode == "fixed"
         if use_map:
             stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-            with prof.stage("bg_query"):
-                fg_mask = self._bg_map.foreground(pts)
-            n_bg = len(self._bg_map)
-            # Insert AFTER querying, or the frame is its own background.
-            with prof.stage("bg_insert"):
-                self._bg_map.insert(pts, stamp_s)
-            with prof.stage("bg_prune"):
-                self._bg_map.prune(stamp_s)
+            if self._bg_map_far is not None:
+                far_band = range_m > self._p["bg_map_range_split_m"]
+                near_band = ~far_band
+                with prof.stage("bg_query"):
+                    fg_mask = np.zeros(pts.shape[0], dtype=bool)
+                    fg_mask[near_band] = self._bg_map.foreground(pts[near_band])
+                    fg_mask[far_band] = self._bg_map_far.foreground(pts[far_band])
+                n_bg = len(self._bg_map) + len(self._bg_map_far)
+                # Insert AFTER querying, or the frame is its own background.
+                with prof.stage("bg_insert"):
+                    self._bg_map.insert(pts[near_band], stamp_s)
+                    self._bg_map_far.insert(pts[far_band], stamp_s)
+                with prof.stage("bg_prune"):
+                    self._bg_map.prune(stamp_s)
+                    self._bg_map_far.prune(stamp_s)
+            else:
+                with prof.stage("bg_query"):
+                    fg_mask = self._bg_map.foreground(pts)
+                n_bg = len(self._bg_map)
+                # Insert AFTER querying, or the frame is its own background.
+                with prof.stage("bg_insert"):
+                    self._bg_map.insert(pts, stamp_s)
+                with prof.stage("bg_prune"):
+                    self._bg_map.prune(stamp_s)
             fg_pts = pts[fg_mask]
         else:
             with prof.stage("bg_deque_diff"):

@@ -1,11 +1,15 @@
 # rendered_detector.yaml — detector_node.py on the RENDERED long-range lane:
 # iris_ar0234 depth camera -> ros_gz_bridge -> depth_noise_node -> here.
 #
-# DERIVED FROM params/detector.yaml AT REVISION e44032e. detector_node.py is
-# byte-identical — nothing in this lane modifies the detector. This is a
-# STANDALONE params file, not a partial overlay: it is the node's only
-# --params-file and detector_node's in-code defaults differ from detector.yaml
-# where it matters (min_publish_score 0.3 vs 0.006), so every key must appear.
+# DERIVED FROM params/detector.yaml AT REVISION e44032e. detector_node.py was
+# byte-identical for the other three lanes through 2026-08-21; as of
+# 2026-08-22 it carries the range-adaptive background-map fix below
+# (bg_map_far_leaf_m/bg_map_range_split_m), opt-in and defaulted to 0.0/0.0 —
+# every other lane's behaviour is UNCHANGED unless it sets both explicitly,
+# which only this file does. This is a STANDALONE params file, not a partial
+# overlay: it is the node's only --params-file and detector_node's in-code
+# defaults differ from detector.yaml where it matters (min_publish_score 0.3
+# vs 0.006), so every key must appear.
 #
 # WHAT LANE THIS IS, because the repo now has four and they are never merged:
 #   week4 (baseline)  rendered OAK-D, SDF per-pixel noise, patrol, ~3.4 m
@@ -167,6 +171,29 @@ detector:
     bg_map_ttl_s: 20.0
     bg_map_max_voxels: 400000
     bg_history_frames: 5
+
+    # 2026-08-22 — THE PREDICTION ABOVE CAME TRUE, confirmed live via
+    # debug_funnel on heldout_H16 (fg up to 176,191 points, most frames
+    # skipped). Root cause, traced to the actual live code path (this lane
+    # runs use_persistent_bg:true with a valid odom TF, so it is
+    # VoxelBackgroundMap.foreground()'s voxel-occupancy dilation that gates
+    # foreground here, NOT diff_threshold_m above -- that key is dead on this
+    # configuration): bg_map_leaf_m is a FIXED 0.10 m, giving a fixed
+    # leaf..leaf*sqrt(3) dilation tolerance, while modelled depth error grows
+    # as range^2. Beyond z = 26*sqrt(0.10/0.30) = 15.0 m -- the same crossover
+    # the prediction above derived -- a static point's frame-to-frame jitter
+    # exceeds the dilation radius and it reads as foreground every frame.
+    #
+    # Fix: a second, coarser-leaf map for points beyond the split range
+    # (detector_node.py, bg_map_far_leaf_m/bg_map_range_split_m). 0.45 m gives
+    # a dilation tolerance up to 0.78 m, covering sigma_depth(28.00) = 0.348 m
+    # (the ROI ceiling) with margin, while the near map (bg_map_leaf_m, hence
+    # this lane's near-range behaviour) is untouched. 15.0 m is this file's
+    # own registered flood-onset threshold, not a value chosen after seeing
+    # held-out results. MUST be validated against T01-T14/train/test before
+    # any held-out re-score, per docs/perception_eval.md.
+    bg_map_far_leaf_m: 0.45
+    bg_map_range_split_m: 15.0
 
     # The subject of the registered prediction above. Left at detector.yaml's
     # measured value on purpose: this lane's first run has to fly the
