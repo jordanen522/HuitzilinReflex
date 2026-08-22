@@ -314,3 +314,38 @@ this artifact and at the exact command that produced it.
 
 Steps 2–4 may be revised freely; they are instrumentation, and any revision
 happens before step 5. After step 5, this document is fixed.
+
+---
+
+## Amendments
+
+Added below, never edited into the sections above. All of these are **pre-data**:
+no H-bag has been captured and nothing has been scored.
+
+### A1 — 2026-08-21. What counts as a false positive (amends §3.4)
+
+§3.4 defined a false positive as a centroid "not matched to any truth entity",
+and glossed it as including "the airframe's own standoffs promoted to a threat".
+Those two clauses contradict each other: the airframe **is** a truth entity, so
+the rule as written would have EXCUSED a detector that reported the drone's own
+standoffs as an incoming threat.
+
+Replaced by: a detection is matched iff it matches **the projectile**. Anything
+else on `/threat/centroid` -- terrain, clutter, the airframe, another vehicle --
+is unmatched and counts toward the false-positive statistics.
+
+This is strictly **stricter** than the original wording; it cannot turn a fail
+into a pass. Found while writing the scorer, before any data existed.
+
+### A2 — 2026-08-21. Void conditions extended to the drone track (amends §3.1)
+
+The match radius depends on the detection's range from the camera, which is
+computed as `|| p_detected - p_drone ||` from the drone's own truth transform.
+(The `base_link -> camera_link` offset is a few centimetres against a match
+radius of >= 0.50 m, so it is neglected; this is an approximation in the
+MATCHING TOLERANCE only, never in a reported error.)
+
+A bag with no drone transform therefore cannot be scored at all, and is **void**
+on the same terms as a positive bag with no projectile transform. This is a real
+risk rather than a theoretical one: `gz topic .../dynamic_pose/info` publishes
+MOVING entities, so a sufficiently still airframe can drop out of the stream.

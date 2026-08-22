@@ -103,5 +103,18 @@ fi
 
 echo "[$ID] >>> PRESS Ctrl-C ~8-10 s after the spawn to stop & save the bag. <<<"
 # exec so Ctrl-C goes straight to rosbag2 as an interactive SIGINT (clean flush).
+# /gz/dynamic_poses IS GROUND TRUTH AND IS NOT OPTIONAL.
+# Without it a bag can say THAT a centroid was published and never whether it
+# was OF THE BALL. Every bag captured before this line was added lacks it,
+# which is why none of them can carry the held-out recall claim -- see
+# docs/perception_eval.md section 3.1, which VOIDS any positive bag with no
+# projectile transform in this stream.
+#
+# IT REQUIRES gz_pose_bridge TO BE RUNNING. Nothing else publishes it, and a
+# topic nobody publishes records as zero messages with no error: `ros2 bag
+# record --topics` on an absent topic waits quietly rather than failing, so a
+# whole capture session can complete and be void. Check BEFORE the session:
+#   ros2 topic hz /gz/dynamic_poses
 exec ros2 bag record -s mcap -o "$BAG" \
-  --topics /oak/depth /oak/points /clock /huitzilin/odom /threat/centroid
+  --topics /oak/depth /oak/points /clock /huitzilin/odom /threat/centroid \
+           /gz/dynamic_poses
