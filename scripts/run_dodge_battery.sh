@@ -10,6 +10,8 @@
 #   ./scripts/run_dodge_battery.sh sweep      # parameter sweep
 #   ./scripts/run_dodge_battery.sh week6      # 20 m/s synthetic-oracle battery
 #   ./scripts/run_dodge_battery.sh week6depth # 20 m/s through the REAL detector
+#   ./scripts/run_dodge_battery.sh week7      # 20 m/s through the RENDERED lane
+#   DRONE_MODEL=iris_ar0234 ./scripts/run_dodge_battery.sh week7
 #   EXTRA_ARGS="-p run_window_s:=6.0" ./scripts/run_dodge_battery.sh
 #
 # week6 mode requires week6_oracle.launch.py, NOT week4_evasion: its rows
@@ -42,12 +44,28 @@
 # script. A named mode keeps it explicit, matching the week6 precedent above.
 # Fidelity gate first, then hover:
 #   EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6depth
+# week7 mode requires week7_rendered.launch.py and NEITHER week6 lane: its rows
+# assume /threat/centroid is computed by the real detector from a cloud the
+# renderer actually produced. It is the only lane whose reach is an OUTPUT
+# rather than an input, so there is no detection_range_m to pin here — the
+# sensor is the WORLD FILE, and which world is running is not visible from this
+# script. Quote it with every number. Fidelity gate (G01/G02, baseline world,
+# noise off, patrol) first, then hover:
+#   DRONE_MODEL=iris_ar0234 EXTRA_ARGS="-p hover_mode:=true" \
+#       ./scripts/run_dodge_battery.sh week7
+#
+# DRONE_MODEL exists because huitzilin_runway_ar0234.sdf names its drone entity
+# iris_ar0234 while dodge_battery defaults to iris_depth. It is a named variable
+# rather than something to bury in EXTRA_ARGS so that the one axis which differs
+# between the two week7 arms is visible in the command line. It defaults to
+# iris_depth, which is correct for every other mode in this script and for
+# week7's own fidelity-gate arm.
 set -euo pipefail
 
 MODE="${1:-battery}"
 PKG_SHARE="$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception"
 
-ARGS=(-p use_sim_time:=true)
+ARGS=(-p use_sim_time:=true -p "drone_model:=${DRONE_MODEL:-iris_depth}")
 if [[ "${MODE}" == "sweep" ]]; then
   ARGS+=(-p "sweep_config:=${PKG_SHARE}/config/week4_sweep.yaml"
          -p output_file:=/tmp/week4_sweep.txt
@@ -73,6 +91,18 @@ elif [[ "${MODE}" == "week6depth" ]]; then
          -p det_match_tol_m:=1.5
          -p output_file:=/tmp/week6_depth_battery.txt
          -p csv_file:=/tmp/week6_depth_battery.csv)
+elif [[ "${MODE}" == "week7" ]]; then
+  # det_match_tol_m 1.5 for the same reason as the two week6 modes: it is a
+  # DISTANCE tolerance standing in for a TIME one, a 20 m/s ball moves 1.0 m per
+  # 50 ms of centroid-vs-pose skew, and the shipped 0.75 m would silently leave
+  # first_det_range_m blank at exactly the speed under study. It matters more
+  # here than anywhere else: in this lane first_det_range_m is not a check on a
+  # launched reach, it IS the reach measurement, and a blank column would
+  # discard the headline output. It affects reporting only, never the dodge.
+  ARGS+=(-p "battery_config:=${PKG_SHARE}/config/week7_rendered_battery.yaml"
+         -p det_match_tol_m:=1.5
+         -p output_file:=/tmp/week7_rendered_battery.txt
+         -p csv_file:=/tmp/week7_rendered_battery.csv)
 fi
 # shellcheck disable=SC2206
 ARGS+=(${EXTRA_ARGS:-})

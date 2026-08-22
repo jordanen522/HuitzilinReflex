@@ -1,0 +1,206 @@
+# rendered_detector.yaml — detector_node.py on the RENDERED long-range lane:
+# iris_ar0234 depth camera -> ros_gz_bridge -> depth_noise_node -> here.
+#
+# DERIVED FROM params/detector.yaml AT REVISION e44032e. detector_node.py is
+# byte-identical — nothing in this lane modifies the detector. This is a
+# STANDALONE params file, not a partial overlay: it is the node's only
+# --params-file and detector_node's in-code defaults differ from detector.yaml
+# where it matters (min_publish_score 0.3 vs 0.006), so every key must appear.
+#
+# WHAT LANE THIS IS, because the repo now has four and they are never merged:
+#   week4 (baseline)  rendered OAK-D, SDF per-pixel noise, patrol, ~3.4 m
+#   week6_oracle      /threat/centroid asserted from Gazebo truth
+#   week6_synthetic   fabricated ball-only cloud -> real detector
+#   THIS ONE          rendered geometry -> modelled stereo error -> real
+#                     detector. No asserted centroid and no fabricated cloud:
+#                     every return is something the renderer actually saw.
+#
+# EVERY KEY CHANGED FROM detector.yaml, AND WHY — there are exactly two:
+#
+#   roi_max_range_m   5.00 -> 28.00
+#       Forced. 5.00 m rejects a 26 m ball before it reaches the clusterer, so
+#       the shipped value measures nothing here. The ROI gate runs on the
+#       NOISED cloud, so the ceiling must clear the reach by
+#       4 * sigma_depth(reach) = 4 * 0.30 = 1.20 m at 26 m or one frame in six
+#       is discarded for having drawn long — and those are a throw's FIRST
+#       detections, the ones that buy tca. 28.00 is 6.7 sigma of headroom and
+#       sits under the camera's own 35 m far clip. Raising the reach past
+#       ~26.7 m requires raising this too: sigma grows as z^2.
+#
+#   cluster_max_extent_m   0.35 -> 0.64
+#       Forced, and this one was MEASURED here rather than inherited. 0.35 was
+#       sized for a ball at <= 5 m where sigma is a centimetre. At 26 m the
+#       0.30 m along-ray error stretches the ball's bounding box to a median
+#       0.26 m and a p95 of 0.45 m, so ~20 % of ball frames trip the shipped
+#       gate — and they are not dropped quietly: cloud_geometry.cluster_and_split
+#       re-clusters an oversized cluster at cluster_split_tol_m, which on a
+#       24-point ball fragments it below cluster_min_points. Flying 0.35 would
+#       have produced a depressed save rate that read as a perception limit
+#       instead of a misconfiguration.
+#
+#       SIZED AT THE ROI CEILING, NOT AT THE DESIGN REACH, and that distinction
+#       is the whole content of this note. This file first carried 0.56 m =
+#       required_cluster_max_extent_m(26.0), the 26 m reach the lane is BUILT to
+#       serve. That is the wrong range to size against: nothing clamps the cloud
+#       to 26 m, and the gate that decides which returns reach the clusterer is
+#       roi_max_range_m, which admits balls all the way out to 28.00 m. A ball
+#       at 28 m draws sigma = 0.30 * (28/26)^2 = 0.348 m and stretches to
+#       0.080 + 1.6 * 0.348 = 0.637 m, so 0.56 would have fragmented every ball
+#       between ~26.7 m and the ceiling — the LONGEST first detections, the ones
+#       that buy tca, which is precisely where this lane's claim lives.
+#       0.64 m is required_cluster_max_extent_m(28.00) rounded up.
+#
+#       Caught by test_rendered_lane.py before the first flight, not after:
+#       rendered_lane.assert_gates_clear_the_rendered_range sizes the
+#       requirement off the ceiling the config itself declares, and
+#       week7_rendered.launch.py refuses to start on a config that fails it.
+#       RAISE THIS WHENEVER roi_max_range_m IS RAISED; the two move together.
+#
+# use_persistent_bg STAYS TRUE, unlike the synthetic lane. That lane turns it
+# off because its cloud contains the ball and nothing else, so a background
+# model has nothing to model and one way to do harm. Here there is a real
+# scene — ground plane, runway, standoffs — and the persistent map is what
+# closed the patrol blindness in Week 4. Turning it off would make this a
+# different experiment.
+#
+# ###################################################################
+# A PREDICTION, REGISTERED BEFORE THE FIRST RUN OF THIS FILE (2026-08-21),
+# so that if it comes true it is a prediction and not a rationalisation.
+#
+# diff_threshold_m is 0.10 m and FIXED, while this lane's depth error is
+# 0.30 m at 26 m and grows as z^2. Frame differencing calls a return
+# foreground when it sits further than one threshold from the background,
+# so beyond the range where sigma(z) exceeds 0.10 m — z = 26 * sqrt(1/3)
+# = 15.0 m — STATIC TERRAIN FLICKERS FOREGROUND ON ITS OWN NOISE. The
+# camera is level on a hovering airframe at ~2 m with a +/-11 deg vertical
+# sector, so the ground plane enters the frame at 2/tan(11 deg) = 10.3 m
+# and fills the lower band from there to the 35 m clip. A large share of
+# those pixels sit past 15 m.
+#
+# I THEREFORE EXPECT THIS FILE, AS WRITTEN, TO FLOOD: fg_max_points (5000)
+# tripped on most frames, few or no clusters, and few or no detections at
+# range. detector.yaml's own roi_max_range_m comment records the same
+# failure at a mere 8.0 m ROI on the wider OAK-D lens (S02 funnel:
+# fg=25k-90k, clusters=0), which is the direct precedent.
+#
+# TWO THINGS COULD MAKE IT SURVIVE ANYWAY, and they are why this is being
+# RUN rather than assumed: the AR0234 lens is 16.6 % of the OAK-D's solid
+# angle, so far less ground is in frame at all; and the error field here
+# is spatially CORRELATED over ~7 px, so a terrain patch tends to move
+# coherently frame to frame rather than dancing per-pixel.
+#
+# IF IT FLOODS, the fix is a range-dependent difference threshold —
+# max(diff_threshold_m, k * sigma_depth(z)) — which is what the sensor's
+# own error model says the threshold should have been all along, and is
+# the same class of change as making the tracker's R range-dependent. It
+# is a DESIGN change to be made on the evidence and then re-validated
+# against the Week 4 baseline under the identical detector, NOT a knob to
+# turn until a number improves. Whatever happens, this block stays.
+# ###################################################################
+
+detector:
+  ros__parameters:
+
+    # ── Diagnostics — all off, same as detector.yaml ──────────────────────────
+    # debug_dump_dir costs ~40 ms/frame and invalidates every latency number
+    # from the run. debug_funnel is chatty but cheap (1.4-2.3 ms/frame) and is
+    # the tool that answers the prediction above — turn it on for a diagnostic
+    # run, never for a scored one. detector_node caches params at construction
+    # and has no set-param callback, so `ros2 param set` does nothing: set them
+    # here and restart.
+    debug_funnel: false
+    debug_funnel_throttle_s: 1.0
+    profile_stages: false
+    profile_window_frames: 30
+    debug_dump_dir: ""
+
+    # ── Cloud transport ───────────────────────────────────────────────────────
+    # RELIABLE, and that is load-bearing rather than a default worth inheriting.
+    # This lane's cloud is 800x650 organized XYZ = ~6.2 MB per message, far past
+    # the 64 kB UDP datagram limit, so every frame is fragmented and BEST_EFFORT
+    # discards the whole cloud when any one fragment is lost. detector.yaml
+    # records the measurement that forces it: 3.99 Hz delivered under
+    # BEST_EFFORT against 14.43 Hz reliable on a 7.37 MB cloud — a ~75 % frame
+    # loss, which downstream reads as a sensor that cannot hold a track. That is
+    # a TRANSPORT failure wearing a perception failure's clothes, and it would
+    # have been scored as the latter.
+    #
+    # week7_rendered.launch.py passes this same value to depth_noise_node so the
+    # two ends of /oak/points cannot disagree; a reliability mismatch leaves the
+    # subscription unconnected while the topic still looks alive. It must also
+    # equal depth_noise_node.DEFAULT_CLOUD_RELIABLE, and test_rendered_lane.py
+    # pins that — this file was first written `false` against the node's older
+    # BEST_EFFORT default, and without the pin it would have flown that way.
+    cloud_reliable: true
+    cloud_queue_depth: 5
+
+    # ── Input cloud axis convention ───────────────────────────────────────────
+    # gz-sim PointCloudPacked stays in the gz sensor body frame (X fwd, Y left,
+    # Z up); <optical_frame_id> renames the header only. depth_noise_node
+    # preserves that convention exactly — it scales points along the ray and
+    # rebuilds the same organized layout — so what arrives here is still
+    # gz_flu. This must equal the depth_noise node's cloud_convention: the two
+    # disagreeing is the bug that had the noise stage publishing a noiseless
+    # sensor while reporting a clean run (docs/optics_probe.md).
+    cloud_convention: "gz_flu"
+
+    # ── ROI / range gate ──────────────────────────────────────────────────────
+    roi_min_range_m: 0.30
+    roi_max_range_m: 28.00   # CHANGED from 5.00 — see the header.
+
+    # Unchanged at 45 deg and it never binds: the camera's own frustum is
+    # +/-13.5 x 11.0 deg, so every return is already well inside this cone. The
+    # modelled sector lives in models/iris_ar0234/model.sdf, not here.
+    roi_half_angle_deg: 45.0
+
+    # ── Voxel downsampling ────────────────────────────────────────────────────
+    # 0.02 m resolves the 80 mm ball; 0.05 m is coarser than the ball itself.
+    # The ball carries ~24 raw returns at 26 m through this lens (measured,
+    # lab/probe_out/ar0234_800_26m.result.txt), so voxelization must not thin
+    # it below cluster_min_points.
+    voxel_leaf_m: 0.02
+
+    # ── Background model / frame differencing ────────────────────────────────
+    use_persistent_bg: true   # unchanged — see the header for why this lane
+                              # keeps it while the synthetic lane drops it.
+    bg_map_leaf_m: 0.10       # keep equal to diff_threshold_m
+    bg_map_ttl_s: 20.0
+    bg_map_max_voxels: 400000
+    bg_history_frames: 5
+
+    # The subject of the registered prediction above. Left at detector.yaml's
+    # measured value on purpose: this lane's first run has to fly the
+    # baseline's threshold, or the comparison to Week 4 is confounded on two
+    # axes at once.
+    diff_threshold_m: 0.10
+
+    fg_max_points: 5000
+
+    # ── Euclidean clustering ──────────────────────────────────────────────────
+    cluster_tolerance_m: 0.20
+    cluster_min_points: 5
+    cluster_max_points: 500
+
+    cluster_split_tol_m: 0.10
+    cluster_split_max_points: 5000
+
+    # = required_cluster_max_extent_m(roi_max_range_m), NOT of the 26 m
+    # reach. See the header: sizing it at the reach fragments the longest
+    # detections, which are the ones the claim depends on.
+    cluster_max_extent_m: 0.64   # CHANGED from 0.35 — see the header.
+
+    # ── Centroid publishing ───────────────────────────────────────────────────
+    min_publish_score: 0.006
+
+    # ── Output topics ─────────────────────────────────────────────────────────
+    threat_centroid_topic: "/threat/centroid"
+    marker_topic: "/threat/marker"
+
+    # ── Egomotion compensation ────────────────────────────────────────────────
+    # Needs odom with a valid orientation quaternion AND the
+    # base_link -> camera_link -> camera_optical_frame static TF chain, which
+    # week7_rendered.launch.py publishes for exactly this reason. Without the
+    # chain the detector silently drops to camera-frame differencing.
+    compensate_egomotion: true
+    odom_topic: "/huitzilin/odom"
+    fixed_frame: "odom"

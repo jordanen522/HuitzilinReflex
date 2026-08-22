@@ -1,0 +1,108 @@
+<?xml version="1.0" ?>
+<!--
+  huitzilin_runway_ar0234.sdf — huitzilin_runway.sdf with the long-range
+  camera fitted. THE ONLY DIFFERENCE IS THE DRONE INCLUDE (uri + name).
+
+  WHY THE WORLD NAME IS DELIBERATELY UNCHANGED. `<world name>` is still
+  huitzilin_runway, identical to the baseline. It is the root of the gz topic
+  namespace that spawn_projectile's ApplyLinkWrench pair and gz_pose_bridge
+  both address (/world/huitzilin_runway/wrench). Renaming it would silently
+  re-point every one of those at a topic nothing serves, and the ball would
+  spawn at rest and drop — a physics result that looks like a perception
+  result. Only one world runs at a time, so the shared name costs nothing.
+
+  THE MODEL ENTITY NAME IS NOT SHARED, and that IS load-bearing: it reads
+  iris_ar0234, so anything selecting the drone out of /gz/dynamic_poses must be
+  told. dodge_battery, hz_counterfactual and the oracle/synthetic publishers all
+  default drone_model to "iris_depth" and will find nothing here. Pass
+  DRONE_MODEL=iris_ar0234 to scripts/run_dodge_battery.sh. Keeping the baseline
+  name would have removed that chore at the price of a world that lies about
+  which camera it is flying, which is the more expensive mistake in a study
+  whose whole claim is which sensor was used.
+
+  Inherits the standard ardupilot_gazebo runway world (ground plane, sunlight,
+  physics). iris_ar0234 is iris_depth with only the sensor block changed;
+  test_camera_models.py holds the two to that, and test_rendered_lane.py holds
+  these two worlds to this.
+
+  SETUP
+  -----
+  export GZ_SIM_RESOURCE_PATH=\
+    $GZ_SIM_RESOURCE_PATH:\
+    ~/huitzilin_ws/install/huitzilin_perception/share/huitzilin_perception/models
+
+  Then launch Gazebo with this world:
+    gz sim -s -r ~/huitzilin_ws/install/huitzilin_perception/share/huitzilin_perception/worlds/huitzilin_runway_ar0234.sdf
+-->
+<sdf version="1.9">
+  <world name="huitzilin_runway">
+
+    <!-- ── Physics ── -->
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <!-- ── Plugins ── -->
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-air-pressure-system"
+            name="gz::sim::systems::AirPressure"/>
+    <plugin filename="gz-sim-magnetometer-system"
+            name="gz::sim::systems::Magnetometer"/>
+    <plugin filename="gz-sim-forcetorque-system"
+            name="gz::sim::systems::ForceTorque"/>
+    <!-- Throws the projectile: spawn_projectile.gz_impulse publishes an
+         EntityWrench on /world/huitzilin_runway/wrench, which this system
+         applies for one physics step. gz.msgs.EntityFactory has no velocity
+         field, so without this the ball spawns at rest and just drops. -->
+    <plugin filename="gz-sim-apply-link-wrench-system"
+            name="gz::sim::systems::ApplyLinkWrench"/>
+
+    <!-- ── Sun ── -->
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation><range>1000</range><constant>0.9</constant><linear>0.01</linear><quadratic>0.001</quadratic></attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- ── Ground plane ── -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>200 200</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>200 200</size></plane></geometry>
+          <material>
+            <ambient>0.4 0.5 0.4 1</ambient>
+            <diffuse>0.4 0.5 0.4 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── Drone (iris_ar0234 = iris_with_standoffs + AR0234 mono + 10 mm M12) ── -->
+    <include>
+      <uri>model://iris_ar0234</uri>
+      <name>iris_ar0234</name>
+      <pose>0 0 0.195 0 0 0</pose>
+    </include>
+
+  </world>
+</sdf>
