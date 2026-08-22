@@ -349,3 +349,60 @@ A bag with no drone transform therefore cannot be scored at all, and is **void**
 on the same terms as a positive bag with no projectile transform. This is a real
 risk rather than a theoretical one: `gz topic .../dynamic_pose/info` publishes
 MOVING entities, so a sufficiently still airframe can drop out of the stream.
+
+### A3 — 2026-08-21. The H-set geometry, corrected against the optics (amends §4.1)
+
+§4.1 was written from the shape of the earlier splits and does not survive
+contact with the camera this lane actually flies. Three corrections, all made
+before a single bag was captured, and the second of them makes the set EASIER,
+which is stated here plainly rather than buried.
+
+**(a) The standoff cannot be a constant 36 m.** With `compensate_gravity`,
+`spawn_projectile` holds the HORIZONTAL speed at `speed_mps` and adds
+`vz0 = 0.5*g*t`, `t = offset/speed`, so there is no ballistic range limit --
+but the loft grows as offset/speed and carries the ball out of the camera's
++/-11 deg VERTICAL sector mid-flight. Requiring the whole trajectory to stay
+inside it gives
+
+        max elevation = atan( g * d / (4 * v^2) )  <=  11 deg
+        =>  d  <=  0.0793 * v^2
+
+At 5 m/s that admits a 1.98 m standoff, which is not a scenario. The speed axis
+therefore becomes **7, 9, 13, 16, 18, 20 m/s** (5 dropped, 7 added -- still
+disjoint from S/N's 4/8/12/14 and T's 6/11/17), with the standoff sized per
+speed: **3.5, 6.0, 13.0, 20.0, 25.0, 31.0 m**. The same bound keeps the actual
+launch speed within 7 % of the labelled speed at every row, so `speed_mps`
+stays an honest description of the projectile.
+
+Consequence: **offset co-varies with speed, by physics rather than by choice.**
+It is a covariate of the speed axis and is stated with every per-speed result.
+The matched-envelope requirement that geometry NOT vary with speed belongs to
+the dodge battery, where the claim is a comparison between speeds; here the
+claim is per-scenario detection, and holding geometry fixed would instead mean
+holding the ball outside the sensor's vertical sector.
+
+**(b) The +/-28 deg approach arm is deleted, and this makes the set easier.**
+The AR0234 + 10 mm M12 gives a +/-13.5 deg horizontal sector. A 28 deg approach
+is outside it for the whole flight, so those four positives would have been
+guaranteed misses -- a built-in 14/18 ceiling, measuring the lens rather than
+the detector. The angle axis becomes **0, +/-4, +/-8, +/-11 deg**, with +/-11
+probing the sector edge.
+
+This is a relaxation, not a tightening, and it scopes the claim: **the recall
+figure is recall WITHIN THE DEFENDED SECTOR**, and must be quoted that way. The
+sector limit is not hidden by the deletion -- it moves to the negatives, where
+an out-of-sector ball SHOULD go undetected and a non-detection is the correct
+answer (HN05).
+
+**(c) "Every positive spawns outside roi_max_range_m" is dropped.** Only the
+20 m/s rows (31.0 m) clear the 28.00 m ROI ceiling; the rest cannot, by (a).
+What that requirement protected -- a bag that exercises acquisition rather than
+starting with the ball already visible -- is instead guaranteed by the 3 s
+spawn lead: the ball does not exist for the first three seconds of every
+recording, so the background model always sees clean scene first. It is
+nonetheless a real weakening for the short-standoff rows, where the ball
+appears inside the gate rather than crossing into it, and per-speed results are
+reported so that a reader can see which rows had which.
+
+**Unchanged by this amendment:** 18 positives, 6 negatives, K, R, the window,
+the denominator, the freeze, and the decision table in §5.

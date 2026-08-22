@@ -505,6 +505,410 @@ scenarios:
     time_to_closest_s: 0
     notes: "No spawn. 45 s of straight-leg patrol with no manoeuvre. This is the tune set's false-positive floor — the analogue of N01/N05, which are now off-limits for tuning."
 
+
+  # == HELD-OUT SET (H01-H18, HN01-HN06) - added 2026-08-21 ==================
+  #
+  # PRE-REGISTERED IN docs/perception_eval.md BEFORE ANY OF IT WAS CAPTURED.
+  # That file, not this comment, is the contract: it fixes the match radius,
+  # K, the window, the denominator, the freeze procedure, and the decision
+  # table of what may be claimed at each outcome. Read it before touching a
+  # value here, and NEVER tune against these bags - not once, not to debug a
+  # threshold, not just to look. Scored ONCE per frozen configuration.
+  #
+  # WHY IT EXISTS. The claim is 100 % recall over 17+ held-out POSITIVE
+  # scenarios. `test` carries TWO positives and `train` was fitted on, so
+  # neither can answer it -- and no bag captured before 2026-08-21 records
+  # /gz/dynamic_poses, so none of them can even say whether a detection was
+  # OF THE BALL rather than of terrain.
+  #
+  # DIFFERENT SENSOR, DIFFERENT WORLD, DIFFERENT PREFIX. Captured on
+  # worlds/huitzilin_runway_ar0234.sdf against the AR0234 + 10 mm M12
+  # (+/-13.5 x 11.0 deg, 0.2-35 m clip) through week7_rendered.launch.py on
+  # params/rendered_detector.yaml. These are NOT Week 3 data and must not be
+  # named as though they were:
+  #     BAG_PREFIX=heldout_ ./scripts/capture_scenario.sh H01
+  #
+  # POSITIVES ARE FLOWN IN HOVER, AND THAT IS FORCED. At a 31 m standoff a
+  # patrolling drone translates ~4 m during the ball's 1.55 s flight, and
+  # these entries do not lead the shot (aim_at_drone False, no
+  # target_vel_enu), so the ball would arrive several metres off-axis - far
+  # outside a +/-13.5 deg sector. Under patrol these rows would measure the
+  # geometry, not the detector. Egomotion is not left untested: HN01 and HN03
+  # are patrol negatives, which is where the egomotion FP risk actually is.
+  #
+  # GEOMETRY (amendment A3). compensate_gravity holds the HORIZONTAL speed at
+  # speed_mps and adds vz0 = 0.5*g*t, so the loft grows with offset/speed and
+  # lifts the ball out of the +/-11 deg vertical sector. Keeping the whole
+  # trajectory inside it bounds the standoff:
+  #
+  #     max elevation = atan(g*d / (4*v^2)) <= 11 deg   =>   d <= 0.0793 * v^2
+  #
+  # so offset co-varies with speed BY PHYSICS: 3.5 / 6.0 / 13.0 / 20.0 / 25.0
+  # / 31.0 m at 7 / 9 / 13 / 16 / 18 / 20 m/s. The same bound holds the true
+  # launch speed within 7 % of the label on every row. REPORT THE OFFSET
+  # BESIDE EVERY PER-SPEED NUMBER; it is a covariate, not a nuisance to hide.
+  #
+  # ANGLES ARE ALL INSIDE THE SECTOR (0, +/-4, +/-8, +/-11 deg). The +/-28 deg
+  # arm of the original design was deleted because it lies outside +/-13.5 deg
+  # for the whole flight and would have built four guaranteed misses into the
+  # set. That makes this set EASIER, and scopes the claim to recall WITHIN THE
+  # DEFENDED SECTOR. The deleted case is not lost: HN05 is an out-of-sector
+  # ball, where a NON-detection is the correct answer.
+  #
+  # DISJOINTNESS. Every H speed (7/9/13/16/18/20) is unused by S/N (4/8/12/14)
+  # and by T (6/11/17), so no H scenario can share a full (speed, angle, miss)
+  # triple with a tuning scenario. The angles (+/-4, +/-8, +/-11) and the
+  # misses (0.2, 0.7, 1.1) are new as well.
+  #
+  # closest_approach_m follows the T convention, |offset*sin(angle) +
+  # miss*cos(angle)|: a 2-D horizontal crossing geometry against a STATIONARY
+  # drone. It is informational - score_bags reads `label` and the sidecar's
+  # detection_window_s - and it is NOT the truth used for attribution, which
+  # comes from /gz/dynamic_poses.
+
+  # -- HELD-OUT POSITIVES ---------------------------------------------------
+
+  - id: H01
+    label: positive
+    description: "7 m/s head-on, 0.00 m miss, 3.5 m standoff - hover"
+    speed_mps: 7.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 3.5
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 0.500
+    notes: "HOVER. vz0 2.45 m/s, apex 0.31 m at 1.8 m, max elevation 9.9 deg against a +/-11 deg sector. True launch speed 7.42 m/s, +6.0% over the label."
+
+  - id: H02
+    label: positive
+    description: "7 m/s from right +8 deg, 0.70 m miss, 3.5 m standoff - hover"
+    speed_mps: 7.0
+    approach_angle_deg: 8.0
+    miss_distance_m: 0.70
+    offset_forward_m: 3.5
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 1.180
+    time_to_closest_s: 0.500
+    notes: "HOVER. vz0 2.45 m/s, apex 0.31 m at 1.8 m, max elevation 9.9 deg against a +/-11 deg sector. True launch speed 7.42 m/s, +6.0% over the label."
+
+  - id: H03
+    label: positive
+    description: "7 m/s from left -11 deg, 1.10 m miss, 3.5 m standoff - hover"
+    speed_mps: 7.0
+    approach_angle_deg: -11.0
+    miss_distance_m: 1.10
+    offset_forward_m: 3.5
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.412
+    time_to_closest_s: 0.500
+    notes: "HOVER. vz0 2.45 m/s, apex 0.31 m at 1.8 m, max elevation 9.9 deg against a +/-11 deg sector. True launch speed 7.42 m/s, +6.0% over the label."
+
+  - id: H04
+    label: positive
+    description: "9 m/s head-on, 0.20 m miss, 6.0 m standoff - hover"
+    speed_mps: 9.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.20
+    offset_forward_m: 6.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.200
+    time_to_closest_s: 0.667
+    notes: "HOVER. vz0 3.27 m/s, apex 0.54 m at 3.0 m, max elevation 10.3 deg against a +/-11 deg sector. True launch speed 9.58 m/s, +6.4% over the label."
+
+  - id: H05
+    label: positive
+    description: "9 m/s from left -4 deg, 0.00 m miss, 6.0 m standoff - hover"
+    speed_mps: 9.0
+    approach_angle_deg: -4.0
+    miss_distance_m: 0.00
+    offset_forward_m: 6.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.419
+    time_to_closest_s: 0.667
+    notes: "HOVER. vz0 3.27 m/s, apex 0.54 m at 3.0 m, max elevation 10.3 deg against a +/-11 deg sector. True launch speed 9.58 m/s, +6.4% over the label."
+
+  - id: H06
+    label: positive
+    description: "9 m/s from right +11 deg, 1.10 m miss, 6.0 m standoff - hover"
+    speed_mps: 9.0
+    approach_angle_deg: 11.0
+    miss_distance_m: 1.10
+    offset_forward_m: 6.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 2.225
+    time_to_closest_s: 0.667
+    notes: "HOVER. vz0 3.27 m/s, apex 0.54 m at 3.0 m, max elevation 10.3 deg against a +/-11 deg sector. True launch speed 9.58 m/s, +6.4% over the label."
+
+  - id: H07
+    label: positive
+    description: "13 m/s head-on, 0.00 m miss, 13.0 m standoff - hover"
+    speed_mps: 13.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 13.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 1.000
+    notes: "HOVER. vz0 4.91 m/s, apex 1.23 m at 6.5 m, max elevation 10.7 deg against a +/-11 deg sector. True launch speed 13.89 m/s, +6.9% over the label."
+
+  - id: H08
+    label: positive
+    description: "13 m/s from right +4 deg, 0.70 m miss, 13.0 m standoff - hover"
+    speed_mps: 13.0
+    approach_angle_deg: 4.0
+    miss_distance_m: 0.70
+    offset_forward_m: 13.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 1.605
+    time_to_closest_s: 1.000
+    notes: "HOVER. vz0 4.91 m/s, apex 1.23 m at 6.5 m, max elevation 10.7 deg against a +/-11 deg sector. True launch speed 13.89 m/s, +6.9% over the label."
+
+  - id: H09
+    label: positive
+    description: "13 m/s from left -8 deg, 0.20 m miss, 13.0 m standoff - hover"
+    speed_mps: 13.0
+    approach_angle_deg: -8.0
+    miss_distance_m: 0.20
+    offset_forward_m: 13.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 1.611
+    time_to_closest_s: 1.000
+    notes: "HOVER. vz0 4.91 m/s, apex 1.23 m at 6.5 m, max elevation 10.7 deg against a +/-11 deg sector. True launch speed 13.89 m/s, +6.9% over the label."
+
+  - id: H10
+    label: positive
+    description: "16 m/s head-on, 1.10 m miss, 20.0 m standoff - hover"
+    speed_mps: 16.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 1.10
+    offset_forward_m: 20.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 1.100
+    time_to_closest_s: 1.250
+    notes: "HOVER. vz0 6.13 m/s, apex 1.92 m at 10.0 m, max elevation 10.8 deg against a +/-11 deg sector. True launch speed 17.13 m/s, +7.1% over the label."
+
+  - id: H11
+    label: positive
+    description: "16 m/s from left -11 deg, 0.00 m miss, 20.0 m standoff - hover"
+    speed_mps: 16.0
+    approach_angle_deg: -11.0
+    miss_distance_m: 0.00
+    offset_forward_m: 20.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 3.816
+    time_to_closest_s: 1.250
+    notes: "HOVER. vz0 6.13 m/s, apex 1.92 m at 10.0 m, max elevation 10.8 deg against a +/-11 deg sector. True launch speed 17.13 m/s, +7.1% over the label."
+
+  - id: H12
+    label: positive
+    description: "16 m/s from right +8 deg, 0.20 m miss, 20.0 m standoff - hover"
+    speed_mps: 16.0
+    approach_angle_deg: 8.0
+    miss_distance_m: 0.20
+    offset_forward_m: 20.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 2.982
+    time_to_closest_s: 1.250
+    notes: "HOVER. vz0 6.13 m/s, apex 1.92 m at 10.0 m, max elevation 10.8 deg against a +/-11 deg sector. True launch speed 17.13 m/s, +7.1% over the label."
+
+  - id: H13
+    label: positive
+    description: "18 m/s head-on, 0.70 m miss, 25.0 m standoff - hover"
+    speed_mps: 18.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.70
+    offset_forward_m: 25.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.700
+    time_to_closest_s: 1.389
+    notes: "HOVER. vz0 6.81 m/s, apex 2.37 m at 12.5 m, max elevation 10.7 deg against a +/-11 deg sector. True launch speed 19.25 m/s, +6.9% over the label."
+
+  - id: H14
+    label: positive
+    description: "18 m/s from right +11 deg, 0.00 m miss, 25.0 m standoff - hover"
+    speed_mps: 18.0
+    approach_angle_deg: 11.0
+    miss_distance_m: 0.00
+    offset_forward_m: 25.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 4.770
+    time_to_closest_s: 1.389
+    notes: "HOVER. vz0 6.81 m/s, apex 2.37 m at 12.5 m, max elevation 10.7 deg against a +/-11 deg sector. True launch speed 19.25 m/s, +6.9% over the label."
+
+  - id: H15
+    label: positive
+    description: "18 m/s from left -4 deg, 1.10 m miss, 25.0 m standoff - hover"
+    speed_mps: 18.0
+    approach_angle_deg: -4.0
+    miss_distance_m: 1.10
+    offset_forward_m: 25.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.647
+    time_to_closest_s: 1.389
+    notes: "HOVER. vz0 6.81 m/s, apex 2.37 m at 12.5 m, max elevation 10.7 deg against a +/-11 deg sector. True launch speed 19.25 m/s, +6.9% over the label."
+
+  - id: H16
+    label: positive
+    description: "20 m/s head-on, 0.00 m miss, 31.0 m standoff - hover"
+    speed_mps: 20.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 31.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 1.550
+    notes: "HOVER. vz0 7.60 m/s, apex 2.95 m at 15.5 m, max elevation 10.8 deg against a +/-11 deg sector. True launch speed 21.40 m/s, +7.0% over the label."
+
+  - id: H17
+    label: positive
+    description: "20 m/s from left -8 deg, 0.70 m miss, 31.0 m standoff - hover"
+    speed_mps: 20.0
+    approach_angle_deg: -8.0
+    miss_distance_m: 0.70
+    offset_forward_m: 31.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 3.621
+    time_to_closest_s: 1.550
+    notes: "HOVER. vz0 7.60 m/s, apex 2.95 m at 15.5 m, max elevation 10.8 deg against a +/-11 deg sector. True launch speed 21.40 m/s, +7.0% over the label."
+
+  - id: H18
+    label: positive
+    description: "20 m/s from right +4 deg, 0.20 m miss, 31.0 m standoff - hover"
+    speed_mps: 20.0
+    approach_angle_deg: 4.0
+    miss_distance_m: 0.20
+    offset_forward_m: 31.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 2.362
+    time_to_closest_s: 1.550
+    notes: "HOVER. vz0 7.60 m/s, apex 2.95 m at 15.5 m, max elevation 10.8 deg against a +/-11 deg sector. True launch speed 21.40 m/s, +7.0% over the label."
+
+  # -- HELD-OUT NEGATIVES ---------------------------------------------------
+  # Six, keeping the library's >= 25 % negative budget (6/24 = 25 %). Scored
+  # for FALSE POSITIVES only, on their own denominator, and NEVER merged into
+  # the recall fraction - see docs/perception_eval.md section 3.4.
+
+  - id: HN01
+    label: negative
+    description: "clean straight-leg patrol, no spawn"
+    speed_mps: 0.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 0.0
+    offset_vertical_m: 0.0
+    compensate_gravity: false
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 0.000
+    notes: "PATROL. The false-positive floor, and the analogue of N01/N05 for this sensor. No ball exists, so every centroid inside the window is unmatched by construction."
+
+  - id: HN02
+    label: negative
+    description: "clean hover, no spawn"
+    speed_mps: 0.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 0.0
+    offset_vertical_m: 0.0
+    compensate_gravity: false
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 0.000
+    notes: "HOVER. The same floor under the configuration the POSITIVES are flown in. Without it a false positive seen in HN01 could be blamed on patrol egomotion when it is really the static scene."
+
+  - id: HN03
+    label: negative
+    description: "patrol through a turn, no spawn"
+    speed_mps: 0.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 0.00
+    offset_forward_m: 0.0
+    offset_vertical_m: 0.0
+    compensate_gravity: false
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 0.000
+    notes: "PATROL, with a turn inside the window. detector.yaml names newly-explored terrain along a patrol leg as this library's dominant FP class, and a turn sweeps the most new terrain per second available."
+
+  - id: HN04
+    label: negative
+    description: "ball thrown AWAY from the drone - receding, not closing"
+    speed_mps: 13.0
+    approach_angle_deg: 180.0
+    miss_distance_m: 0.00
+    offset_forward_m: 13.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 0.000
+    time_to_closest_s: 1.000
+    notes: "HOVER. Velocity tilted 180 deg, so the ball recedes rather than closes. Tests that something moving in the cloud is not by itself a threat."
+
+  - id: HN05
+    label: negative
+    description: "ball passing 21.8 deg off-axis - OUTSIDE the +/-13.5 deg sector"
+    speed_mps: 16.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 8.00
+    offset_forward_m: 20.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 8.000
+    time_to_closest_s: 1.250
+    notes: "HOVER. 8.0 m lateral at a 20.0 m standoff = 21.8 deg, outside the horizontal sector for the whole flight. This is where the deleted +/-28 deg positive arm went (amendment A3): out of sector a NON-detection is CORRECT, and a detection here would mean the sector is not what the model says it is."
+
+  - id: HN06
+    label: negative
+    description: "20 m/s ball at a 3.0 m miss - real, detected, and not a threat"
+    speed_mps: 20.0
+    approach_angle_deg: 0.0
+    miss_distance_m: 3.00
+    offset_forward_m: 31.0
+    offset_vertical_m: 0.0
+    compensate_gravity: true
+    size_class: medium
+    closest_approach_m: 3.000
+    time_to_closest_s: 1.550
+    notes: "HOVER. 5.5 deg off-axis, so the ball IS in sector and SHOULD be detected: those detections are MATCHED and are not false positives. What this row measures is whether a real object at a wide miss also generates unmatched clutter. Its dodge-side meaning - trigger discrimination - belongs to the battery, not here."
+
 # ── SPLITS ────────────────────────────────────────────────────────────────────
 # tune  : T01–T14. The ONLY split detector thresholds may be fitted against.
 #         Added 2026-08-16 for exactly that purpose; no threshold has been
@@ -529,3 +933,7 @@ split:
   train: [S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, N01, N02, N03, N04]
   test:  [S11, S12, N05]
   tune:  [T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T11, T12, T13, T14]
+  heldout:
+    [H01, H02, H03, H04, H05, H06, H07, H08, H09, H10, H11, H12, H13,
+     H14, H15, H16, H17, H18,
+     HN01, HN02, HN03, HN04, HN05, HN06]

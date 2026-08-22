@@ -18,6 +18,12 @@ BAG_DIR="/data/huitzilin_bags"
 # Resolve through the ament index like every sibling script, rather than
 # assuming the workspace is ~/huitzilin_ws.
 MATRIX="$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/config/scenario_matrix.yaml"
+# Bag filename prefix. "week3_" is every bag captured before 2026-08-21;
+# score_bags takes the same default, so nothing existing changes. The held-out
+# set is captured with BAG_PREFIX=heldout_ -- those bags are not Week 3 data
+# and must not be named as though they were:
+#   BAG_PREFIX=heldout_ ./scripts/capture_scenario.sh H01
+BAG_PREFIX="${BAG_PREFIX:-week3_}"
 SPAWN_LEAD=3
 
 mkdir -p "$BAG_DIR"
@@ -45,6 +51,13 @@ print(f'OFFSET_V={r.get("offset_vertical_m",0.0) or 0.0}')
 print(f'CLOSEST={r.get("closest_approach_m",0.0)}')
 print(f'TTC={r.get("time_to_closest_s",0.0)}')
 print(f'SPAWN={"yes" if speed > 0 else "no"}')
+# compensate_gravity defaults False, matching spawn_projectile's own default,
+# so every S/N/T entry keeps the flat throw it was captured with. The held-out
+# H entries set it true: they spawn ~36 m out, and a flat throw from 2 m
+# altitude is on the ground after 0.639 s and ~3 m of travel, so it would never
+# reach the drone at all -- a geometry failure that would score as a perception
+# failure on every single positive.
+print(f'GRAVCOMP={"true" if r.get("compensate_gravity", False) else "false"}')
 PY
 )"; then
   echo "[$ID] ERROR: could not read scenario $ID from $MATRIX"; exit 2
@@ -70,11 +83,11 @@ if awk "BEGIN{exit !($OFFSET_V < 0)}"; then
   echo "[$ID] vertical offset ${OFFSET_V} m OK (drone z=${DZ} m -> spawn z=${SPAWN_Z} m)"
 fi
 
-BAG="$BAG_DIR/week3_${ID}"
+BAG="$BAG_DIR/${BAG_PREFIX}${ID}"
 rm -rf "$BAG"
 
 # Label first — exists regardless of how you stop the recorder.
-cat > "$BAG_DIR/week3_${ID}.label.yaml" <<YAML
+cat > "$BAG_DIR/${BAG_PREFIX}${ID}.label.yaml" <<YAML
 scenario_id: $ID
 label: $LABEL
 closest_approach_m: $CLOSEST
@@ -82,8 +95,8 @@ time_to_closest_s: $TTC
 detection_window_s: 4.0
 YAML
 
-echo "[$ID] label=$LABEL spawn=$SPAWN speed=$SPEED angle=$ANGLE miss=$MISS offset=$OFFSET"
-echo "[$ID] label written -> $BAG_DIR/week3_${ID}.label.yaml"
+echo "[$ID] label=$LABEL spawn=$SPAWN speed=$SPEED angle=$ANGLE miss=$MISS offset=$OFFSET gravcomp=$GRAVCOMP"
+echo "[$ID] label written -> $BAG_DIR/${BAG_PREFIX}${ID}.label.yaml"
 
 # Spawn fires SPAWN_LEAD s into the recording (background; survives the exec).
 if [ "$SPAWN" = "yes" ]; then
@@ -93,6 +106,7 @@ if [ "$SPAWN" = "yes" ]; then
       -p scenario_id:="$ID" -p speed_mps:="$SPEED" -p approach_angle_deg:="$ANGLE" \
       -p miss_distance_m:="$MISS" -p offset_forward_m:="$OFFSET" \
       -p offset_vertical_m:="$OFFSET_V" \
+      -p compensate_gravity:="$GRAVCOMP" \
       || echo "[$ID] (spawn returned nonzero — usually just the gz confirm timeout)"
   ) &
   disown

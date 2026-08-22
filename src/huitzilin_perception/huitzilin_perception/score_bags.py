@@ -194,7 +194,15 @@ class ScorerNode(Node):
         self.declare_parameter("bag_dir", "/data/huitzilin_bags")
         self.declare_parameter("scenario_matrix",
                                "config/scenario_matrix.yaml")
-        self.declare_parameter("split", "test")   # train | test | tune | all
+        self.declare_parameter("split", "test")   # train|test|tune|heldout|all
+        # Filename prefix of the bags to score. "week3_" is every bag captured
+        # before 2026-08-21 and is the default so no existing invocation
+        # changes. The held-out set uses "heldout_", because a bag named
+        # week3_H07 carrying the headline recall number is exactly the kind of
+        # mislabelling a sceptical reader is right to distrust -- those bags
+        # are not Week 3 data, were captured on a different world, against a
+        # different camera, under a pre-registered protocol.
+        self.declare_parameter("bag_prefix", "week3_")
         self.declare_parameter("recall_floor", 0.95)
         self.declare_parameter("output_file", "/tmp/week3_regression.txt")
         # The node under test. Its own publisher list — discovered live from
@@ -208,6 +216,7 @@ class ScorerNode(Node):
         self._floor     = self.get_parameter("recall_floor").value
         self._out_file  = Path(self.get_parameter("output_file").value)
         self._detector_node_name = self.get_parameter("detector_node_name").value
+        self._bag_prefix = self.get_parameter("bag_prefix").value
 
         # Track detections during current bag replay. bag_start is no longer
         # tracked as live subscriber state — see _read_bag_start_sim_t.
@@ -674,8 +683,8 @@ class ScorerNode(Node):
         }
 
     def _find_bag(self, sid: str) -> Optional[Path]:
-        """Find first .mcap file in bag_dir whose name starts with week3_<sid>."""
-        prefix = f"week3_{sid}"
+        """First bag in bag_dir whose name starts with <bag_prefix><sid>."""
+        prefix = f"{self._bag_prefix}{sid}"
         for f in sorted(self._bag_dir.glob(f"{prefix}*.mcap")):
             return f
         # Also check subdirectory bags (ros2 bag play uses a directory)
@@ -684,7 +693,7 @@ class ScorerNode(Node):
         return None
 
     def _load_sidecar(self, sid: str) -> dict:
-        sidecar_path = self._bag_dir / f"week3_{sid}.label.yaml"
+        sidecar_path = (self._bag_dir / f"{self._bag_prefix}{sid}.label.yaml")
         if sidecar_path.exists():
             with open(sidecar_path) as f:
                 return yaml.safe_load(f) or {}
