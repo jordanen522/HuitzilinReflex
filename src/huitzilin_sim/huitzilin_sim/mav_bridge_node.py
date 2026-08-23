@@ -171,7 +171,7 @@ class MavBridgeNode(Node):
             # Orientation is REQUIRED by the detector's egomotion compensation
             # (W3-13): without it, bags carry the all-zero default quaternion
             # and background differencing falls back to the flood-prone
-            # camera-frame mode (the 2026-07-06 60%-recall root cause).
+            # camera-frame mode (the 60%-recall root cause).
             if {"roll", "pitch", "yaw"} <= s.keys():
                 qx, qy, qz, qw = MavBridge.ned_rpy_to_enu_quat(
                     s["roll"], s["pitch"], s["yaw"])

@@ -231,7 +231,7 @@ class MavBridge:
         position it wants, so attitude only survives when one happens to land
         after a LOCAL_POSITION_NED. Position stays perfectly fresh (it is
         fetched first) while yaw silently freezes at a value minutes old —
-        measured live 2026-07-26: odom position matched Gazebo truth to the
+        measured live: odom position matched Gazebo truth to the
         millimetre while odom yaw read 180.0 deg against a true 85.8 deg.
 
         That asymmetry is expensive. Every consumer of the odom quaternion

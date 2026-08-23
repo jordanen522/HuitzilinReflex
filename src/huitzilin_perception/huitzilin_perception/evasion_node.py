@@ -110,7 +110,7 @@ class EvasionNode(Node):
     def __init__(self) -> None:
         super().__init__("evasion")
 
-        # ── Params (values from params/evasion.yaml) ─────────────────────
+        # Params (values from params/evasion.yaml)
         self.declare_parameter("centroid_topic", "/threat/centroid")
         self.declare_parameter("odom_topic", "/huitzilin/odom")
         self.declare_parameter("evade_topic", "/cmd/evade")
@@ -142,14 +142,14 @@ class EvasionNode(Node):
         self.declare_parameter("patrol_handoff_s", 0.8)
         self.declare_parameter("evade_cmd_rate_hz", 20.0)
         self.declare_parameter("auto_resume_patrol", True)
-        # ── Phase 5: acceleration feedforward (default off = old behaviour) ──
+        # Phase 5: acceleration feedforward (default off = old behaviour)
         self.declare_parameter("evade_accel_topic", "/cmd/evade_accel")
         self.declare_parameter("evade_accel_ff_mps2", 0.0)
-        # ── Phase 6: cue-gated confirmation (inert with no cue publisher) ───
+        # Phase 6: cue-gated confirmation (inert with no cue publisher)
         self.declare_parameter("cue_topic", "/threat/cue")
         self.declare_parameter("alert_min_track_updates", 2)
         self.declare_parameter("cue_timeout_s", 2.0)
-        # ── Phase 7: vertical escape (default off = old behaviour) ──────────
+        # Phase 7: vertical escape (default off = old behaviour)
         self.declare_parameter("allow_upward_escape", False)
         self.declare_parameter("escape_ceiling_m", 5.0)
 
@@ -175,7 +175,7 @@ class EvasionNode(Node):
         self.add_on_set_parameters_callback(self._on_param_set)
         self._meas_std_xyz = _resolve_meas_std_xyz(self._p["meas_std_xyz_m"])
 
-        # ── Tracker + state machine ──────────────────────────────────────
+        # Tracker + state machine
         self._tracker = MultiHypothesisTracker(
             max_tracks=int(self._p["max_tracks"]),
             max_assoc_sigma_m=float(self._p["max_assoc_sigma_m"]),
@@ -193,7 +193,7 @@ class EvasionNode(Node):
         self._warned_no_odom = False
         self._warned_bad_quat = False
 
-        # ── ROS interfaces ───────────────────────────────────────────────
+        # ROS interfaces
         self.create_subscription(PointStamped, self._p["centroid_topic"],
                                  self._centroid_cb, RELIABLE_QOS)
         self.create_subscription(Odometry, self._p["odom_topic"],
@@ -225,7 +225,7 @@ class EvasionNode(Node):
             f"for {self._p['dodge_duration_s']} s"
         )
 
-    # ── Param updates (sweep support) ────────────────────────────────────
+    # Param updates (sweep support)
 
     def _on_param_set(self, params) -> SetParametersResult:
         """Validate every parameter in the set before applying any of them.
@@ -256,7 +256,7 @@ class EvasionNode(Node):
                 self.get_logger().info(f"param {prm.name} -> {prm.value}")
         return SetParametersResult(successful=True)
 
-    # ── Callbacks ────────────────────────────────────────────────────────
+    # Callbacks
 
     def _odom_cb(self, msg: Odometry) -> None:
         self._last_odom = msg
@@ -400,7 +400,7 @@ class EvasionNode(Node):
             self._start_dodge(plan, track, q, msg.header.stamp, v_drone,
                               min_updates)
 
-    # ── Dodge lifecycle ──────────────────────────────────────────────────
+    # Dodge lifecycle
 
     def _start_dodge(self, plan, track, q, stamp, v_drone,
                      min_updates_used) -> None:
@@ -529,7 +529,7 @@ class EvasionNode(Node):
         req.data = run
         self._patrol_cli.call_async(req)
 
-    # ── Intercept output ─────────────────────────────────────────────────
+    # Intercept output
 
     def _publish_intercept(self, plan, pos_proj, vel_proj, T_odom_bl,
                            stamp) -> None:

@@ -68,7 +68,7 @@ class ProjectileTracker:
         # so a zero v_proj makes the ball look like it is receding — the relative
         # minimum lands at t~0, giving tca~0 and a predicted miss equal to the
         # current range. should_dodge then reads a genuine intercept as "not a
-        # threat" until the velocity re-converges. Measured 2026-07-27: the
+        # threat" until the velocity re-converges. Measured: the
         # published predicted miss does track the ball's current range on inbound
         # throws, which is that signature — these counters say whether mid-flight
         # reseeds are the cause. The two paths are separated because their fixes
@@ -78,7 +78,7 @@ class ProjectileTracker:
         self._n_reseeds_timeout = 0
         self.reset()
 
-    # ── track lifecycle ──────────────────────────────────────────────────
+    # track lifecycle
 
     def reset(self) -> None:
         self._x: Optional[np.ndarray] = None
@@ -154,7 +154,7 @@ class ProjectileTracker:
             raise RuntimeError("no active track")
         return self._x[:3].copy(), self._x[3:].copy()
 
-    # ── filtering ────────────────────────────────────────────────────────
+    # filtering
 
     def process(self, t: float, z, R=None, source: Optional[str] = None) -> bool:
         """
@@ -211,7 +211,7 @@ class ProjectileTracker:
         self._apply(x_pred, P_pred, S, nu, t, source)
         return True
 
-    # ── association primitives (used by MultiHypothesisTracker) ──────────
+    # association primitives (used by MultiHypothesisTracker)
 
     def association_cost(self, t: float, z, *, cov_cap: float, R=None) -> float:
         """How well this track explains z, as a negative log-likelihood.
@@ -271,7 +271,7 @@ class ProjectileTracker:
     def is_stale(self, t: float) -> bool:
         return self._x is not None and (t - self._t) > self._timeout
 
-    # ── filter internals ─────────────────────────────────────────────────
+    # filter internals
 
     def _as_R(self, R) -> np.ndarray:
         """This measurement's covariance, or the configured default.
@@ -365,7 +365,7 @@ class MultiHypothesisTracker:
         self._n_spawned = 0
         self._n_pruned = 0
 
-    # ── introspection ────────────────────────────────────────────────────
+    # introspection
 
     @property
     def tracks(self) -> list[ProjectileTracker]:
@@ -392,7 +392,7 @@ class MultiHypothesisTracker:
     def reset(self) -> None:
         self._tracks.clear()
 
-    # ── association ──────────────────────────────────────────────────────
+    # association
 
     def process(self, t: float, z, R=None, source: Optional[str] = None) -> bool:
         """Route one measurement. Always True: a centroid that no hypothesis
@@ -435,7 +435,7 @@ class MultiHypothesisTracker:
             self._tracks.remove(weakest)
 
 
-# ── Dodge planning ────────────────────────────────────────────────────────
+# Dodge planning
 
 
 def predict_closest_approach(
@@ -543,7 +543,7 @@ def clamp_dodge_to_clearance(
     dodge_direction() only sees the approach geometry, and it is *usually*
     right to escape downward: a gravity-compensated throw arrives descending,
     so the fastest-opening perpendicular points down. That is also how the
-    drone kills itself. Measured live 2026-07-26 hovering at 2 m:
+    drone kills itself. Measured live hovering at 2 m:
 
         dir_body=(+0.01,+0.68,-0.74)
         dir_body=(+0.03,+0.56,-0.83)
@@ -737,7 +737,7 @@ def dodge_velocity_command(
     from where the drone was when the dodge fired.
 
     Commanding an absolute dodge_speed_mps * direction gets this wrong,
-    measured 2026-07-27 over 16 dodges (scripts/hz_cmd_path_probe.py): it
+    measured over 16 dodges (scripts/hz_cmd_path_probe.py): it
     REPLACES the ~4.2 m/s patrol cruise with a 1.5 m/s command, so the drone
     sheds 2.5-3.9 m/s within a second and the deviation is dominated by
     -v_cruise. Its component along the escape direction is

@@ -13,7 +13,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 
-# ── Quaternions / rigid transforms ────────────────────────────────────────────
+# Quaternions / rigid transforms
 
 def is_valid_quat(x: float, y: float, z: float, w: float,
                   tol: float = 1e-3) -> bool:
@@ -57,10 +57,10 @@ def rotate_covariance(R: np.ndarray, Rot: np.ndarray) -> np.ndarray:
     return Rot @ R @ Rot.T
 
 
-# ── Voxel grid (pure-numpy, no PCL / open3d dep) ─────────────────────────────
+# Voxel grid (pure-numpy, no PCL / open3d dep)
 
 # Voxel indices are packed into one int64 so np.unique can take its fast 1-D
-# sort path. Measured 2026-07-27 on the Dell, this function was THE detector
+# sort path. Measured on the Dell, this function was THE detector
 # latency overrun: 66-74 ms per call on patrol clouds against a 77 ms/frame wall
 # budget (15 Hz at RTF 0.864), 48-62% of all measured stage time. Two numpy
 # anti-patterns, both in one function:
@@ -124,7 +124,7 @@ def voxel_downsample(pts: np.ndarray, leaf: float) -> np.ndarray:
     return _voxel_centroids(pts, inv.ravel(), len(unique_packed))
 
 
-# ── Frame differencing ────────────────────────────────────────────────────────
+# Frame differencing
 
 def foreground_mask(current: np.ndarray, background: np.ndarray,
                     threshold: float) -> np.ndarray:
@@ -140,7 +140,7 @@ def foreground_mask(current: np.ndarray, background: np.ndarray,
     return min_dists > threshold
 
 
-# ── Euclidean clustering (single-linkage radius, cKDTree) ────────────────────
+# Euclidean clustering (single-linkage radius, cKDTree)
 
 # Cap on materialised neighbour pairs before clustering falls back to the
 # per-point traversal. 4M pairs is ~64 MB of int64 indices. The voxel stage
@@ -228,7 +228,7 @@ def cluster_all(pts: np.ndarray, tol: float, min_pts: int) -> list[np.ndarray]:
     a large surface lands in one oversized cluster, and discarding it here loses
     the ball. cluster_and_split() re-clusters such a blob instead.
 
-    Measured 2026-07-27 on the Dell: this was the second-hottest detector stage
+    Measured on the Dell: this was the second-hottest detector stage
     after voxel_downsample was fixed — 12-71 ms per call, up to 38% of stage
     time — because the original implementation issued one Python-level
     tree.query_ball_point per point. It is now one query_pairs plus one
@@ -280,7 +280,7 @@ def cluster_and_split(pts: np.ndarray, tol: float, min_pts: int,
     re-clustered ONCE at the tighter `split_tol` instead of being discarded.
     Returns only clusters with extent <= max_extent.
 
-    Why this exists (W4, 2026-07-26): the old path clustered once at
+    Why this exists (W4,): the old path clustered once at
     cluster_tolerance_m and then *discarded* anything bigger than the ball. Under
     patrol that threw the ball away with the clutter — funnel evidence from a
     throw that passed 0.484 m from the drone:

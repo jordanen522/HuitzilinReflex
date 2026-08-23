@@ -294,7 +294,7 @@ class SyntheticDepthPublisherNode(Node):
     def _p(self, name):
         return self.get_parameter(name).value
 
-    # ── callbacks ────────────────────────────────────────────────────────────
+    # callbacks
 
     def _odom_cb(self, msg: Odometry) -> None:
         self._last_odom = msg
@@ -410,7 +410,7 @@ class SyntheticDepthPublisherNode(Node):
             return None
         return points, float(np.linalg.norm(rel_cam))
 
-    # ── output ───────────────────────────────────────────────────────────────
+    # output
 
     def _make_cloud(self, points: np.ndarray, stamp) -> PointCloud2:
         """An unorganized float32 xyz cloud in the gz sensor body convention.
@@ -447,7 +447,7 @@ class SyntheticDepthPublisherNode(Node):
             % (self._n_with_ball, cloud.width, rng_m),
             throttle_duration_sec=1.0)
 
-    # ── alarms ───────────────────────────────────────────────────────────────
+    # alarms
 
     def _note_no_drone(self, msg: TFMessage) -> None:
         """Say once that the configured drone model is not in the world.

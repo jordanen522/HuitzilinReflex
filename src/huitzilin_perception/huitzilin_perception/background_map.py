@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import numpy as np
 
-# ── Voxel key packing ─────────────────────────────────────────────────────────
+# Voxel key packing
 # 21 bits per axis, signed via a bias, packed into one int64 (63 bits used).
 # Collision-free by construction — a hash with mixing would not be, and a false
 # "already seen" silently deletes a projectile.
@@ -82,12 +82,12 @@ class VoxelBackgroundMap:
         self._inserts = 0
         self._last_t: float | None = None
 
-    # ── introspection ────────────────────────────────────────────────────────
+    # introspection
 
     def __len__(self) -> int:
         return int(self._keys.size)
 
-    # ── core ─────────────────────────────────────────────────────────────────
+    # core
 
     def clear(self) -> None:
         self._keys = np.empty(0, dtype=np.int64)

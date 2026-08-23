@@ -139,7 +139,7 @@ def gz_world_control(world: str, body: str,
     DO NOT pause a world that a flying SITL is attached to. ArduPilot keeps
     running on wall clock while Gazebo is frozen, so it winds up its
     controllers against stale state and the drone lurches hard on resume.
-    Measured 2026-07-26 with a ~2 s pause across create+impulse: the very
+    Measured with a ~2 s pause across create+impulse: the very
     first frame after resume floods the detector's egomotion diff
     (fg=34881 > fg_max_points), the next has raw 115k->153k and the range
     gate 17k->58k as the tilted frustum fills with ground, and the whole
@@ -226,7 +226,7 @@ class WrenchThrower:
     published from ROS publishers that are already matched to
     ros_gz_bridge's ROS->gz bridge (launched by week4_evasion.launch.py).
 
-    Verified 2026-07-26: ball held dead still at z=3.000 across five polls
+    Verified: ball held dead still at z=3.000 across five polls
     after create, then a 8 m/s vertical throw apexed at 6.08+ m against 6.26
     predicted (0.2 s polling straddles the true apex).
 
@@ -324,7 +324,7 @@ def _run_gz(cmd: list[str], timeout_s: float) -> tuple[bool, str]:
     exits 0 with empty stdout, and a request `gz` itself cannot parse writes
     a protobuf error to stderr and also exits 0. Both are caught here so no
     caller can read silence as success — that hid every failed spawn of the
-    2026-07-26 bring-up session.
+    bring-up session.
     """
     try:
         result = subprocess.run(cmd, capture_output=True, text=True,
@@ -350,7 +350,7 @@ class SpawnProjectileNode(Node):
     def __init__(self) -> None:
         super().__init__("spawn_projectile")
 
-        # ── Params ────────────────────────────────────────────────────────────
+        # Params
         self.declare_parameter("scenario_id", "S00")
         self.declare_parameter("speed_mps", 8.0)
         self.declare_parameter("approach_angle_deg", 0.0)   # 0° = head-on from front
@@ -367,7 +367,7 @@ class SpawnProjectileNode(Node):
         # hash-space int quantization and the physics engine aborts the entire
         # world ("ODE INTERNAL ERROR 1: assertion aabbBound >= dMinIntExact &&
         # aabbBound < dMaxIntExact failed in collide()"). That killed the
-        # 2026-07-26 bring-up world after ~9 idle hours, with leftover balls
+        # bring-up world after ~9 idle hours, with leftover balls
         # measured at x=-42 m and x=-207 m. dodge_battery calls gz_remove
         # itself, so this only covers the standalone/probe path. 20 s wall is
         # ~6 s of sim time at the Dell's ~0.33 RTF — well past a 0.75 s transit,

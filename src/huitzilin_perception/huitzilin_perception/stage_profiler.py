@@ -55,7 +55,7 @@ class StageProfiler:
         self._frames = 0
         self._wall0 = time.monotonic()
 
-    # ── Recording ────────────────────────────────────────────────────────────
+    # Recording
 
     @contextmanager
     def stage(self, name: str):
@@ -77,7 +77,7 @@ class StageProfiler:
     def frame_done(self) -> None:
         self._frames += 1
 
-    # ── Reporting ────────────────────────────────────────────────────────────
+    # Reporting
 
     def due(self) -> bool:
         return self._frames >= self._window

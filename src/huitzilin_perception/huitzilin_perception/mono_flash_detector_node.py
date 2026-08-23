@@ -144,7 +144,7 @@ class MonoFlashDetectorNode(Node):
             f"(fx {self._p['fx_px']} px, baseline {self._p['baseline_m']} m). "
             "Replace with the device's own before trusting a range.")
 
-    # ── frame plumbing ───────────────────────────────────────────────────
+    # frame plumbing
 
     @staticmethod
     def _stamp_to_sec(stamp) -> float:
@@ -214,7 +214,7 @@ class MonoFlashDetectorNode(Node):
         del self._pending_right[:best_i + 1]
         return frame
 
-    # ── detection ────────────────────────────────────────────────────────
+    # detection
 
     def _detect(self, prev_l, cur_l, prev_r, cur_r):
         diff_l = np.abs(cur_l.astype(np.int16) - prev_l.astype(np.int16))
@@ -259,7 +259,7 @@ class MonoFlashDetectorNode(Node):
             centroid_std_px=float(self._p["centroid_std_px"]))
         return point, cov
 
-    # ── output ───────────────────────────────────────────────────────────
+    # output
 
     def _publish(self, point, cov, stamp) -> None:
         src = PointStamped()

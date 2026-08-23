@@ -13,7 +13,7 @@ format, and hand-parse it into TFMessage — matching the exact shape
 dodge_battery.py already expects on /gz/dynamic_poses (TransformStamped per
 pose, child_frame_id = model name).
 
-Message format (captured 2026-07-23 via `gz topic -e -t .../dynamic_pose/info`):
+Message format (captured via `gz topic -e -t .../dynamic_pose/info`):
   header {
     stamp { sec: <int> nsec: <int> }
   }
@@ -28,7 +28,7 @@ Message format (captured 2026-07-23 via `gz topic -e -t .../dynamic_pose/info`):
   pose { ... }
   ...
 
-Message framing (corrected 2026-07-24 on the Dell): this build emits **no
+Message framing (corrected on the Dell): this build emits **no
 blank-line separators** — top-level blocks stream back to back. An earlier
 version split messages on blank lines, so the buffer never flushed and
 /gz/dynamic_poses stayed silent while the source streamed fine. Boundaries are

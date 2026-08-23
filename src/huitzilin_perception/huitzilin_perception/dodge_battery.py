@@ -245,7 +245,7 @@ class DodgeBatteryNode(Node):
         self._ball_track = []   # opening (sim_t, ball_enu) samples of the flight
         # True separation when the detector FIRST reports the ball. This, not
         # roi_max_range_m, is what bounds how much warning the dodge can get:
-        # measured 2026-07-27, widening the gate 5 -> 8 m left tca unchanged
+        # measured, widening the gate 5 -> 8 m left tca unchanged
         # (0.204 -> 0.201 s) while costing 41 ms of latency, so the ball's
         # detectable range is set by how many points it projects at distance,
         # not by the gate that discards points beyond it.
@@ -280,7 +280,7 @@ class DodgeBatteryNode(Node):
             f"world={self._world} drone_model={self._drone_model}"
         )
 
-    # ── Subscriptions ────────────────────────────────────────────────────
+    # Subscriptions
 
     def _odom_cb(self, msg: Odometry) -> None:
         self._latest_odom = msg
@@ -392,7 +392,7 @@ class DodgeBatteryNode(Node):
             except json.JSONDecodeError:
                 self.get_logger().warn("unparseable /threat/evade_event payload")
 
-    # ── Time helpers (SIM time via node clock; use_sim_time:=true) ───────
+    # Time helpers (SIM time via node clock; use_sim_time:=true)
 
     def _sim_now(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9
@@ -493,7 +493,7 @@ class DodgeBatteryNode(Node):
             time.sleep(0.05)
         return False, reason, best_leg, needed_s
 
-    # ── Main flow ────────────────────────────────────────────────────────
+    # Main flow
 
     def run(self) -> int:
         if not self._thrower.wait_for_bridge():
@@ -653,7 +653,7 @@ class DodgeBatteryNode(Node):
         # therefore leads with a systematically SLOWER speed than the drone has
         # at launch, i.e. a systematic under-lead.
         #
-        # Measured 2026-07-27, which is how this was found: the drone arrived at
+        # Measured, which is how this was found: the drone arrived at
         # closest approach 0.217 s ahead of the assumed flight time and
         # lead_along sat at -1.40 m (= 1.14 m at the 5.26 m/s cruise) — two
         # independent measurements of the same ~0.22 s. Ball speed was verified
@@ -1007,7 +1007,7 @@ class DodgeBatteryNode(Node):
             self.get_logger().info(f"sweep combo applied: {self._combo_str(combo)}")
         return ok
 
-    # ── Reporting ────────────────────────────────────────────────────────
+    # Reporting
 
     @staticmethod
     def _miss_lines(sub: list) -> list:
@@ -1109,7 +1109,7 @@ class DodgeBatteryNode(Node):
             n_false = sum(1 for r in wides if not r["success"])
             lats = [r["latency_ms"] for r in sub if r.get("latency_ms") is not None]
             # On-target subsets: a throw that missed its specified geometry
-            # tests the throw harness, not the dodge. Battery v7 (2026-07-26)
+            # tests the throw harness, not the dodge. Battery v7
             # is why this is printed: 3 of 3 B01 runs missed by 1.0-4.2 m and
             # B07's nominal 1.5 m wide miss arrived at 0.30 m, so its
             # "0/2 false dodges" was crediting the trigger for ignoring a
@@ -1229,7 +1229,7 @@ class DodgeBatteryNode(Node):
             # detection that happened but did not become a maturing track.
             #
             # A large gap once looked like a DETECTOR consistency problem, and
-            # the label stuck; it was not. A per-frame trace on 2026-07-27
+            # the label stuck; it was not. A per-frame trace
             # showed the detector publishing the true ball on 5-6 consecutive
             # frames from ~4.7 m inwards, so nothing was being dropped — the
             # frames were being spent inside the single-target filter, arguing
