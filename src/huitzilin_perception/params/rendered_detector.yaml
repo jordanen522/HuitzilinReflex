@@ -213,8 +213,21 @@ detector:
 
     # = required_cluster_max_extent_m(roi_max_range_m), NOT of the 26 m
     # reach. See the header: sizing it at the reach fragments the longest
-    # detections, which are the ones the claim depends on.
+    # detections, which are the ones the claim depends on. Still governs
+    # cluster_and_split's split decision below (must stay this loose so a
+    # 28 m ball isn't fragmented at the split step).
     cluster_max_extent_m: 0.64   # CHANGED from 0.35 — see the header.
+
+    # 2026-08-22 RT-set recall root cause: the single 0.64 m ceiling above,
+    # applied to every cluster regardless of its own range, let near/mid-
+    # range clutter fragments (up to 0.64 m across) into ball_sized
+    # candidacy, where they out-pointed the genuine (small, close-range)
+    # ball cluster. This applies required_cluster_max_extent_m() PER
+    # CANDIDATE at its own detection range instead — e.g. ~0.10 m at 5 m,
+    # 0.64 m only right at the 28 m ROI ceiling — so cluster_max_extent_m
+    # above still bounds what cluster_and_split will even consider, but this
+    # is the gate that decides what actually looks like the ball.
+    range_adaptive_extent: true
 
     # ── Centroid publishing ───────────────────────────────────────────────────
     min_publish_score: 0.006

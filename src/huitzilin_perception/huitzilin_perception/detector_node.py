@@ -56,6 +56,7 @@ from huitzilin_perception.cloud_geometry import (
     make_transform,
     voxel_downsample,
 )
+from huitzilin_perception.depth_noise import required_cluster_max_extent_m
 from huitzilin_perception.stage_profiler import StageProfiler
 
 
@@ -163,6 +164,21 @@ class DetectorNode(Node):
         # ball-sized fragments — measured) and below the ball's standoff.
         self.declare_parameter("cluster_split_tol_m", 0.10)
         self.declare_parameter("cluster_split_max_points", 5000)
+        # 2026-08-22 RT-set root cause: `ball_sized` below filters candidates
+        # by point count only, never by extent. cluster_max_extent_m is a
+        # single global ceiling (0.64 m on the rendered lane, sized for the
+        # 28 m ROI ceiling so the noisiest long-range ball survives
+        # cluster_and_split's split pass) — applied to every cluster
+        # regardless of its own range, it also admits near/mid-range clutter
+        # fragments up to 0.64 m across, which then out-point the genuine
+        # (correctly small at short range) ball cluster in the largest-
+        # cluster pick. depth_noise.required_cluster_max_extent_m(range) is
+        # the function rendered_detector.yaml's own header already used to
+        # derive 0.64 m for r=28 m; this applies it PER CANDIDATE CLUSTER at
+        # its own range instead of once globally. False by default so every
+        # non-rendered lane stays byte-identical; only rendered_detector.yaml
+        # opts in.
+        self.declare_parameter("range_adaptive_extent", False)
         # Cloud subscription reliability. TRUE is not the usual sensor-data
         # choice, and it is deliberate: /oak/points is a 7.37 MB sample
         # (640x480 x 24 B) fragmented across thousands of UDP datagrams against
@@ -363,6 +379,7 @@ class DetectorNode(Node):
             "bg_map_range_split_m": self.get_parameter("bg_map_range_split_m").value,
             "cluster_split_tol_m": self.get_parameter("cluster_split_tol_m").value,
             "cluster_split_max_points": self.get_parameter("cluster_split_max_points").value,
+            "range_adaptive_extent": self.get_parameter("range_adaptive_extent").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
@@ -685,6 +702,20 @@ class DetectorNode(Node):
                 split_tol=self._p["cluster_split_tol_m"],
                 max_split_points=self._p["cluster_split_max_points"],
             )
+        if self._p["range_adaptive_extent"]:
+            with prof.stage("range_extent_gate"):
+                T_cam_fixed = (np.linalg.inv(T_fixed_cam)
+                               if mode == "fixed" and T_fixed_cam is not None
+                               else None)
+                range_gated = []
+                for c in split:
+                    ctr = c.mean(axis=0)
+                    r = (float(apply_transform(T_cam_fixed, ctr[None, :])[0, 2])
+                         if T_cam_fixed is not None else float(ctr[2]))
+                    if cluster_extent(c) <= required_cluster_max_extent_m(max(r, 0.0)):
+                        range_gated.append(c)
+                split = range_gated
+
         # cluster_max_points still applies, but only AFTER splitting: a dense
         # sub-0.35 m blob is not a ball, and it would otherwise out-vote the ball
         # in the largest-cluster pick below. Pre-split it discarded the ball.
