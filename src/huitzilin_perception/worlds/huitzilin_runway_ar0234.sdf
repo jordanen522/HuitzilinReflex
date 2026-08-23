@@ -37,14 +37,14 @@
 <sdf version="1.9">
   <world name="huitzilin_runway">
 
-    <!-- ── Physics ── -->
+    <!-- Physics -->
     <physics name="1ms" type="ignored">
       <max_step_size>0.001</max_step_size>
       <real_time_factor>1.0</real_time_factor>
       <real_time_update_rate>1000</real_time_update_rate>
     </physics>
 
-    <!-- ── Plugins ── -->
+    <!-- Plugins -->
     <plugin filename="gz-sim-physics-system"
             name="gz::sim::systems::Physics"/>
     <plugin filename="gz-sim-user-commands-system"
@@ -70,7 +70,7 @@
     <plugin filename="gz-sim-apply-link-wrench-system"
             name="gz::sim::systems::ApplyLinkWrench"/>
 
-    <!-- ── Sun ── -->
+    <!-- Sun -->
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
       <pose>0 0 10 0 0 0</pose>
@@ -80,7 +80,7 @@
       <direction>-0.5 0.1 -0.9</direction>
     </light>
 
-    <!-- ── Ground plane ── -->
+    <!-- Ground plane -->
     <model name="ground_plane">
       <static>true</static>
       <link name="link">
@@ -97,7 +97,7 @@
       </link>
     </model>
 
-    <!-- ── Drone (iris_ar0234 = iris_with_standoffs + AR0234 mono + 10 mm M12) ── -->
+    <!-- Drone (iris_ar0234 = iris_with_standoffs + AR0234 mono + 10 mm M12) -->
     <include>
       <uri>model://iris_ar0234</uri>
       <name>iris_ar0234</name>

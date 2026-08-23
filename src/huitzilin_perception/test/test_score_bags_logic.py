@@ -203,7 +203,7 @@ def test_strict_window_is_asymmetric_about_the_event():
     assert upper - spawn == pytest.approx(
         FLAT_THROW_FALL_TIME_S + POST_EVENT_TOLERANCE_S)
     assert upper < event + POST_EVENT_TOLERANCE_S
-    assert (upper - lower) < 2 * 4.0                  # narrower than 5b's 8 s
+    assert (upper - lower) < 2 * 4.0                  # narrower than the legacy 8 s
 
 
 def test_strict_window_is_a_subset_of_the_symmetric_gate():
@@ -457,7 +457,7 @@ def test_strict_window_rejects_detection_one_tick_before_spawn():
 
 
 def test_strict_window_rejects_late_background_the_old_gate_accepted():
-    # 3.5 s after the nominal event: inside 5b's +/-4 s tolerance, outside
+    # 3.5 s after the nominal event: inside the legacy +/-4 s tolerance, outside
     # the 2 s the ball's own physics can justify.
     late = [100.0 + SPAWN_LEAD_S + 0.75 + 3.5]
     assert is_in_window_symmetric_legacy(
@@ -481,7 +481,7 @@ def test_strict_window_uses_spawn_lead_s_by_default():
 
 
 def test_strict_window_false_far_from_closest_approach_but_inside_loose_window():
-    # The discriminator the 5b brief asked for: a detection that passes the
+    # The discriminator required here: a detection that passes the
     # loose (bag-start-anchored) gate but is nowhere near when the ball was
     # actually present must fail the strict gate.
     # ttc is the library MAXIMUM (S01, 1.5 s). It used to be 8.0 here, which
@@ -529,17 +529,17 @@ def test_loose_window_has_no_lower_bound_as_documented():
     assert is_in_window_loose([99.0], bag_start=100.0, window_s=4.0) is True
 
 
-def test_symmetric_legacy_gate_reproduces_task_5b_exactly():
+def test_symmetric_legacy_gate_reproduces_the_original_exactly():
     assert is_in_window_symmetric_legacy(
         [100.0], bag_start=100.0, time_to_closest_s=0.43, window_s=4.0
-    ) is True   # -0.57 s relative to bag start: 5b's real lower edge
+    ) is True   # -0.57 s relative to bag start: the legacy gate's real lower edge
 
 
 def test_symmetric_window_bounds_are_the_old_gate_written_as_an_interval():
     lower, upper = symmetric_window_bounds(100.0, 0.43, window_s=4.0)
     event = 100.0 + SPAWN_LEAD_S + 0.43
     assert (lower, upper) == pytest.approx((event - 4.0, event + 4.0))
-    # 5b's real lower edge for S03/S06/S08: 0.57 s BEFORE bag start.
+    # The legacy lower edge for S03/S06/S08: 0.57 s BEFORE bag start.
     assert lower == pytest.approx(100.0 - 0.57)
 
 
@@ -693,11 +693,11 @@ def _sequence(start_range, rate_mps, n, hz=15.0, t0=100.0):
 
 def test_airframe_speed_closing_run_is_not_attributed():
     # THE required negative case: a textbook clean, strictly decreasing,
-    # time-contiguous run of 5 points — which the 5b rule attributes with no
+    # time-contiguous run of 5 points — which the sign rule attributes with no
     # hesitation — closing at 2.09 m/s, the MEDIAN measured patrol speed.
     # This is a rock the drone is flying at, and it must not read as a ball.
     egomotion = _sequence(4.5, 2.09, 5)
-    assert longest_closing_run(egomotion) == 5          # 5b would attribute
+    assert longest_closing_run(egomotion) == 5          # the sign rule would attribute
     result = attribute_closing_ball(egomotion, ball_speed_mps=8.0)
     assert result["attributable"] is False
     assert "m/s" in result["reason"]
@@ -837,19 +837,19 @@ def test_out_of_band_step_still_fails_when_neither_half_is_long_enough():
 
 # --- the null model (a later revision, MEDIUM-5) ----------------------------------
 
-def test_monte_carlo_harness_reproduces_the_published_5b_noise_rate():
+def test_monte_carlo_harness_reproduces_the_published_noise_rate():
     # The harness is shipped so this number can be re-derived rather than
-    # believed. The 5b sign rule is distribution-free (it reads only the
-    # sign of successive differences), so this figure is an exact check on
-    # the harness: the the earlier revision reviewer published 0.91 at n=15 over 200 000
-    # trials, and it is the number that explains 5b's "11 of 12
-    # attributable" as noise. Seeded, so this does not flake.
+    # believed. The sign rule is distribution-free (it reads only the sign of
+    # successive differences), so this figure is an exact check on the
+    # harness: 0.91 at n=15 over 200 000 trials, which is the number that
+    # explains the legacy "11 of 12 attributable" as noise. Seeded, so this
+    # does not flake.
     p = null_attribution_mc.p_fires(
         null_attribution_mc.fires_sign_rule, n=15, trials=20_000)
     assert p == pytest.approx(0.91, abs=0.015)
 
 
-def test_monte_carlo_harness_reproduces_the_published_5c_noise_rate():
+def test_monte_carlo_harness_reproduces_the_magnitude_noise_rate():
     # The replacement rule is 2.5-4x better and still not decisive: at the
     # in-window counts this library actually produces, pure noise attributes
     # a ball roughly a third of the time.
@@ -906,11 +906,11 @@ def test_the_null_floor_sits_at_the_smallest_in_window_count():
 
 
 def test_sign_only_run_at_airframe_speed_never_becomes_attributable():
-    # The refuted 5b statistic and the 5c verdict must disagree here — that
+    # The refuted sign statistic and the magnitude verdict must disagree — that
     # disagreement is the whole point of the fix.
     ego = _sequence(4.9, 2.09, 8)
     result = attribute_closing_ball(ego, ball_speed_mps=17.0)
-    assert result["longest_run"] == 8      # what 5b reported and trusted
+    assert result["longest_run"] == 8      # what the sign rule reported and trusted
     assert result["best_run"] < DEFAULT_MIN_CLOSING_RUN
     assert result["attributable"] is False
 

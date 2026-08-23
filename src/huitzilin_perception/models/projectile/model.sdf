@@ -7,7 +7,7 @@
            created until it is thrown. The `gz` CLI costs ~0.5 s of SIM time
            per call, so with gravity on the ball free-fell 1.55 m and hit the
            ground before its impulse arrived, then rolled away along z=0.040
-           and never crossed the camera frustum (measured 2026-07-26).
+           and never crossed the camera frustum.
            spawn_projectile restores gravity as a persistent wrench of
            -mass*g on /world/<world>/wrench/persistent, published from the
            same warm publisher as the launch impulse so both land within a
@@ -26,7 +26,7 @@
       <!-- NO <collision> ELEMENT, DELIBERATELY. The ball must collide with
            NOTHING: it flies its parabola through the airframe and the runway
            alike. This is a measurement decision, not a fidelity shortcut. A
-           150 g ball at 8-14 m/s does tumble a 3.5" quad, and it did: 2026-07-26
+           150 g ball at 8-14 m/s does tumble a 3.5" quad, and it did:
            the battery scored B03 r0 as dodged=True min=0.27 m (a real
            miss-distance failure), then the contact flipped the vehicle,
            ArduPilot crash-checked (AngErr=170>30) and disarmed, and every
@@ -44,7 +44,7 @@
              XML Element[collide_bitmask], child of element[surface], not
              defined in SDF. Copying[collide_bitmask] as children of [surface].
 
-           Measured cost (2026-08-07, cell r12.0 dataflash 00000008.BIN): six of
+           Measured cost (cell r12.0, dataflash 00000008.BIN): six of
            eight throws produced an UNCOMMANDED attitude excursion starting
            0.27-0.47 s after the dodge (the tca window, i.e. ball arrival),
            peaking at a roll of 33-48 deg, past ATC_ANGLE_MAX=30 and so not

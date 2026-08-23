@@ -4,17 +4,14 @@ name: tests
 # yaml or pymavlink, so it runs on a stock ubuntu runner with no ROS 2 and no
 # colcon build.
 #
-# THIS IS A DENY-LIST ON PURPOSE -- collect both test/ directories, then
-# subtract. It used to name all 14 ROS-free modules explicitly, and five new
-# ones (test_oracle, test_mono_flash, test_cmd_router, test_setpoint_masks,
-# test_projectile_model) were added to the tree without being added here, so
-# they ran only on the Dell and never on push. An allow-list fails SILENTLY --
-# a module nobody lists simply never runs, and CI stays green while covering
-# less than you think. A deny-list fails LOUDLY: a new module that needs ROS
-# breaks the run until it is named below, which is the error you want.
+# The module list is a DENY-LIST on purpose: collect both test/ directories,
+# then subtract. An allow-list fails silently -- a module nobody lists simply
+# never runs, and CI stays green while covering less than you think. A
+# deny-list fails loudly: a new module that needs ROS breaks the run until it
+# is named below.
 #
-# NOT run here, and not an oversight:
-#   test_evasion_params  - imports evasion_node, which imports rclpy.
+# Not run here, and not an oversight:
+#   test_evasion_params - imports evasion_node, which imports rclpy.
 # test_clock_guard IS run: clock_guard imports rclpy.clock only inside
 # install_clock_guard, and those tests skip themselves without it.
 #

@@ -9,7 +9,7 @@
 # Prereq: ROS 2 Jazzy + workspace overlay sourced in THIS shell:
 #   source /opt/ros/jazzy/setup.bash && source ~/huitzilin_ws/install/setup.bash
 #
-# Verified 2026-07-06: with SITL up, this world flies (Frame QUAD/X, EKF+GPS,
+# Verified: with SITL up, this world flies (Frame QUAD/X, EKF+GPS,
 # no "No JSON sensor message") and /oak/points streams 15 Hz sim, metronome-stable.
 set -euo pipefail
 

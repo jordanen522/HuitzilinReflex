@@ -109,7 +109,7 @@ TF2_PID=$!
 # The warm-up player is inert by construction. --topics /clock replays ONLY the
 # recorded clock track, so /oak/points and /huitzilin/odom stay silent and the
 # detector's persistent background map cannot be seeded with frames from outside
-# the scenario being scored — verified on the Dell 2026-08-03: /clock advancing
+# the scenario being scored — verified on the Dell: /clock advancing
 # with one publisher, both sensor topics confirmed silent. --loop keeps time
 # moving if startup drags. It is killed the moment the guard passes; the guard
 # never runs again, and score_bags drives /clock from that point on.

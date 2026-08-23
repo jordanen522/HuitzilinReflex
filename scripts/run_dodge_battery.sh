@@ -23,7 +23,7 @@
 # detection_range_m alone describes the wrong instrument: "the sensor" is reach
 # AND sector AND rate, and a gate that matches one axis while leaving the other
 # two at some other sensor's values does not reproduce the reference. Measured
-# on the depth lane 2026-08-16 — at reach 3.4 m the shipped sector and rate gave
+# on the depth lane — at reach 3.4 m the shipped sector and rate gave
 # D11 4/6 and D12 6/6, the shipped sector at 15 Hz gave 1/6 and 0/6, and only
 # the fully matched sensor returned 2/6 and 6/6 against a Week 4 reference of
 # 0/17 and 78/78. For week6depth the three axes are detection_range_m,

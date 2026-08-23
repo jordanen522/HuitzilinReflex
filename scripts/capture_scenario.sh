@@ -18,7 +18,7 @@ BAG_DIR="/data/huitzilin_bags"
 # Resolve through the ament index like every sibling script, rather than
 # assuming the workspace is ~/huitzilin_ws.
 MATRIX="$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/config/scenario_matrix.yaml"
-# Bag filename prefix. "week3_" is every bag captured before 2026-08-21;
+# Bag filename prefix. "week3_" is every bag from the original capture;
 # score_bags takes the same default, so nothing existing changes. The held-out
 # set is captured with BAG_PREFIX=heldout_ -- those bags are not Week 3 data
 # and must not be named as though they were:
