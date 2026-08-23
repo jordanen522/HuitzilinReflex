@@ -29,7 +29,7 @@ For each scenario in the chosen split:
      recorded /threat/centroid (and /threat/marker) track. Replaying it
      without excluding those topics republishes that recorded track and
      score_bags' subscriber counts it as a detection by the detector UNDER
-     TEST — Task 5b Defect 1. Exclusion topics are discovered from the
+     TEST. Exclusion topics are discovered from the
      LIVE detector node's own publisher list (see _discover_exclude_topics),
      not hardcoded here, so a future debug publisher cannot reopen this hole
      silently.
@@ -39,7 +39,7 @@ For each scenario in the chosen split:
        [max(event - detection_window_s, bag_start + SPAWN_LEAD_S),
         event + min(detection_window_s, POST_EVENT_TOLERANCE_S)],
        event = bag_start + SPAWN_LEAD_S + time_to_closest_s (all three
-       required — see Defect 2 below and score_bags_logic's
+       required — see the detection-window note below and score_bags_logic's
        strict_window_bounds) → TP else FN
      - Negative scenario: centroid published at any point → FP else TN
   5b. Attribute: decide whether each TP is a ball or background that merely
@@ -64,13 +64,13 @@ For each scenario in the chosen split:
 
 All timing uses message stamps (use_sim_time), never wall-clock.
 
-Defect 2 (Task 5b) — the window was never actually enforced: no sidecar ever
+The detection window — it was never actually enforced: no sidecar ever
 carried `bag_start_sim_t`, so every run silently fell back to "detected
 somewhere in the whole replay", which the FP background alone can satisfy.
 bag_start is now measured directly — but NOT by subscribing to the live
 /clock topic during replay, despite that being the obvious reading of "the
 first /clock stamp is the honest bag-start in sim time." Verified on the
-Dell 2026-08-17: `ros2 bag play --clock` does not republish a bag's own
+`ros2 bag play --clock` does not republish a bag's own
 recorded /clock payload during replay. It SYNTHESISES its own /clock stream
 from real wall-clock playback progress (`ros2 topic echo /clock --once`
 during an active replay returned `sec: 1786950555`, matching that day's
@@ -154,7 +154,7 @@ RELIABLE_QOS = QoSProfile(
     depth=10,
 )
 
-# ── Label sidecar format ──────────────────────────────────────────────────────
+# Label sidecar format
 #
 # Each bag <bag_dir>/week3_<id>_<ts>.mcap has a sidecar:
 #   <bag_dir>/week3_<id>.label.yaml
@@ -169,7 +169,7 @@ RELIABLE_QOS = QoSProfile(
 # bag_start_sim_t is intentionally NOT a sidecar field: score_bags reads it
 # itself from each bag's own recorded /clock payload (see
 # _read_bag_start_sim_t) rather than trusting a recorded value that no
-# sidecar has ever actually carried (Task 5b Defect 2). It is read from the
+# sidecar has ever actually carried. It is read from the
 # BAG FILE directly, not from a live /clock subscription during replay —
 # `ros2 bag play --clock` synthesises its own wall-clock-anchored /clock
 # stream rather than republishing the bag's recorded payload; see the module
@@ -196,18 +196,18 @@ class ScorerNode(Node):
                                "config/scenario_matrix.yaml")
         self.declare_parameter("split", "test")   # train|test|tune|heldout|all
         # Filename prefix of the bags to score. "week3_" is every bag captured
-        # before 2026-08-21 and is the default so no existing invocation
+        # in earlier runs and is the default so no existing invocation
         # changes. The held-out set uses "heldout_", because a bag named
         # week3_H07 carrying the headline recall number is exactly the kind of
         # mislabelling a sceptical reader is right to distrust -- those bags
         # are not Week 3 data, were captured on a different world, against a
-        # different camera, under a pre-registered protocol.
+        # different camera, under a fixed protocol.
         self.declare_parameter("bag_prefix", "week3_")
         self.declare_parameter("recall_floor", 0.95)
         self.declare_parameter("output_file", "/tmp/week3_regression.txt")
         # The node under test. Its own publisher list — discovered live from
         # the ROS graph, not hardcoded — is what gets excluded from bag
-        # replay (Task 5b Defect 1).
+        # replay.
         self.declare_parameter("detector_node_name", "detector")
 
         self._bag_dir   = Path(self.get_parameter("bag_dir").value)
@@ -223,7 +223,7 @@ class ScorerNode(Node):
         self._detection_times: list[float] = []
         # Full (t, x, y, z) alongside the timestamps above — kept separate so
         # is_in_window_strict/loose's pure-function signature (list[float])
-        # never has to change. Only used for attribution (Task 5b): a real
+        # never has to change. Only used for attribution: a real
         # ball produces a closing sequence of centroids with DECREASING
         # range across frames, first-sight terrain/patrol-motion noise does
         # not — see _attributable_to_ball and the task-5b-report.md.
@@ -262,7 +262,7 @@ class ScorerNode(Node):
         self._listening = False
         return list(self._detection_times)
 
-    # ── Main scoring logic ────────────────────────────────────────────────────
+    # Main scoring logic
 
     def run(self) -> int:
         """
@@ -276,7 +276,7 @@ class ScorerNode(Node):
         try:
             self._exclude_topics = self._discover_exclude_topics()
         except RuntimeError as e:
-            # Loud and fatal on purpose (Task 5b Defect 1): a run that cannot
+            # Loud and fatal on purpose: a run that cannot
             # establish what to exclude must not fall back to excluding
             # nothing, which is exactly the self-scoring defect this harness
             # exists to prevent.
@@ -339,16 +339,14 @@ class ScorerNode(Node):
         found yet, retry", not as an immediate fatal error. Raises
         RuntimeError — never returns an empty list — only once every retry
         is exhausted: run() treats that as fatal rather than silently
-        scoring with no exclusion at all.
-
-        Task 5c HIGH-1: the loop used to break on the first NON-EMPTY
+        scoring with no exclusion at all. the loop used to break on the first NON-EMPTY
         result. rclpy creates /parameter_events and /rosout inside
         Node.__init__, i.e. before detector_node.py creates
         /threat/centroid, and DDS propagates endpoints asynchronously — so
         a graph read of ['/parameter_events', '/rosout'] is a real
         intermediate state, it satisfied every guard, and it produced an
         exclusion list without the one topic that matters. That silently
-        restored Defect 1 in full. The break now requires the topic the
+        restored the self-scoring contamination in full. The break now requires the topic the
         harness actually subscribes to; compute_exclude_topics is the
         second, load-bearing check on the same condition.
         """
@@ -389,10 +387,8 @@ class ScorerNode(Node):
         window_s, time_to_closest_s, exc: Exception,
     ) -> dict:
         """
-        Turn a refused detection window into a per-bag error row.
-
-        Task 5c fix round 3, MEDIUM-1. strict_window_bounds() raises on an
-        inverted window (fix round 2) and that raise is CORRECT and stays:
+        Turn a refused detection window into a per-bag error row. strict_window_bounds() raises on an
+        inverted window and that raise is CORRECT and stays:
         an inverted window admits nothing, so scoring under it would post a
         silent FN — the exact failure the gate exists to prevent. What was
         wrong was the blast radius. The raise reached run()'s scenario loop
@@ -449,7 +445,7 @@ class ScorerNode(Node):
         # _read_bag_start_sim_t for why that is the wrong source).
         bag_start = self._read_bag_start_sim_t(bag_path)
         if bag_start is None:
-            # Task 5b Defect 2: "no window could be established" must fail
+            #  "no window could be established" must fail
             # loudly, never quietly pass as "detected somewhere". A bag with
             # no recorded /clock is a harness/capture error, not a detector
             # result — exclude it from the confusion matrix the same way a
@@ -504,9 +500,8 @@ class ScorerNode(Node):
                     "note": "sidecar missing time_to_closest_s — strict "
                             "window cannot be enforced",
                 }
-            # The window is asymmetric, floored at spawn (Task 5c
-            # CRITICAL-1) and clamped at ground impact on the late side
-            # (fix round 1, HIGH-3): lower = max(event - window_s, bag_start
+            # The window is asymmetric, floored at spawn and clamped at ground impact on the late side
+            #: lower = max(event - window_s, bag_start
             # + SPAWN_LEAD_S), upper = spawn + min(ttc, fall_time) +
             # min(window_s, POST_EVENT_TOLERANCE_S). See
             # strict_window_bounds().
@@ -534,7 +529,7 @@ class ScorerNode(Node):
                 )
             # Both superseded gates, computed for the artifact only so the
             # CRITICAL-1 change is visible per scenario rather than only in
-            # aggregate: `sym` is Task 5b's symmetric unfloored gate, `loose`
+            # aggregate: `sym` is the legacy symmetric unfloored gate, `loose`
             # is the pre-5b "anywhere in the first window_s" gate.
             in_window_sym = is_in_window_symmetric_legacy(
                 detections, bag_start, time_to_closest_s, window_s,
@@ -543,7 +538,7 @@ class ScorerNode(Node):
             in_window_loose = is_in_window_loose(detections, bag_start, window_s)
             passed = in_window_strict
             # How many detections each gate ADMITS, not just whether it
-            # fires (fix round 1, MEDIUM-3). n_win/n_win_sym is the only
+            # fires. n_win/n_win_sym is the only
             # number that answers "strict, sym and loose still agree on
             # every positive — is the new gate doing anything at all?", and
             # it belongs in the artifact where it can be recomputed rather
@@ -563,7 +558,7 @@ class ScorerNode(Node):
                 f"{upper - bag_start:.3f}]"
             )
 
-            # Attribution (Task 5c CRITICAL-2): is this TP a real ball, or
+            # Attribution: is this TP a real ball, or
             # background that merely landed inside the window? Restricted to
             # detections actually inside the strict window — a closing run
             # elsewhere in a 20-45 s bag says nothing about THIS TP.
@@ -573,7 +568,7 @@ class ScorerNode(Node):
             attr = attribute_closing_ball(in_window_ranges, speed_mps)
             attributable = attr["attributable"]
             closing_run = attr["longest_run"]
-            # Raw evidence behind the verdict. Task 5c HIGH-2 is about the
+            # Raw evidence behind the verdict. is about the
             # artifact, but the (time, range) pairs themselves are what let
             # an attribution verdict be re-derived offline without another
             # ~13-minute Dell run — which is exactly what was needed to
@@ -585,7 +580,7 @@ class ScorerNode(Node):
             )
             # t_last_rel makes the "POST_EVENT_TOLERANCE_S is non-binding"
             # claim checkable from the artifact instead of from a console
-            # log nobody keeps (fix round 1, MEDIUM-2): compare it against
+            # log nobody keeps: compare it against
             # win_rel's upper edge.
             in_win_times = [t for t in detections if lower <= t <= upper]
             t_last_rel = (
@@ -610,14 +605,14 @@ class ScorerNode(Node):
             # time to anchor to.
             passed = not detected
 
-            # NEGATIVE CONTROL (Task 5c CRITICAL-2b). Every negative carries
+            # NEGATIVE CONTROL. Every negative carries
             # tens of live false positives, so these are the control
-            # population an attribution test must survive. Task 5b set
+            # population an attribution test must survive. The original test set
             # attributable=None here and so could never falsify its own
             # method.
             #
             # READ THE `ball_free` FLAG BEFORE QUOTING ANY COUNT FROM THIS
-            # BRANCH (fix round 1, HIGH-2). Only the speed_mps 0.0 bags
+            # BRANCH. Only the speed_mps 0.0 bags
             # (N01, N02, N05, T11, T14) contain no projectile and can
             # therefore falsify. N03/N04/T12/T13 have a real ball in them,
             # thrown away from or below the camera; a firing there is a
@@ -658,7 +653,7 @@ class ScorerNode(Node):
             attributable = attr_all["attributable"]
             closing_run = attr_all["longest_run"]
             note = (
-                # win_rel on negatives too (fix round 1, LOW-5): ctl_win is
+                # win_rel on negatives too: ctl_win is
                 # uninterpretable without the width of the window it read.
                 f"win_rel=[{ctl_lower - bag_start:.2f},"
                 f"{ctl_upper - bag_start:.2f}] "
@@ -721,7 +716,7 @@ class ScorerNode(Node):
 
         Why not just subscribe to /clock during replay (the seemingly
         obvious reading of "the first /clock stamp is the honest bag-start
-        in sim time")? Verified on the Dell 2026-08-17: `ros2 bag play
+        in sim time")? Verified on the `ros2 bag play
         --clock` does NOT republish a bag's recorded /clock payload. It
         SYNTHESISES its own /clock stream from real wall-clock playback
         progress, to satisfy downstream nodes' use_sim_time / clock_guard
@@ -734,9 +729,7 @@ class ScorerNode(Node):
         This does not affect detection scoring itself: /threat/centroid
         stamps are copied from the incoming cloud's own header.stamp
         (detector_node.py), which IS the bag's original recorded Gazebo
-        sim-time payload — only bag_start needed this fix.
-
-        Task 5c MEDIUM-4: storage_id is left empty so rosbag2 reads it from
+        sim-time payload — only bag_start needed this fix. storage_id is left empty so rosbag2 reads it from
         the bag's own metadata.yaml. It used to be hardcoded "mcap" while
         _find_bag will happily return a DIRECTORY bag, so a directory bag
         with sqlite3 storage failed the whole run on a bag `ros2 bag play`
@@ -777,7 +770,7 @@ class ScorerNode(Node):
         Returns approximate sim duration (seconds). Non-blocking spin runs
         in background via thread.
 
-        The exclusion is Task 5b Defect 1's fix: T-bags were captured with a
+        The exclusion is fix: T-bags were captured with a
         live perception stack running, so they contain that stack's own
         recorded /threat/centroid (and /threat/marker) track. Without
         --exclude-topics, replaying the bag republishes that recorded track
@@ -797,7 +790,7 @@ class ScorerNode(Node):
             self.get_logger().warn(f"bag replay timed out for {bag_path.name}")
         return time.monotonic() - t_start
 
-    # ── Reporting ──────────────────────────────────────────────────────────────
+    # Reporting
 
     def _report(self, results: list[dict]) -> int:
         errors    = [r for r in results if r.get("error")]
@@ -834,7 +827,7 @@ class ScorerNode(Node):
         passed = recall >= self._floor and not errors
         verdict = "PASS ✓"
         if errors:
-            # Task 5c MEDIUM-3: name the actual errors. The old string
+            # name the actual errors. The old string
             # hardcoded "bag(s) missing" for all three error conditions, so
             # a sidecar with no time_to_closest_s produced a verdict that
             # misdirected the investigation to a bag that was never missing.
@@ -845,7 +838,7 @@ class ScorerNode(Node):
             )
         elif not passed:
             verdict = "FAIL ✗ — recall below floor"
-        # Task 5c MEDIUM-3: always print the denominator. "Recall: 100.0%"
+        # always print the denominator. "Recall: 100.0%"
         # over a shrunken positive set, with no denominator, is copyable
         # straight out of the artifact as an overstatement.
         n_pos = len(positives)
@@ -856,11 +849,11 @@ class ScorerNode(Node):
             + (f", {n_excluded_pos} excluded" if n_excluded_pos else "")
             + f")  (floor: {self._floor*100:.0f}%)"
         )
-        # Task 5c HIGH-2: attribution belongs in the artifact, not only in a
+        # attribution belongs in the artifact, not only in a
         # console log that nobody can re-read six months later.
         attributed = sum(1 for r in positives if r.get("attributable"))
         ctl_hits = [r["id"] for r in negatives if r.get("attributable")]
-        # Fix round 1, HIGH-2: only the speed_mps 0.0 negatives are
+        # Only the speed_mps 0.0 negatives are
         # ball-free, and only they can falsify an attribution rule. Emitting
         # the two counts separately is what stops the next reader repeating
         # the error of calling all nine "ball-free" — N03/N04/T12/T13 have a
@@ -894,7 +887,7 @@ class ScorerNode(Node):
         ]
 
         report = "\n".join(lines)
-        # ARTIFACT FIRST, CONSOLE SECOND (Task 5c fix round 4, MEDIUM-A).
+        # ARTIFACT FIRST, CONSOLE SECOND.
         # print() used to run HERE, ahead of the write and outside any
         # try. On a non-UTF-8 stdout (Windows cp1252, or LANG=C) the
         # report's box-drawing characters raise UnicodeEncodeError out of
@@ -906,7 +899,7 @@ class ScorerNode(Node):
         # costs nothing and cannot itself lose the artifact.
         try:
             self._out_file.parent.mkdir(parents=True, exist_ok=True)
-            # encoding pinned (Task 5c fix round 3): the report ALWAYS
+            # encoding pinned: the report ALWAYS
             # contains box-drawing characters and em-dashes, so write_text's
             # locale default silently truncates the artifact to zero bytes
             # under any non-UTF-8 locale (Windows cp1252, or a container
@@ -945,7 +938,7 @@ class ScorerNode(Node):
         return 0 if passed else 1
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# Entry point
 
 def main(args=None) -> None:
     rclpy.init(args=args)

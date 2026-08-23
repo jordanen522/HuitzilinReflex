@@ -1,48 +1,40 @@
 """
-score_bags_logic.py — pure-Python scoring logic for score_bags.py, split out
-so it is unit-testable without rclpy/ROS (see test/test_score_bags_logic.py,
-which the ROS-free CI subset picks up automatically).
+Pure-Python scoring logic for score_bags.py, split out so it is unit-testable
+without rclpy (see test/test_score_bags_logic.py, which the ROS-free CI subset
+picks up automatically).
 
-Covers the two defects Task 5b repaired and the two CONFIRMED CRITICAL
-findings its review returned against those repairs (Task 5c).
+Three guards live here, each closing a way the harness could score itself.
 
-Defect 1 (5b) — the harness was replaying a bag's own recorded
-/threat/centroid (and /threat/marker) track back onto the bus, and
-score_bags' subscriber counted that as a detection by the detector UNDER
-TEST. compute_exclude_topics turns "every topic the node under test
-publishes" into the --exclude-topics list for `ros2 bag play`. It refuses
-(loudly) to ever exclude /clock or /oak/points, and — Task 5c HIGH-1 — it
-now also refuses a discovery result that does NOT contain /threat/centroid,
-because a partial publisher list like ['/parameter_events', '/rosout']
-passed every earlier guard and silently restored Defect 1 in full.
+Bag-replay exclusion. A bag records the detector's own /threat/centroid track,
+and replaying it puts that track back on the bus, where score_bags' subscriber
+counts it as a detection by the detector under test. compute_exclude_topics
+turns "every topic the node under test publishes" into the --exclude-topics
+list for `ros2 bag play`. It refuses (loudly) to exclude /clock or /oak/points,
+and refuses a discovery result that does not contain /threat/centroid: a
+partial publisher list like ['/parameter_events', '/rosout'] passes every other
+guard and silently restores the contamination in full.
 
-Defect 2 (5b) — `detection_window_s` was never enforced because no sidecar
-carried `bag_start_sim_t`, so `in_window = detected` (any centroid, anywhere
-in the whole replay) was the only code path ever exercised.
+The detection window. Enforcing it needs bag_start_sim_t from the sidecar;
+without it `in_window = detected` -- any centroid anywhere in the replay -- is
+the only path ever taken. A symmetric `abs(t - event_t) <= window_s` gate is
+not enough either: at the shipped window_s of 4.0 it spans eight seconds of a
+~20 s bag, and its lower edge lands within 0.6 s of bag start, which admits the
+cold background map's false-positive burst from the first 1-2 s of every
+replay. A positive whose ball was never seen then passes on background alone.
+strict_window_bounds() replaces it with an asymmetric, physics-floored window.
 
-Task 5c CRITICAL-1 — 5b's replacement gate was `abs(t - event_t) <=
-window_s`. Symmetric, so at the shipped window_s of 4.0 it spanned EIGHT
-seconds of a ~20 s bag, and its lower edge landed between -0.57 s and
-+0.50 s of bag start for all twelve of the 17 originals' positives. The
-cold-background-map false-positive burst that detector.yaml documents in
-the first ~1-2 s of every replay therefore sat inside the gate, so a
-positive whose ball was never seen could pass on background alone — exactly
-the failure Defect 2 existed to make impossible. strict_window_bounds()
-replaces it with an asymmetric, physics-floored window; see its docstring.
-
-Task 5c CRITICAL-2 — 5b attributed a TP to a ball by finding a run of >= 3
-in-window detections of strictly DECREASING range, using only the SIGN of
-each range difference. That is a stationary sensor's null hypothesis. These
-bags were captured under patrol, and detector.yaml identifies this library's
-dominant FP class as newly-explored static terrain along a patrol leg —
-terrain the drone translates TOWARD, whose base_link range therefore falls
-monotonically frame after frame. The sign test selects FOR that class. The
-magnitude was in hand and discarded; attribute_closing_ball() now uses it.
+Attribution. Finding a run of >= 3 in-window detections of decreasing range
+tests only the SIGN of each range difference, which is a stationary sensor's
+null hypothesis. These bags were captured under patrol, where the dominant
+false-positive class is newly-explored static terrain along a leg -- terrain
+the drone translates toward, whose base_link range therefore falls
+monotonically frame after frame. The sign test selects for that class, so
+attribute_closing_ball() uses the magnitude as well.
 """
 
 from __future__ import annotations
 
-# ── Bag-replay exclusion (Defect 1) ────────────────────────────────────────
+# Bag-replay exclusion
 #
 # Topics that must never appear in an --exclude-topics list, no matter what a
 # (possibly buggy) enumeration produces. /clock is the harness's sole time
@@ -53,10 +45,9 @@ from __future__ import annotations
 # presence here would itself be a bug in whatever built the topic list.
 FORBIDDEN_EXCLUDE_TOPICS = frozenset({"/clock", "/oak/points"})
 
-# Topics that MUST appear, or the exclusion is not doing its job (Task 5c
-# HIGH-1). score_bags subscribes to exactly one topic — /threat/centroid —
-# and that is the topic whose recorded capture-time track contaminated every
-# pre-5b measurement. A live publisher enumeration that comes back with
+# Topics that MUST appear, or the exclusion is not doing its job. score_bags
+# subscribes to exactly one topic — /threat/centroid — and that is the topic
+# whose recorded capture-time track contaminated every earlier measurement. A live publisher enumeration that comes back with
 # ['/parameter_events', '/rosout'] (both created inside rclpy's Node.__init__,
 # i.e. BEFORE detector_node.py creates its own publishers, and propagated
 # per-endpoint and asynchronously by DDS) satisfies "non-empty" and "nothing
@@ -79,7 +70,7 @@ def compute_exclude_topics(published_topics: list[str]) -> list[str]:
         silently reopen the self-scoring defect this function exists to
         prevent, and a detector that publishes nothing is itself a sign the
         node under test was never actually discovered.
-      - the enumeration is missing /threat/centroid (Task 5c HIGH-1) — a
+      - the enumeration is missing /threat/centroid — a
         partial DDS graph read is not a safe basis for an exclusion, and the
         one topic the harness actually scores is the one that must be gone.
     """
@@ -105,7 +96,7 @@ def compute_exclude_topics(published_topics: list[str]) -> list[str]:
             f"{sorted(missing)} — this is a PARTIAL read of the ROS graph, "
             "not the node's real publisher set. Proceeding would replay the "
             "bag's own recorded /threat/centroid track back onto the bus and "
-            "score it as the detector's output (Task 5b Defect 1)"
+            "score it as the detector's output"
         )
     return sorted(topics)
 
@@ -135,7 +126,7 @@ def clock_msg_to_sim_t(sec: int, nanosec: int) -> float:
     """
     rosgraph_msgs/Clock payload -> float sim seconds.
 
-    Split out of score_bags._read_bag_start_sim_t (Task 5c MEDIUM-4) purely
+    Split out of score_bags._read_bag_start_sim_t purely
     so it can be tested with no bag fixture and no ROS: this one line fixes
     the absolute position of every scenario's detection window, and a
     nanosecond-scaling slip here would shift all seventeen windows in
@@ -144,7 +135,7 @@ def clock_msg_to_sim_t(sec: int, nanosec: int) -> float:
     return float(sec) + float(nanosec) * 1e-9
 
 
-# ── Detection window (Defect 2, and Task 5c CRITICAL-1) ────────────────────
+# Detection window
 #
 # capture_scenario.sh:21 fires the projectile SPAWN_LEAD seconds INTO the
 # recording, not at bag start -- the script writes the label sidecar, starts
@@ -160,19 +151,19 @@ def clock_msg_to_sim_t(sec: int, nanosec: int) -> float:
 SPAWN_LEAD_S = 3.0
 
 # How far AFTER the ball's last airborne instant a genuine detection can
-# still land (Task 5c CRITICAL-1: the width of the window).
+# still land.
 #
 # The asymmetry is not a preference, it is the physics. Everything in the
 # ball's own flight puts real detections EARLIER than the nominal event:
 #   - Week 3 throws are flat (compensate_gravity defaults False,
-#     ballistics.py), so a ball thrown level from a 2 m hover reaches the
-#     ground sqrt(2*2.0/9.81) = 0.639 s after spawn regardless of its speed.
+# ballistics.py), so a ball thrown level from a 2 m hover reaches the
+# ground sqrt(2*2.0/9.81) = 0.639 s after spawn regardless of its speed.
 #     For five of the twelve original positives (S01 1.5 s, S10 1.25 s) and
-#     four of the ten tune positives (ttc 1.1 s) the nominal closest
-#     approach is never reached at all -- scenario_matrix.yaml:73-77 says so
-#     for T01 explicitly. That is what FLAT_THROW_FALL_TIME_S below is for.
+# four of the ten tune positives (ttc 1.1 s) the nominal closest
+# approach is never reached at all -- scenario_matrix.yaml:73-77 says so
+# for T01 explicitly. That is what FLAT_THROW_FALL_TIME_S below is for.
 #   - an oblique throw leaves the 45 deg ROI cone before closest approach
-#     (the matrix's own T04/T06 notes).
+# (the matrix's own T04/T06 notes).
 # So the ONLY mechanism that can put a genuine detection later is
 # spawn-command latency: capture_scenario.sh:90-97 runs `sleep 3` and then
 # `ros2 run huitzilin_perception spawn_projectile`, and that `ros2 run`
@@ -180,32 +171,30 @@ SPAWN_LEAD_S = 3.0
 # closest approach, ground impact -- is therefore shifted LATER by that
 # latency relative to bag_start + SPAWN_LEAD_S, which is exactly what this
 # constant absorbs, and it is added to the ball's last airborne instant
-# rather than to a nominal event that may never happen (Task 5c fix round 1,
-# HIGH-3).
+# rather than to a nominal event that may never happen.
 #
 # Budget, measured on the Dell rather than assumed:
-#   ros2 CLI startup                0.25 - 0.49 s  (3 runs, idle machine)
-#   python + rclpy init + Node()    0.41 - 0.74 s  (3 runs, idle machine)
-#   -> `ros2 run` floor             0.7  - 1.2  s, before spawn_projectile
-#      does any work of its own (ballistics + a gz create service round
-#      trip, on a machine simultaneously running gz, SITL and rosbag2).
+# ros2 CLI startup                0.25 - 0.49 s (3 runs, idle machine)
+# python + rclpy init + Node()    0.41 - 0.74 s (3 runs, idle machine)
+#   -> `ros2 run` floor             0.7  - 1.2 s, before spawn_projectile
+# does any work of its own (ballistics + a gz create service round
+# trip, on a machine simultaneously running gz, SITL and rosbag2).
 # PROVENANCE, so a later reader can weigh it: the one end-to-end figure the
 # repo contains is S05's recorded capture-time centroid, which puts the
 # effective lead at 4.108 s against the nominal 3.0, i.e. 1.108 s of
 # latency. S05 is a TRAIN-SPLIT ORIGINAL, not a tune bag. It was used as
 # CONFIRMATION ONLY of a constant derived from the Dell timing measurement
-# and capture_scenario.sh (the Task 5b review's Q4 rule sanctions exactly
-# that), but this is a scoring constant partly corroborated by an original
+# and capture_scenario.sh, but this is a scoring constant partly corroborated by an original
 # and should be read as such.
 #
 # 2.0 s is ~1.8x that end-to-end offset and ~1.7-2.9x the measured `ros2
 # run` floor, so the late edge cannot manufacture a false negative out of
-# spawn latency -- while cutting the gate from the 8.0 s that Task 5b
+# spawn latency -- while cutting the gate from the 8.0 s that the legacy gate
 # shipped down to 2.43-2.64 s, and (with the floor below) removing the
 # documented cold-map FP burst entirely.
 POST_EVENT_TOLERANCE_S = 2.0
 
-# ── The ball's last airborne instant (Task 5c fix round 1, HIGH-3) ─────────
+# The ball's last airborne instant
 #
 # The window used to be `event_t + min(window_s, POST_EVENT_TOLERANCE_S)`
 # with event_t the NOMINAL closest approach, bag_start + spawn_lead +
@@ -220,8 +209,8 @@ POST_EVENT_TOLERANCE_S = 2.0
 #
 # The corrected rule derives the late edge from the same flat-throw model:
 #
-#   t_last_airborne = min(time_to_closest_s, FLAT_THROW_FALL_TIME_S)
-#   upper           = spawn_t + t_last_airborne + min(window_s, post_event_s)
+# t_last_airborne = min(time_to_closest_s, FLAT_THROW_FALL_TIME_S)
+# upper           = spawn_t + t_last_airborne + min(window_s, post_event_s)
 #
 # min(), because a flat throw that has not reached closest approach by
 # ground impact is still closing when it lands: its ACTUAL closest approach
@@ -238,9 +227,9 @@ POST_EVENT_TOLERANCE_S = 2.0
 # Sources, none of them a measured outcome of this harness:
 #   - 2.0 m: bridge.yaml / hw_bridge.yaml takeoff_alt_m, the altitude every
 #     Week 3 capture flew (capture_scenario.sh raises it only for the
-#     vertical-offset negatives N04/T13, handled below).
+# vertical-offset negatives N04/T13, handled below).
 #   - flat throw: spawn_projectile.py:362 declares compensate_gravity False
-#     and capture_scenario.sh:92-96 never passes it, so vz(0) = 0.
+# and capture_scenario.sh:92-96 never passes it, so vz(0) = 0.
 #   - 9.81 m/s^2 and h = 1/2 g t^2.
 HOVER_ALTITUDE_M = 2.0
 G_MPS2 = 9.81
@@ -292,7 +281,7 @@ def strict_window_bounds(
         The floor is a PHYSICS floor, not a tuned one: the projectile does
         not exist before bag_start + spawn_lead_s, so a centroid earlier
         than that is definitionally not the ball, whatever else it is. Task
-        5b's symmetric gate had no floor at all, which is why its lower edge
+        The legacy symmetric gate had no floor at all, which is why its lower edge
         landed within half a second of bag start for every positive in the
         library and swallowed the cold-background-map FP burst that
         detector.yaml:229-231 documents in the first ~1-2 s of every replay.
@@ -307,8 +296,7 @@ def strict_window_bounds(
 
         min(time_to_closest_s, fall_time_s) is the ball's LAST AIRBORNE
         INSTANT relative to spawn, and is where the tolerance is added --
-        not to a nominal closest approach the flat throw may never reach
-        (Task 5c fix round 1, HIGH-3; see FLAT_THROW_FALL_TIME_S). Pass
+        not to a nominal closest approach the flat throw may never reach. Pass
         fall_time_s=None for a scenario whose geometry the flat-throw model
         does not describe, which restores the nominal-event edge for that
         scenario alone; flat_throw_fall_time_s() decides that.
@@ -322,11 +310,11 @@ def strict_window_bounds(
         capture could ship a tighter one, but nobody should read the
         ceiling as doing work here.
 
-        Both edges together make this window a strict SUBSET of the one
-        Task 5b shipped AND of the one Task 5c originally shipped -- recall
+        Both edges together make this window a strict SUBSET of the legacy
+        gate and of its first replacement -- recall
         measured under it can only fall or stay equal, never rise.
 
-        RAISES on an inverted window (Task 5c fix round 2, MEDIUM-2). The
+        RAISES on an inverted window. The
         two edges move in OPPOSITE directions -- the floor reaches FORWARD
         from the event, the clamped late edge reaches BACK from ground
         impact -- so the pair can cross and leave an empty interval. The old
@@ -340,7 +328,7 @@ def strict_window_bounds(
                 < max(ttc - window_s, 0)
 
         which is a SURFACE, not a single crossover -- two independent routes
-        reach it, and fix round 2 found the second one by running the guard
+        reach it, and the second was found by running the guard
         rather than by reading the algebra:
 
           - small window_s: below (ttc - min(ttc, fall_time_s)) / 2. At
@@ -419,7 +407,7 @@ def is_in_window_strict(
     """
     At least one detection inside strict_window_bounds().
 
-    THIS is the production predicate (Task 5c fix round 1, LOW-3):
+    THIS is the production predicate:
     score_bags._score_one used to inline `any(lower <= t <= upper ...)`
     itself, so the eight unit tests below covered a function the harness
     never called. The predicate that decides pass/fail must be the one with
@@ -439,10 +427,9 @@ def symmetric_window_bounds(
     spawn_lead_s: float = SPAWN_LEAD_S,
 ) -> tuple[float, float]:
     """
-    Absolute bounds of Task 5b's symmetric unfloored gate, [event - w,
+    Absolute bounds of the legacy symmetric unfloored gate, [event - w,
     event + w]. Exists so the artifact can report how many detections that
-    gate admitted (n_win_sym) beside how many this one does (Task 5c fix
-    round 1, MEDIUM-3) -- the ratio is the only number that answers "the
+    gate admitted (n_win_sym) beside how many this one does -- the ratio is the only number that answers "the
     strict, sym and loose verdicts still agree, so is the new gate inert?".
     """
     if bag_start is None or time_to_closest_s is None:
@@ -464,7 +451,7 @@ def is_in_window_symmetric_legacy(
     spawn_lead_s: float = SPAWN_LEAD_S,
 ) -> bool:
     """
-    Task 5b's gate exactly as it shipped: `abs(t - event_t) <= window_s`,
+    The legacy gate exactly as it shipped: `abs(t - event_t) <= window_s`,
     symmetric and unfloored. Kept ONLY so every run artifact can print the
     old verdict beside the new one and make the CRITICAL-1 change visible
     per scenario. It is never what decides pass/fail.
@@ -479,10 +466,10 @@ def is_in_window_loose(
     detections: list[float], bag_start: float, window_s: float
 ) -> bool:
     """
-    The PRE-5b semantics, reproduced verbatim for comparison only: at least
+    The legacy semantics, reproduced verbatim for comparison only: at least
     one detection with (t - bag_start) <= window_s.
 
-    Note what that expression actually computes (Task 5c LOW-4): it has no
+    Note what that expression actually computes: it has no
     lower bound, so any t before bag_start passes too. That is faithful to
     the original — the point of this function is to reproduce the gate whose
     numbers older reports quoted, not to be a defensible gate — but the
@@ -497,20 +484,19 @@ def is_in_window_loose(
     return any((t - bag_start) <= window_s for t in detections)
 
 
-# ── Attribution (Task 5b, rebuilt for Task 5c CRITICAL-2) ──────────────────
+# Attribution
 #
-# The bags do NOT carry ground-truth ball position (no /gz/dynamic_poses —
-# see the task-5b-brief), so attribution cannot compare a detection against a
+# The bags do NOT carry ground-truth ball position (no /gz/dynamic_poses), so attribution cannot compare a detection against a
 # known trajectory. What IS available is the range from base_link that
 # /threat/centroid already carries (detector_node.py stamps it
 # frame_id="base_link", so sqrt(x^2+y^2+z^2) is range from the airframe, not
 # from a world origin — no frame conversion is involved anywhere below).
 #
-# Task 5b tested only the SIGN of successive range differences. Under patrol
+# The original test used only the SIGN of successive range differences. Under patrol
 # that is inverted: the drone translates toward newly-explored terrain, whose
 # base_link range then decreases monotonically frame after frame, and
 # detector.yaml:226-231 names exactly that terrain as this library's dominant
-# FP mechanism. Independently quantified by the Task 5b reviewer over 200 000
+# FP mechanism. Independently quantified over 200 000
 # iid-noise trials per point through the shipped function: P(spurious run >=
 # 3) = 0.77 at n=10, 0.91 at n=15, 0.97 at n=20 detections in the window. The
 # reported 11-of-12 attribution rate sat exactly on the n~15 noise
@@ -530,7 +516,7 @@ def is_in_window_loose(
 # POPULATION, not a tuned threshold: a closure faster than the drone can
 # itself fly cannot be produced by egomotion on a static object.
 #
-# PROVENANCE (Task 5c fix round 1, MEDIUM-6): CLAUDE.md records this figure
+# Provenance: CLAUDE.md records this figure
 # from the WEEK 6 dodge-battery throw-window gate, while this bag library
 # was captured in WEEK 3. It is a real measurement of this repo's own
 # patrol, but nothing establishes that the two runs used the same patrol
@@ -553,8 +539,7 @@ V_AIRFRAME_MEDIAN_MPS = 2.09
 LIBRARY_MAX_BALL_SPEED_MPS = 17.0  # scenario_matrix.yaml: T03, T07, T08
 
 # Two detections of the SAME object cannot be arbitrarily far apart in time
-# (the Task 5b reviewer's point: with no bound at all, two detections six
-# seconds apart inside an 8 s window counted as one "closing step").
+#.
 #
 # The bound is set by the ROI, not by the frame rate. A first attempt at this
 # constant used (cloud_queue_depth + 1) / 15 Hz = 0.4 s, reasoning from how
@@ -626,11 +611,10 @@ def longest_closing_run(
     own it is the refuted statistic (see CRITICAL-2 above) and must never
     again be used as an attribution verdict by itself.
 
-    It is NOT Task 5b's number and must not be compared with one (Task 5c
-    fix round 1, LOW-7): 5b's run had no gap bound at all, so two detections
+    It is not the legacy number and must not be compared with one: the legacy run had no gap bound at all, so two detections
     six seconds apart inside its 8 s window counted as one closing step,
     whereas this one is bounded by max_gap_s. Same sign test, different
-    statistic; it can only read lower than 5b's, never higher.
+    statistic; it can only read lower than the legacy statistic's, never higher.
     """
     if not ranges_by_time:
         return 0
@@ -689,21 +673,20 @@ def attribute_closing_ball(
         roi_max_range_m-deep ROI, no in-band step can span more than
         roi_max_range_m / v_airframe_max seconds anyway.
 
-    Returns a dict — every field goes into the run artifact (Task 5c
-    HIGH-2), because "11 of 12 attributable" reaching only a console log is
+    Returns a dict — every field goes into the run artifact, because "11 of 12 attributable" reaching only a console log is
     part of why the refuted version survived to be quoted:
-      attributable   bool
-      longest_run    int    points, longest closing run (any rate), the
+      attributable bool
+      longest_run int points, longest closing run (any rate), the
                             sign-only descriptive statistic
-      best_run       int    points, longest IN-BAND run — the one the
+      best_run int points, longest IN-BAND run — the one the
                             verdict is made on
-      closure_rate   float  m/s, end-to-end rate of that same longest
+      closure_rate float m/s, end-to-end rate of that same longest
                             in-band run, whether or not it qualified
-      rate_band      (float, float)
-      n_points       int    detections considered
-      reason         str    why it failed, when it failed
+      rate_band (float, float)
+      n_points int detections considered
+      reason str why it failed, when it failed
 
-    On closure_rate when nothing qualified (Task 5c fix round 1, LOW-2):
+    On closure_rate when nothing qualified:
     the fallback is the longest IN-BAND run, `max(in_band_runs, key=len)`
     — NOT "the longest closing run", which is what this docstring used to
     claim and is not what the code below does. When no step is in band
@@ -717,7 +700,7 @@ def attribute_closing_ball(
     band_lo = v_airframe_max
     band_hi = ball_speed_mps + v_airframe_max
     # The sign-only statistic: descriptive only, never a verdict, and NOT
-    # comparable with Task 5b's run length (it is gap-bounded; 5b's was
+    # comparable with the legacy run length (it is gap-bounded; the legacy one was
     # not). See longest_closing_run's docstring.
     longest = longest_closing_run(ranges_by_time, max_gap_s)
 
@@ -769,8 +752,7 @@ def attribute_closing_ball(
 
 def format_closure_rate(attr: dict) -> str:
     """
-    Render attribute_closing_ball()'s closure_rate for a human (Task 5c fix
-    round 1, LOW-2).
+    Render attribute_closing_ball()'s closure_rate for a human.
 
     A closure rate needs at least one in-band STEP to exist, i.e. an
     in-band run of >= 2 points. Below that the dict carries 0.0 purely
