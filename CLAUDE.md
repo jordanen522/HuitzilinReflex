@@ -54,18 +54,25 @@ held-out set — are **not yet met**, and are blocked on the same open problem:
   ball (needed for the AR0234's 26–28 m reach): a large-but-still-plausible clutter fragment
   routinely has more points than the genuine ball cluster and wins the pick.
 - Measured on the `tune_rendered` split (RT01–RT10, disjoint from held-out, `./scripts/
-  run_heldout_eval.sh` with `SPLIT=tune_rendered BAG_PREFIX=rt_`): **2/6 positive recall,
-  2/4 (50%) false-fire**, unchanged by three same-day fixes (background-map range split,
-  track-continuity gate, egomotion-flood rescue) plus a fourth this session (per-candidate
-  range-adaptive extent gate, commit `c8bfb5a` — confirmed engaging live, zero effect on the
-  recall/false-fire numbers).
-- Root-cause evidence (debug_funnel replay, `RT02`): even with the range-adaptive extent fix,
-  competing clutter clusters are frequently themselves far enough away that their own
-  distance-scaled extent tolerance still admits them, so they still out-point the real ball.
-  The fix closes one confirmed hole without being sufficient — the "largest cluster by point
-  count" selection criterion itself looks like the actual defect. A real fix likely needs
-  scoring candidates by compactness/density rather than raw point count, which is a
-  redesign, not a threshold tweak. **This is an open problem, not solved as of this commit.**
+  run_heldout_eval.sh` with `SPLIT=tune_rendered BAG_PREFIX=rt_`): **2/6 positive recall
+  (RT04, RT05), 2/4 (50%) false-fire (RT09, RT10)** — identical, scenario-for-scenario, across
+  FIVE same-day fix attempts: background-map range split (`5dfc2a3`), track-continuity gate
+  (`00f6075`), egomotion-flood rescue (`ed3ac37`), per-candidate range-adaptive extent gate
+  (`c8bfb5a`), and point-density cluster selection (`c4d25cf`).
+- **This changes the diagnosis.** Two selection-tie-break redesigns in a row (point count →
+  density) reproducing byte-identical per-scenario results means the bug is not in *which*
+  candidate wins the pick — it's upstream of that, in whether a valid ball candidate exists
+  at all. RT01/RT02/RT03/RT06's `truth_score_heldout` match counts (2, 0, 0, 0 out of a
+  `min_matched=3` bar) are consistent with the ball's own cluster rarely forming or surviving
+  to `ball_sized` status in those scenarios, not with a correct candidate losing a tie-break —
+  no downstream selection rule, however scored, can pick a candidate that was never formed.
+  RT04/RT05 (5, 3 matched) recall fine, so this is scenario-specific, not universal. Per
+  `superpowers:systematic-debugging`'s own rule (3+ failed fixes → stop patching, question the
+  architecture), a 6th selection-side fix was not attempted this session. **Open, next step:
+  instrument the diff/cluster stage itself (not the selection stage) on RT01/RT02/RT03/RT06 to
+  see whether a ball-sized cluster ever exists near the true ball position in the frames that
+  should recall — if it doesn't, the defect is in background differencing or clustering
+  tolerance, not in cluster selection at all.**
 - The held-out set (H01–H18 + HN01–HN06) has never been validly scored — one attempt was
   invalidated by a harness bug (per-scenario detector restart fixed it,
   `scripts/run_heldout_eval.sh`), and `H16` was used diagnostically, which burns the set per
