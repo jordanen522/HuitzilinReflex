@@ -628,13 +628,41 @@ class DetectorNode(Node):
             d["fg_flood"] = bool(n_fg > self._p["fg_max_points"])
         if fg_pts.shape[0] > self._p["fg_max_points"]:
             # Whole-scene depth change (patrol turn / aggressive egomotion) —
-            # not a projectile signature. Skip rather than cluster 10k+ points.
-            if dbg:
-                self.get_logger().info(
-                    f"funnel: fg={n_fg} > fg_max_points={self._p['fg_max_points']} "
-                    "-> egomotion flood, skip frame",
-                    throttle_duration_sec=self._funnel_throttle_s)
-            return
+            # not a projectile signature, and clustering 10k+ points is
+            # expensive. BUT (2026-08-22, RT04 funnel evidence): this exact
+            # flood, spanning 32K-156K points at whole-ROI extent, is what a
+            # translating drone during hover_mode's cruise-speed throw window
+            # (up to ~3.49 m/s, per CLAUDE.md) produces every time — and it
+            # lands for several consecutive seconds right as the ball needs
+            # tracking, blacking out detection wholesale. If a recent track
+            # exists, don't give up on the whole frame: a bounded, cheap mask
+            # (not full clustering) around the last known position first, to
+            # see if the ball's own small cluster survived the flood.
+            fg_flood_pts = fg_pts
+            if (self._last_centroid is not None
+                    and self._last_centroid_time is not None):
+                stamp_s_flood = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+                if (stamp_s_flood - self._last_centroid_time
+                        <= self._p["track_gate_stale_s"]):
+                    near_mask = (np.linalg.norm(
+                        fg_pts - self._last_centroid, axis=1)
+                        <= self._p["track_gate_radius_m"])
+                    n_near = int(near_mask.sum())
+                    if 0 < n_near <= self._p["fg_max_points"]:
+                        fg_pts = fg_pts[near_mask]
+                        if dbg:
+                            self.get_logger().info(
+                                f"funnel: fg={n_fg} flood, but {n_near} pts "
+                                "near last track -> clustering regionally "
+                                "instead of skipping",
+                                throttle_duration_sec=self._funnel_throttle_s)
+            if fg_pts is fg_flood_pts:
+                if dbg:
+                    self.get_logger().info(
+                        f"funnel: fg={n_fg} > fg_max_points={self._p['fg_max_points']} "
+                        "-> egomotion flood, skip frame",
+                        throttle_duration_sec=self._funnel_throttle_s)
+                return
 
         # Physical-size gate: an 80 mm ball voxelized at 0.02 m can never span
         # more than ~0.15 m, while the dominant FP mode ("scene-entry" blobs —
