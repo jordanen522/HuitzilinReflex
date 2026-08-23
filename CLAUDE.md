@@ -10,7 +10,7 @@ convention, and the sharp edges that bite anyone who checks this out and runs it
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink ·
 Python 3.12 · Ubuntu 24.04.
 
-**Status: REOPENED 2026-08-16, still open as of 2026-08-22.** Weeks 1–6 closed 2026-08-10 on
+**Status: REOPENED 2026-08-16, still open as of 2026-08-23.** Weeks 1–6 closed 2026-08-10 on
 an oracle-sensor result (28/29 below). Reopened because that number needs the real depth
 detector, not a synthetic oracle, and the real detector does not yet deliver it — see
 "Where this actually stands" below before quoting the 20 m/s number as achieved. Hardware
@@ -44,7 +44,7 @@ that modelled sensor has not yet been shown to hit 20 m/s**, because the detecto
 an open recall bug (below) that blocks running that battery meaningfully. Hardware
 bring-up (an actual physical AR0234) is separately out of scope.
 
-### Where this actually stands (2026-08-22)
+### Where this actually stands (2026-08-23)
 
 The two target claims — 20 m/s dodge with the real detector, and 100% recall on the 18+6
 held-out set — are **not yet met**, and are blocked on the same open problem:
@@ -68,16 +68,40 @@ held-out set — are **not yet met**, and are blocked on the same open problem:
   no downstream selection rule, however scored, can pick a candidate that was never formed.
   RT04/RT05 (5, 3 matched) recall fine, so this is scenario-specific, not universal. Per
   `superpowers:systematic-debugging`'s own rule (3+ failed fixes → stop patching, question the
-  architecture), a 6th selection-side fix was not attempted this session. **Open, next step:
-  instrument the diff/cluster stage itself (not the selection stage) on RT01/RT02/RT03/RT06 to
-  see whether a ball-sized cluster ever exists near the true ball position in the frames that
-  should recall — if it doesn't, the defect is in background differencing or clustering
-  tolerance, not in cluster selection at all.**
-- The held-out set (H01–H18 + HN01–HN06) has never been validly scored — one attempt was
-  invalidated by a harness bug (per-scenario detector restart fixed it,
-  `scripts/run_heldout_eval.sh`), and `H16` was used diagnostically, which burns the set per
-  `docs/perception_eval.md` — a fresh capture is required before any official pass, and
-  doing so before the detector's recall problem is fixed would not be meaningful.
+  architecture), a 6th selection-side fix was not attempted that session.
+- **2026-08-23, fix attempt #6 — instrumented instead of patched blind, per the "question the
+  architecture" step.** `debug_funnel:=true` on RT01/RT02/RT03/RT06 showed the diagnosis above
+  was wrong in its specifics: ball-sized candidates DO form most frames (this is not a
+  missing-candidate bug). The real problem is that no *single-frame* geometric feature — point
+  count (`c4d25cf`), extent (`c8bfb5a`), density (`c4d25cf`) — can separate the ball from a
+  clutter fragment of similar size/extent/density; all three read alike in one frame. Tried a
+  genuinely different, temporal signal instead (`60575f3`): require `confirm_frames`
+  consecutive cold-start picks whose frame-to-frame displacement implies a plausible ball speed
+  (`confirm_min/max_speed_mps`, 3–35 m/s) before promoting a new track, opted in on the rendered
+  lane at `confirm_frames: 3`. **Result: also negative, and in a new way — it traded recall for
+  false-fire rather than improving both.** Re-run on `tune_rendered`: recall dropped to **1/6**
+  (RT04 only; RT01 and RT05, which partially matched before, now match 0 — the ball's real
+  encounter window in those bags is short enough that spending 3 frames on confirmation eats
+  the only frames where it was actually visible), while false-fire improved to **1/4** (RT09
+  stopped firing; RT10 still does). Net: not an improvement on either axis considered together,
+  and confirms the RT01/RT05 shortfall is a *volume* problem (too few good frames survive) more
+  than a false-candidate problem for those two scenarios specifically — RT02/RT03/RT06 remain
+  unrecalled under every fix tried and are the more likely core defect.
+- **Process error, 2026-08-22 → 08-23: the official held-out set was touched further.** A
+  background command intended for the `tune_rendered` split was mis-issued against `SPLIT=heldout`
+  and scored **H01, H02, H03** (with the unvalidated fix-#6 config, before erroring out on the
+  known node-discovery flake at H03) before being caught and killed. Combined with `H16`'s
+  earlier diagnostic use, at least four held-out bags (H01, H02, H03, H16) have now been scored
+  outside an official pass. Per `docs/perception_eval.md`, the set requires a **fresh capture**
+  before any official pass — this was already true before this incident and remains the
+  requirement, but do not treat H04–H18/HN01–HN06 as "still clean": re-verify against
+  `docs/perception_eval.md`'s own burn bookkeeping before assuming any subset is unspent.
+- **Open, next step:** RT02/RT03/RT06 have failed recall under six independent fix attempts
+  spanning both geometric and temporal discrimination — worth checking, before a 7th attempt,
+  whether their bags contain a ball encounter that's even geometrically resolvable at all (e.g.
+  by rendering the ball's ground-truth position onto their point clouds directly) rather than
+  assuming the pipeline is always at fault. RT01/RT05 look more tractable: they recall
+  partially, so the lever there is volume/frame-count, not discrimination.
 - The `week7_rendered_battery.yaml` dodge battery (`G01`/`G02` fidelity gate, `R01`–`R04`
   hover envelope at 8/14/20 m/s) has never been run to completion, for the same reason: a
   detector missing 4/6 tracked balls cannot produce a trustworthy dodge number.
