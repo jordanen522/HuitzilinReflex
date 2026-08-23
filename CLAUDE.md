@@ -10,9 +10,11 @@ convention, and the sharp edges that bite anyone who checks this out and runs it
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink ·
 Python 3.12 · Ubuntu 24.04.
 
-**Status: complete. The simulation project closed 2026-08-10.** Weeks 1–6 are done — patrol
-loop, detection pipeline scored against a labeled bag library, Kalman filter + dodge
-trigger, and the 20 m/s answer. Hardware bring-up is out of scope.
+**Status: REOPENED 2026-08-16, still open as of 2026-08-22.** Weeks 1–6 closed 2026-08-10 on
+an oracle-sensor result (28/29 below). Reopened because that number needs the real depth
+detector, not a synthetic oracle, and the real detector does not yet deliver it — see
+"Where this actually stands" below before quoting the 20 m/s number as achieved. Hardware
+bring-up is out of scope regardless.
 
 ## The result
 
@@ -33,10 +35,49 @@ the time scales with speed. At 20 m/s that is **21.1 m** at P=0.90, and a 26 m s
 **28/29** head-on in hover with **0 false dodges in 31** clear-miss throws.
 
 The bound is **sensor reach and rate**; every maneuver-side lever was measured and refuted.
-The part that closes the gap is an AR0234 global-shutter mono + 10 mm M12 (See3CAM_20CUG,
-$89, 13.5 g — lighter than the 61 g OAK-D Lite), and the same lens narrows the defended
-sector to ~±10° usable. The aircraft **as built** carries a ~3.4 m OAK-D Lite, which caps it
-at ~3.2 m/s.
+The 28/29 above is an **oracle** (synthetic, ground-truth) sensor, not the real depth
+detector — that is why this project reopened. The candidate fix, an AR0234 global-shutter
+mono + 10 mm M12 (See3CAM_20CUG, $89, 13.5 g — lighter than the 61 g OAK-D Lite, ~±13.5°
+usable sector), is modelled in simulation (`week7_rendered_battery.yaml`,
+`iris_ar0234`) with a real stereo-noise model — but the **real detector running against
+that modelled sensor has not yet been shown to hit 20 m/s**, because the detector itself has
+an open recall bug (below) that blocks running that battery meaningfully. Hardware
+bring-up (an actual physical AR0234) is separately out of scope.
+
+### Where this actually stands (2026-08-22)
+
+The two target claims — 20 m/s dodge with the real detector, and 100% recall on the 18+6
+held-out set — are **not yet met**, and are blocked on the same open problem:
+
+- The real depth detector's cluster-selection ("largest ball-sized cluster wins," pure point
+  count) is unreliable once `cluster_max_extent_m` is loosened to admit a noisy long-range
+  ball (needed for the AR0234's 26–28 m reach): a large-but-still-plausible clutter fragment
+  routinely has more points than the genuine ball cluster and wins the pick.
+- Measured on the `tune_rendered` split (RT01–RT10, disjoint from held-out, `./scripts/
+  run_heldout_eval.sh` with `SPLIT=tune_rendered BAG_PREFIX=rt_`): **2/6 positive recall,
+  2/4 (50%) false-fire**, unchanged by three same-day fixes (background-map range split,
+  track-continuity gate, egomotion-flood rescue) plus a fourth this session (per-candidate
+  range-adaptive extent gate, commit `c8bfb5a` — confirmed engaging live, zero effect on the
+  recall/false-fire numbers).
+- Root-cause evidence (debug_funnel replay, `RT02`): even with the range-adaptive extent fix,
+  competing clutter clusters are frequently themselves far enough away that their own
+  distance-scaled extent tolerance still admits them, so they still out-point the real ball.
+  The fix closes one confirmed hole without being sufficient — the "largest cluster by point
+  count" selection criterion itself looks like the actual defect. A real fix likely needs
+  scoring candidates by compactness/density rather than raw point count, which is a
+  redesign, not a threshold tweak. **This is an open problem, not solved as of this commit.**
+- The held-out set (H01–H18 + HN01–HN06) has never been validly scored — one attempt was
+  invalidated by a harness bug (per-scenario detector restart fixed it,
+  `scripts/run_heldout_eval.sh`), and `H16` was used diagnostically, which burns the set per
+  `docs/perception_eval.md` — a fresh capture is required before any official pass, and
+  doing so before the detector's recall problem is fixed would not be meaningful.
+- The `week7_rendered_battery.yaml` dodge battery (`G01`/`G02` fidelity gate, `R01`–`R04`
+  hover envelope at 8/14/20 m/s) has never been run to completion, for the same reason: a
+  detector missing 4/6 tracked balls cannot produce a trustworthy dodge number.
+- **253 unit tests / 95+ trials are already satisfied** and needed no work this session: 636+
+  test functions exist (253 was a Week-5 snapshot the repo already flags as superseded, see
+  `README.md`), and 95 real-detector-pipeline trials are already recorded in the Week-4
+  envelope table below.
 
 Separately, the Week 4 envelope with the **real** depth detector on **patrol** — the only
 non-oracle measurement, and never to be merged with a hover/oracle table:

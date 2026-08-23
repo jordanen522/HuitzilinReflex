@@ -10,8 +10,8 @@ gives SITL no FDM ("No JSON sensor message received", "link 1 down", nothing on
 :9002, no lift) while Gazebo steps fine and the cloud streams. The failure
 looks like a networking problem, not a model problem.
 
-The other half matters just as much for the resume claim. The 8 m/s baseline
-and the 20 m/s result are only comparable if the AIRFRAME is identical and only
+The other half matters just as much: the 8 m/s baseline and the 20 m/s result
+are only comparable if the AIRFRAME is identical and only
 the sensor changed -- otherwise the improvement could be coming from lighter
 mass, different drag, or a moved camera mount. These assertions are what let
 the two lanes be compared at all.

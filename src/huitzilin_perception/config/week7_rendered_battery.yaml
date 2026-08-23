@@ -171,11 +171,9 @@ runs:
     miss_distance_m: 0.0
     expect_dodge: true
     repeats: 30
-    # 8.0 because that is the speed the résumé's baseline names and the speed
-    # Week 4 measured 78/78 at. It is NOT re-using those 78: this row re-flies
-    # the baseline through the new sensor and the new scoring rule, because a
-    # 2.5x comparison between a patrol dodge count and a hover save rate would
-    # be a comparison between two different quantities.
+    # 8.0 matches the Week 4 baseline (78/78 there). NOT re-using those 78: this
+    # row re-flies the baseline through the new sensor and scoring rule, since a
+    # patrol dodge count and a hover save rate are different quantities.
 
   - id: R02
     description: "14 m/s head-on, hover — the speed the OAK-D lane scored 0/17 at"

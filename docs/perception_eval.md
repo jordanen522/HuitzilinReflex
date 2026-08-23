@@ -271,7 +271,7 @@ over the six negatives, and never folded into the recall number.
 **If the target is missed, the number reported is the number measured.** The
 remedies available are: capture a *new* held-out set against a re-tuned and
 re-frozen configuration (reporting both results, old and new, with their dates
-and SHAs), or state the measured recall on the résumé. The remedies *not*
+and SHAs), or state the measured recall against the target. The remedies *not*
 available are: re-defining K, R, the window, the denominator or the set
 membership after seeing the result; dropping a scenario as "unrepresentative";
 or reporting the best of several scoring passes.
