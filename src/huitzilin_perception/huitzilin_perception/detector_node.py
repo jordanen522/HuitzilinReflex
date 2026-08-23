@@ -60,8 +60,7 @@ from huitzilin_perception.depth_noise import required_cluster_max_extent_m
 from huitzilin_perception.stage_profiler import StageProfiler
 
 
-# ── QoS profiles ──────────────────────────────────────────────────────────────
-
+# QoS profiles
 SENSOR_QOS = QoSProfile(
     reliability=QoSReliabilityPolicy.BEST_EFFORT,
     history=QoSHistoryPolicy.KEEP_LAST,
@@ -75,11 +74,10 @@ RELIABLE_QOS = QoSProfile(
 )
 
 
-# ── Main node ─────────────────────────────────────────────────────────────────
-
+# Main node
 class DetectorNode(Node):
     """
-    Projectile detection node — W3-11 through W3-14.
+    Projectile detection node.
 
     Subscribes /oak/points, runs the filter→diff→cluster→centroid pipeline,
     publishes /threat/centroid (geometry_msgs/PointStamped in base_link).
@@ -88,7 +86,7 @@ class DetectorNode(Node):
     def __init__(self) -> None:
         super().__init__("detector")
 
-        # ── Declare all params (values come from detector.yaml) ──────────────
+        # Declare all params (values come from detector.yaml)
         # These defaults are only reachable via a bare `ros2 run
         # huitzilin_perception detector` -- both real callers pass
         # params/detector.yaml explicitly. They still have to match it: the
@@ -107,7 +105,7 @@ class DetectorNode(Node):
         self.declare_parameter("cluster_min_points", 5)
         self.declare_parameter("cluster_max_points", 500)
         self.declare_parameter("min_publish_score", 0.3)
-        # Track-continuity gate (2026-08-22, RT01-RT06 debug evidence). Cluster
+        # Track-continuity gate (RT01-RT06 debug evidence). Cluster
         # selection below is pure "largest ball-sized cluster, every frame,
         # independently" -- no memory of where the ball was last seen. Once any
         # frame's spurious ground-level clutter cluster is >= the real (often
@@ -128,7 +126,7 @@ class DetectorNode(Node):
         self.declare_parameter("marker_topic", "/threat/marker")
         self.declare_parameter("compensate_egomotion", True)
         self.declare_parameter("odom_topic", "/huitzilin/odom")
-        self.declare_parameter("debug_funnel", False)  # W3-15 diagnostic: log per-stage counts
+        self.declare_parameter("debug_funnel", False)  # diagnostic: log per-stage counts
         # Funnel-log throttle. 1.0 keeps a 15 Hz stream readable, but it also
         # hides most of a projectile pass: a ball is inside the range gate for
         # only ~0.6 s, so a whole throw collapses to one line. Drop this to 0.0
@@ -138,7 +136,7 @@ class DetectorNode(Node):
         self.declare_parameter("fg_max_points", 5000)  # skip frame if foreground explodes (egomotion flood)
         self.declare_parameter("cluster_max_extent_m", 0.35)  # reject clusters physically larger than the projectile
         self.declare_parameter("fixed_frame", "odom")  # frame for egomotion-compensated differencing
-        # ── Persistent background map (W4, 2026-07-26) ────────────────────────
+        # Persistent background map
         # The bg_history_frames rolling deque only remembers 0.267 s, so any
         # region the camera newly sees under patrol reads as novel and the
         # foreground floods to ~48k points. See background_map.py. Set false to
@@ -148,7 +146,7 @@ class DetectorNode(Node):
         self.declare_parameter("bg_map_leaf_m", 0.10)      # match diff_threshold_m
         self.declare_parameter("bg_map_ttl_s", 20.0)
         self.declare_parameter("bg_map_max_voxels", 400000)
-        # Range-adaptive second map (2026-08-22). bg_map_leaf_m's dilation
+        # Range-adaptive second map. bg_map_leaf_m's dilation
         # tolerance (leaf..leaf*sqrt(3)) is a FIXED metres value, while modelled
         # stereo depth error grows as range^2 (see depth_sigma_m). Beyond the
         # range where sigma(z) exceeds that tolerance, a static surface point's
@@ -164,7 +162,7 @@ class DetectorNode(Node):
         # ball-sized fragments — measured) and below the ball's standoff.
         self.declare_parameter("cluster_split_tol_m", 0.10)
         self.declare_parameter("cluster_split_max_points", 5000)
-        # 2026-08-22 RT-set root cause: `ball_sized` below filters candidates
+        # RT-set root cause: `ball_sized` below filters candidates
         # by point count only, never by extent. cluster_max_extent_m is a
         # single global ceiling (0.64 m on the rendered lane, sized for the
         # 28 m ROI ceiling so the noisiest long-range ball survives
@@ -184,7 +182,7 @@ class DetectorNode(Node):
         # (640x480 x 24 B) fragmented across thousands of UDP datagrams against
         # a 208 KB net.core.rmem_max, so under BEST_EFFORT a single lost
         # fragment discards the entire sample with no retransmit. Measured live
-        # 2026-07-26 on this topic with one variable changed:
+        # on this topic with one variable changed:
         #     best_effort depth=1   ->  3.99 Hz
         #     reliable    depth=10  -> 14.43 Hz  (the camera's full 15 Hz)
         # The detector itself was getting only 1.25 Hz. A ball crosses the
@@ -195,14 +193,14 @@ class DetectorNode(Node):
         # publishes best-effort and dropping a frame beats queueing it.
         self.declare_parameter("cloud_reliable", True)
         self.declare_parameter("cloud_queue_depth", 5)
-        # ── Per-stage latency profiling (W4, 2026-07-27) ──────────────────────
+        # Per-stage latency profiling
         # Independent of debug_funnel on purpose: the funnel's own min/max
         # logging runs six reductions over the full ~200k-point cloud, so
         # profiling with it on measures the instrument as much as the pipeline.
         # Turn this on with debug_funnel OFF to get a clean stage breakdown.
         self.declare_parameter("profile_stages", False)
         self.declare_parameter("profile_window_frames", 30)
-        # ── Per-frame dump (W4, 2026-07-27) ───────────────────────────────────
+        # Per-frame dump
         # The funnel log answers "how many survived each stage", which cannot
         # attribute a MISS: a frame with 40 foreground points and no ball-sized
         # cluster looks identical whether the ball was absorbed into the
@@ -214,17 +212,17 @@ class DetectorNode(Node):
         # setting to leave on.
         self.declare_parameter("debug_dump_dir", "")
 
-        # ── Cache params ─────────────────────────────────────────────────────
+        # Cache params
         self._p = self._load_params()
         self.add_on_set_parameters_callback(self._on_param_set)
         self._funnel_throttle_s = float(
             self.get_parameter("debug_funnel_throttle_s").value)
 
-        # ── TF buffer ────────────────────────────────────────────────────────
+        # TF buffer
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
-        # ── Background model ─────────────────────────────────────────────────
+        # Background model
         # Two models, and which one runs depends on the differencing frame, not
         # only on the param: a persistent map is only meaningful in a FIXED
         # frame. In camera mode (no odom attitude — pre-b0eedd5 bags) the map
@@ -238,7 +236,7 @@ class DetectorNode(Node):
             ttl_s=self._p["bg_map_ttl_s"],
             max_voxels=self._p["bg_map_max_voxels"],
         )
-        # ── Track-continuity gate state ─────────────────────────────────────
+        # Track-continuity gate state
         # Last published centroid, in the SAME frame the per-frame `centroid`
         # is computed in below (fixed/odom frame when self._bg_mode=="fixed",
         # else whatever frame the camera-mode path uses) -- both sides of the
@@ -254,7 +252,7 @@ class DetectorNode(Node):
                 max_voxels=self._p["bg_map_max_voxels"],
             )
 
-        # ── Egomotion compensation state (W3-13) ─────────────────────────────
+        # Egomotion compensation state
         # Odom is folded into the tf buffer (odom -> base_link) so clouds can
         # be re-expressed in the fixed odom frame before differencing.
         # _bg_mode tracks which frame the bg buffer currently holds; the two
@@ -262,7 +260,7 @@ class DetectorNode(Node):
         self._bg_mode: str = "camera"
         self._warned_no_attitude = False
 
-        # ── Latency profiling ────────────────────────────────────────────────
+        # Latency profiling
         # Always instrumented, only reported when profile_stages is set: the
         # context managers cost ~1 us each against ms-scale stages, and an
         # always-live instrument cannot drift out of step with the pipeline the
@@ -271,7 +269,7 @@ class DetectorNode(Node):
             int(self.get_parameter("profile_window_frames").value))
         self._profile_on = bool(self.get_parameter("profile_stages").value)
 
-        # ── Per-frame dump ────────────────────────────────────────────────────
+        # Per-frame dump
         self._dump_dir = str(self.get_parameter("debug_dump_dir").value).strip()
         self._dump: Optional[dict] = None
         if self._dump_dir:
@@ -280,7 +278,7 @@ class DetectorNode(Node):
                 f"debug_dump_dir={self._dump_dir} — writing one .npz per cloud "
                 "frame. Diagnostic only; this costs latency and disk.")
 
-        # ── Subscribers ──────────────────────────────────────────────────────
+        # Subscribers
         # See the cloud_reliable comment above for why this is not BEST_EFFORT.
         cloud_qos = QoSProfile(
             reliability=(QoSReliabilityPolicy.RELIABLE
@@ -303,7 +301,7 @@ class DetectorNode(Node):
                 RELIABLE_QOS,
             )
 
-        # ── Publishers ───────────────────────────────────────────────────────
+        # Publishers
         self._centroid_pub = self.create_publisher(
             PointStamped,
             self._p["threat_centroid_topic"],
@@ -323,8 +321,7 @@ class DetectorNode(Node):
             f"diff_thresh {self._p['diff_threshold_m']} m)"
         )
 
-    # ── Param helper ─────────────────────────────────────────────────────────
-
+    # Param helper
     def _on_param_set(self, params) -> SetParametersResult:
         """Refuse live writes to anything snapshotted at construction.
 
@@ -382,8 +379,7 @@ class DetectorNode(Node):
             "range_adaptive_extent": self.get_parameter("range_adaptive_extent").value,
         }
 
-    # ── Odom callback ─────────────────────────────────────────────────────────
-
+    # Odom callback
     def _odom_cb(self, msg: Odometry) -> None:
         q = msg.pose.pose.orientation
         if not is_valid_quat(q.x, q.y, q.z, q.w):
@@ -407,8 +403,7 @@ class DetectorNode(Node):
         t.transform.rotation = q
         self._tf_buffer.set_transform(t, "mav_bridge_odom")
 
-    # ── Main cloud callback ───────────────────────────────────────────────────
-
+    # Main cloud callback
     def _cloud_cb(self, msg: PointCloud2) -> None:
         """Count and time every arriving cloud, then run the pipeline.
 
@@ -448,7 +443,7 @@ class DetectorNode(Node):
         # clock cannot advance mid-callback. Sim-time compute is structurally
         # unmeasurable from in here — don't re-add it.
         #
-        # To convert, measure RTF separately (0.864 on the Dell 2026-07-27 —
+        # To convert, measure RTF separately (0.864 measured on the Dell —
         # NOT the ~0.33 that older notes assume, so 15 Hz clouds arrive every
         # ~77 ms of wall time, and that is the real budget per frame).
         sim0 = self.get_clock().now().nanoseconds * 1e-9
@@ -471,7 +466,7 @@ class DetectorNode(Node):
                 self.get_logger().info("funnel: raw=0 (empty cloud)", throttle_duration_sec=self._funnel_throttle_s)
             return
 
-        # W3-15 root cause of 0% recall: gz-sim fills PointCloudPacked in the
+        # Root cause of an earlier 0% recall: gz-sim fills PointCloudPacked in the
         # gz sensor BODY frame (X fwd, Y left, Z up). <optical_frame_id> in the
         # SDF only renames the header frame — it does NOT rotate the data.
         # Remap to REP-103 optical (X right, Y down, Z fwd) so the depth gate,
@@ -543,7 +538,7 @@ class DetectorNode(Node):
         if pts.shape[0] == 0:
             return
 
-        # ── Egomotion compensation (W3-13; 2026-07-06 recall root cause) ─────
+        # Egomotion compensation
         # Difference in the fixed odom frame, not the moving camera frame: at
         # patrol speed the whole scene shifts ~diff_threshold per frame in
         # camera coords, so uncompensated differencing floods and the
@@ -646,7 +641,7 @@ class DetectorNode(Node):
         if fg_pts.shape[0] > self._p["fg_max_points"]:
             # Whole-scene depth change (patrol turn / aggressive egomotion) —
             # not a projectile signature, and clustering 10k+ points is
-            # expensive. BUT (2026-08-22, RT04 funnel evidence): this exact
+            # expensive. But, on RT04 funnel evidence: this exact
             # flood, spanning 32K-156K points at whole-ROI extent, is what a
             # translating drone during hover_mode's cruise-speed throw window
             # (up to ~3.49 m/s, per CLAUDE.md) produces every time — and it
@@ -689,7 +684,7 @@ class DetectorNode(Node):
         # 42-500 pts); metric extent separates them cleanly.
         #
         # Oversized clusters are re-clustered once at a tighter tolerance rather
-        # than discarded: measured 2026-07-26, the ball merges into a metre-scale
+        # than discarded: the ball merges into a metre-scale
         # blob at tol=0.20 and was being thrown away with it. One pass only —
         # recursive shrinking shatters surfaces into ball-sized false positives.
         # See cluster_and_split().
@@ -839,8 +834,7 @@ class DetectorNode(Node):
                 f"funnel: *** PUBLISHED *** best={best_cluster.shape[0]} score={score:.3f}",
                 throttle_duration_sec=0.5)
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
+    # Helpers
     def _write_dump(self, msg: PointCloud2) -> None:
         """Write one frame's per-stage record to debug_dump_dir.
 
@@ -949,8 +943,7 @@ class DetectorNode(Node):
         self._marker_pub.publish(m)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
-
+# Entry point
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = DetectorNode()

@@ -36,7 +36,7 @@ class SpawnPlan(NamedTuple):
     # lead, or its raw position when not leading. Exposed so a caller can score
     # its own prediction. Comparing a measured miss against the scenario SPEC
     # conflates "the lead predicted the wrong place" with "the geometry about
-    # the predicted place was wrong", and the 2026-07-27 hover control
+    # the predicted place was wrong", and the hover control
     # established the geometry is exact to a few cm — so the aim point is the
     # quantity still worth measuring. Appended last: every existing caller
     # reads .position / .velocity by attribute, never by unpacking.
@@ -50,7 +50,6 @@ class MissVector(NamedTuple):
     the path to the drone and therefore cannot distinguish a lead that fired
     early from a path that drifted sideways from a gravity-compensation error —
     three different bugs with three different fixes.
-    2026-07-27.
     """
     along_m: float   # + = ball ended up BEYOND the drone along its own heading
     cross_m: float   # + = ball passed to the LEFT of the drone (ball's heading)
@@ -119,7 +118,7 @@ def compute_spawn(
     target_vel_enu (ENU m/s, e.g. odom twist.linear) -> LEAD the shot: aim at
       where the drone WILL be, not where it is. Without this the whole geometry
       above is exact about a stale point, which is only correct for a hovering
-      target. Measured on the Dell 2026-07-26 with a single clean stack: patrol
+      target. Measured on the Dell with a single clean stack: patrol
       translates at 2.5-3.2 m/s, and 8 m/s runs specifying
       miss_distance_m=0.0 measured closest approaches of 1.3-2.6 m -- almost
       exactly |v| * t_flight. The same throw against a hovering drone measured
