@@ -1,76 +1,42 @@
 # detector.yaml
-# All detection thresholds for detector_node.py.
-# Tune against the bag library; commit the sweep that justifies any change.
-# The library is saturated (recall 100%) — it can no longer referee threshold
-# changes, and every trigger-side lever is a measured null (CLAUDE.md).
+# All detection thresholds for detector_node.py; the node holds no magic
+# numbers of its own. Tune against the bag library and commit the sweep that
+# justifies the change. The library is saturated (recall 100%), so it cannot
+# referee a threshold change on its own, and every trigger-side lever measured
+# so far is a null — see docs/RESULTS.md §7.
 #
-# NO magic numbers in detector_node.py — every tunable lives here.
+# Parameters are cached at construction and there is no set-parameter callback:
+# `ros2 param set` is accepted and ignored. Every change needs a node restart.
 
 detector:
   ros__parameters:
 
-    # W4 live bring-up diagnostic (2026-07-24): live runs produce zero
-    # /threat/centroid while /oak/points streams fine — Week 3 was only ever
-    # scored against bags, never live. This logs per-stage survivor counts
-    # (raw -> range -> angle -> voxel -> fg -> clusters -> ball_sized -> score).
-    # Note: detector_node caches params at construction and has no set-param
-    # callback, so this cannot be flipped with `ros2 param set` — it must be
-    # set here and the node restarted. Revert to false once live detection
-    # is confirmed; it is chatty (throttled to ~1 Hz per stage).
-    # Reverted to false 2026-07-27 (live detection confirmed; the persistent
-    # background map closed the patrol blindness). Set true again only while
-    # diagnosing a specific throw's survivor counts.
-    #
-    # It is NOT the latency problem, contrary to what was assumed when profiling
-    # started. Its min/max block does run six reductions over the full
-    # ~200k-point cloud before the range gate discards most of it, but measured
-    # as its own stage (funnel_log_minmax) at throttle 0.0 that costs only
-    # 1.4-2.3 ms/frame — 4-5% of the frame. The ~160 ms figure was the cost of a
-    # PUBLISHING frame, and it was voxel (66-74 ms) plus cluster (30-70 ms).
+    # ── Diagnostics ───────────────────────────────────────────────────────────
+    # Per-stage survivor counts (raw -> range -> angle -> voxel -> fg ->
+    # clusters -> ball_sized -> score). Chatty; enable only while diagnosing a
+    # specific throw. Not a latency suspect — measured at 1.4-2.3 ms/frame.
     debug_funnel: false
     debug_funnel_throttle_s: 1.0
 
-    # ── Per-stage latency profiling (W4, 2026-07-27) ──────────────────────────
-    # Dodge latency was root-caused to detector COMPUTE, not transport: clouds
-    # arrive every ~77 ms wall (15 Hz at the measured RTF 0.864) and _cloud_cb
-    # was taking ~160 ms, so the depth-5 queue backs up and every cloud is stale
-    # on arrival. Transport is the symptom. This logs a wall-time breakdown per
-    # stage (hottest first) every profile_window_frames clouds, so the
-    # optimisation targets the measured hot stage instead of a guess.
-    # Deliberately independent of debug_funnel — leave that false while
-    # profiling. Same restart caveat as debug_funnel: params are cached at
-    # construction, so `ros2 param set` has no effect.
-    # Off after the 2026-07-27 measurement: voxel_downsample (66-74 -> 5-17 ms)
-    # and cluster_all (12-71 -> 2-20 ms) were the whole overrun, and every frame
-    # now fits the budget (14-55 ms). Turn it on again before changing anything
-    # in the callback -- it is how those two were found.
+    # Wall-time breakdown per stage, hottest first, every profile_window_frames
+    # clouds. This is how the ~160 ms cloud callback was traced to
+    # voxel_downsample (66-74 -> 5-17 ms) and cluster_all (12-71 -> 2-20 ms)
+    # rather than to transport. Turn it on before changing the callback.
     profile_stages: false
     profile_window_frames: 30
 
-    # ── Per-frame dump (W4, 2026-07-27) ───────────────────────────────────────
-    # Set to a directory to write one .npz per cloud frame: the post-voxel,
-    # egomotion-compensated cloud, its foreground mask, every cluster the
-    # splitter produced, and the publish decision.
-    #
-    # Why this exists when the funnel log does not suffice: the funnel reports
-    # survivor COUNTS, which cannot attribute a miss. A frame with 40 foreground
-    # points and no ball-sized cluster reads identically whether the background
-    # map absorbed the ball or the ball merely fell under cluster_min_points.
-    # With the cloud and the mask on disk, and the ball's true pose known from
-    # /gz/dynamic_poses, the attribution is exact — that is the measurement the
-    # detection-consistency gap (~1.7 m detected then discarded) needs.
-    #
-    # Costs latency and ~250 KB/frame at 15 Hz. Empty string = off, and it must
-    # be left off: added latency drops frames, which corrupts the very
-    # consistency it is measuring.
+    # Directory for one .npz per cloud frame (post-voxel egomotion-compensated
+    # cloud, foreground mask, every cluster, publish decision) — attributes a
+    # miss where the funnel's survivor counts only report that one happened.
+    # Costs ~40 ms and ~250 KB per frame, so it drops frames: no latency or
+    # consistency number from a dumping run is valid. Empty string = off.
     debug_dump_dir: ""
 
-    # ── Cloud transport (W4 live bring-up, 2026-07-26) ────────────────────────
-    # /oak/points is a 7.37 MB sample; BEST_EFFORT lost ~75% of it to UDP
-    # fragmentation (measured: best_effort 3.99 Hz vs reliable 14.43 Hz on the
-    # same topic; the detector itself was down to 1.25 Hz). At that rate a ball
-    # is seen once per throw and no dodge can ever trigger. Set cloud_reliable
-    # false on real hardware, where DepthAI publishes best-effort.
+    # ── Cloud transport ───────────────────────────────────────────────────────
+    # /oak/points is a 7.37 MB sample and BEST_EFFORT loses ~75% of it to UDP
+    # fragmentation (3.99 Hz vs 14.43 Hz reliable). Set false on real hardware,
+    # where DepthAI publishes best-effort. The queue depth drops clouds under
+    # load, so false-positive counts only compare across comparably loaded runs.
     cloud_reliable: true
     cloud_queue_depth: 5
 
@@ -85,13 +51,11 @@ detector:
     # Keep only points within this depth range (metres).
     # Reliable OAK-D Lite working band; clip edges that are too noisy.
     roi_min_range_m: 0.30
-    roi_max_range_m: 5.00   # 8.0 let far background (12-19m) dominate the diff — hover attitude
-                             # jitter x long range >> diff_threshold there, flooding fg every frame
-                             # (S02 funnel: fg=25k-90k, clusters=0). Tried 6.5 to rescue S08 (14 m/s,
-                             # offset_forward_m=6.0) but that regressed S03 and STILL didn't fix S08
-                             # (90%->80% recall) — S08's failure isn't a range/dwell issue after all.
-                             # Reverting to 5.0 (best measured train recall: 90%, TP=9/FN=1) and
-                             # moving to the held-out test split; S08 stays a known FN.
+    roi_max_range_m: 5.00   # 8.0 let far background (12-19 m) dominate the diff: attitude jitter
+                             # at long range swamps diff_threshold and floods fg every frame
+                             # (S02 funnel: fg=25k-90k, clusters=0). 6.5 regressed recall to 80%.
+                             # 5.0 is the best measured train recall (90%, TP=9/FN=1); S08 (14 m/s)
+                             # stays a known false negative and is not a range problem.
 
     # Forward half-angle of the ROI frustum (degrees).
     # Points outside this cone ahead of the camera are discarded.
@@ -100,18 +64,16 @@ detector:
     # ── Voxel downsampling ────────────────────────────────────────────
     # Leaf size for voxel grid downsampling (metres).
     # Larger = faster but misses small objects.
-    voxel_leaf_m: 0.02   # 0.05 m voxels are COARSER than the 80 mm projectile -> it collapsed to 1-2 pts. 0.02 m resolves it into ~10-20 pts.
+    voxel_leaf_m: 0.02   # 0.05 m voxels are coarser than the 80 mm ball and collapse it to 1-2 points; 0.02 m resolves ~10-20.
 
     # ── Background model / frame differencing ────────────────────────────────
     # Persistent voxel-hashed background map in the fixed frame, replacing the
-    # rolling deque below. Root cause it fixes (measured 2026-07-26): the deque
-    # only remembers 0.267 s, so scene the camera newly sees while patrolling
-    # reads as novel, fg floods to ~48k points, and the ball is absorbed into a
-    # metre-scale cluster — every on-target patrol throw gave 0-1 centroids
-    # against a min_track_updates=3 gate. Set false to A/B against the Week-3
-    # deque (which is what the recorded W3 recall figures were scored on).
-    # Ignored in camera mode (pre-b0eedd5 bags): a persistent map needs a fixed
-    # frame, so those runs always use the deque.
+    # rolling deque below. The deque only remembers 0.267 s, so terrain the
+    # camera newly sees while patrolling reads as novel, fg floods to ~48k
+    # points, and the ball is absorbed into a metre-scale cluster. Set false to
+    # A/B against the Week 3 deque, which is what the Week 3 recall figures were
+    # scored on. Ignored in camera mode (pre-b0eedd5 bags): a persistent map
+    # needs a fixed frame, so those runs always use the deque.
     use_persistent_bg: true
     bg_map_leaf_m: 0.10       # keep equal to diff_threshold_m — see background_map.py
     bg_map_ttl_s: 20.0        # forget a voxel unseen this long (bounds a drifting map)
@@ -133,275 +95,39 @@ detector:
     # Points within this radius (metres) are merged into the same cluster.
     cluster_tolerance_m: 0.20
 
-    # Reject clusters outside this size range (number of voxel-downsampled points).
-    # W4: cluster_max_points now applies only AFTER extent splitting. Applying it
-    # first discarded the ball whenever it merged into a larger blob.
-    cluster_min_points: 5     # raised 3->5 — 3 was letting background clutter FP (N01, N03) through
+    # Reject clusters outside this size range (number of voxel-downsampled
+    # points). cluster_max_points applies only AFTER extent splitting; applying
+    # it first discarded the ball whenever it merged into a larger blob.
+    cluster_min_points: 5     # raised 3->5 — 3 let background clutter through as FPs (N01, N03)
     cluster_max_points: 500
 
-    # Extent splitting (W4): a cluster larger than cluster_max_extent_m is
+    # Extent splitting: a cluster larger than cluster_max_extent_m is
     # re-clustered ONCE at this tighter radius instead of being dropped, so a
     # ball touching a surface stays separable. Keep it above voxel_leaf_m and
-    # below the ball's standoff from the scene: recursive shrinking was tried
-    # first and shatters a surface into ball-sized false positives once the
-    # radius reaches its own point spacing (29 fragments in the unit test).
-    # max_points bounds the cost — a bigger blob is an egomotion flood, which is
-    # fg_max_points' job, not a scene object worth splitting.
+    # below the ball's standoff from the scene — recursive shrinking shatters a
+    # surface into ball-sized false positives once the radius reaches its own
+    # point spacing (29 fragments in the unit test). max_points bounds the cost:
+    # a bigger blob is an egomotion flood, which is fg_max_points' job.
     cluster_split_tol_m: 0.10
     cluster_split_max_points: 5000
 
     # Reject clusters whose max axis extent exceeds this (metres). The 80 mm
     # ball spans <= ~0.15 m after 0.02 m voxelization; scene-entry blobs (near
     # ground/wall patches entering the ROI, fg==voxel) span metres. This is the
-    # primary FP gate — point-count ranges overlap, metric size does not.
+    # primary FP gate against those, where a point-count cut does not reach.
     cluster_max_extent_m: 0.35
 
-    # ###################################################################
-    # INVALIDATED 2026-08-17, THE SAME DAY IT WAS WRITTEN. DO NOT CITE THE
-    # NUMBERS IN THE BLOCK BELOW. They came from replays that scored a
-    # RECORDED /threat/centroid track instead of the detector under test,
-    # so they measure the wrong detector.
-    #
-    # Task 4 captured the T-bags with a live perception stack running, so
-    # each T-bag CONTAINS that stack's own /threat/centroid output --
-    # T01-T10 carry 75-99 messages, T11 1, T12 31, T13 0, T14 99 -- and
-    # score_bags._replay_bag passes no --exclude-topics, so `ros2 bag play`
-    # republishes them and _centroid_cb counts them as detections of the
-    # detector under test. Proven empirically, not just by reading the code:
-    # replaying T14's /threat/centroid with NO detector running delivers
-    # exactly 99 messages to a RELIABLE subscriber (the bag records the topic
-    # with offered reliability=reliable, so it is QoS-compatible).
-    #
-    # Do NOT try to recover the old numbers by subtracting the recorded count
-    # from the buggy total. That subtraction was tried and is unsound: it
-    # predicts 8 live FPs on T14, while the fixed harness measures 97. The
-    # leading explanation is message loss -- two publishers bursting into one
-    # depth-limited RELIABLE queue -- but that mechanism is a HYPOTHESIS and
-    # has not been verified; a plainer rival is that FP counts are
-    # throughput-sensitive (cloud_queue_depth: 5, below) and the contaminated
-    # and clean runs carried different loads. Either way a contaminated total
-    # is not the sum of anything: measure, never subtract. The trustworthy
-    # counts are the ones measured with the recorded track excluded, on the
-    # Dell, at that load (tune: T11 0, T12 35, T13 0, T14 97).
-    #
-    # Also corrected: an earlier revision of this header claimed T05 and T10
-    # were scored TP while the detector published nothing, i.e. two hidden
-    # false negatives. That was wrong -- under the fixed harness both pass
-    # the anchored window. The MECHANISM that produced the false claim was
-    # never established: a later revision of this block attributed it to a
-    # funnel log read at debug_funnel_throttle_s: 1.0, but nothing in the
-    # code, the diff or the Task 5b report substantiates that, and the only
-    # account of the incident that exists names two different candidates --
-    # the missing SPAWN_LEAD_S anchor and the `ros2 bag play --clock`
-    # wall-clock-synthesis trap, each of which independently produces the
-    # symptom "the detector looks like it published nothing near the
-    # expected time". Recorded here as unresolved rather than guessed.
-    #
-    # Two claims below DO survive, both re-checked against the code:
-    #  - bg_query genuinely reports first-sight terrain as foreground
-    #    (background_map.py foreground(): a point is foreground only when
-    #    its own voxel and all 26 neighbours are unobserved).
-    #  - the ball/terrain geometric overlap is directionally real, but the
-    #    quoted ranges are not: a funnel line lists EVERY ball-sized
-    #    cluster in a frame, not the ball, so the "TP population" above
-    #    already contains the FP class it is compared against. Attribution
-    #    cannot use debug_dump_dir's cl_centroid against /gz/dynamic_poses:
-    #    the bags do not record that topic.
-    #
-    # RETRACTED 2026-08-17 (Task 5c): this block used to end "Task 5b
-    # attributes instead by requiring a run of >=3 in-window detections of
-    # strictly decreasing range -- a closing ball -- which terrain noise
-    # does not produce." That last clause is FALSE, and it is refuted 25
-    # lines below by this file's own account of the FP mechanism. A run of
-    # strictly decreasing base_link range is exactly what a patrolling drone
-    # translating TOWARD newly-explored static terrain produces, frame after
-    # frame. A sign-only test therefore selects FOR this library's dominant
-    # FP class, and over 200 000 iid-noise trials per point it fires at
-    # P=0.77 (n=10), 0.91 (n=15), 0.97 (n=20) detections in the window --
-    # which is where the "11 of 12 attributable" figure came from. The
-    # replacement uses the closure RATE the sign test discarded: a run only
-    # counts when every step closes faster than the airframe's own measured
-    # rolling-max ground speed (3.49 m/s) and no faster than that scenario's
-    # ball speed plus the same figure. See score_bags_logic
-    # .attribute_closing_ball. Do not re-derive any attribution claim from
-    # a run length alone.
-    #
-    # AND THE REPLACEMENT IS ITSELF REFUTED, by the falsification control
-    # Task 5b structurally could not run. Measured 2026-08-17 over every
-    # negative in the library, whole replay, against the most permissive
-    # band any scenario gets.
-    #
-    # THERE ARE TWO KINDS OF NEGATIVE IN THIS LIBRARY AND ONLY ONE OF THEM
-    # IS A NULL CONTROL. Corrected 2026-08-17 (Task 5c fix round 1): an
-    # earlier version of this block called N03 and T12 "ball-free". They
-    # are not. scenario_matrix.yaml gives N03 speed_mps 8.0 (spawned behind
-    # the camera), N04 8.0 (~10 m below), T12 11.0 (behind), T13 11.0
-    # (below) -- a projectile IS spawned in all four. They are negatives in
-    # the sense of "wrong bearing, wrong elevation, the gates must suppress
-    # it", not "contains no ball". The genuinely ball-free bags are the
-    # five with speed_mps 0.0, where capture_scenario.sh issues no spawn
-    # command at all: N01, N02, N05, T11, T14.
-    #
-    # ON THE GENUINELY BALL-FREE SUBSET: of the three that emit any
-    # centroid at all -- N01 (30 FPs), N02 (36), N05 (22) -- ALL THREE
-    # yield a qualifying in-band closing run and falsely attribute a ball.
-    # 3 of 3. T11 emits nothing; T14 emits 97 detections and does not fire.
-    # N01's firing run is three detections spanning 0.462 s at ~4.5 m/s, in
-    # a bag with no projectile in it. (Re-measured 2026-08-17 under the
-    # corrected window; the FP counts drift by 1-2 per bag between runs, as
-    # the throughput note further down predicts. Every verdict reproduced.)
-    # And state the n rather than hiding it behind "9 negatives": the
-    # ball-free control is THREE emitting bags, all three from the
-    # originals' negatives. T11 and T14, the tune set's two ball-free bags,
-    # do not fire. It is a small control; it is also unanimous on every bag
-    # that produces any data.
-    # ON THE BALL-PRESENT MUST-NOT-DETECT SUBSET, reported separately
-    # because it is a different and weaker fact: N03 fires, T12 fires, N04
-    # emits nothing, T13 emits nothing. Interesting, not a null result --
-    # there is a real ball in those bags.
-    # Meanwhile 0 of the 12 original positives and 1 of the 10 tune
-    # positives qualify, and that one (T03) fires 1.3 s after its 17 m/s
-    # ball has left the frame, at 7.7 m/s.
-    # THERE IS NO WORKING OFFLINE ATTRIBUTION IN THIS HARNESS.
-    #
-    # HOW STRONG THE REFUTATION IS, stated precisely, because the earlier
-    # version of this block overstated it in two directions at once:
-    #  - AS A WHOLE-BAG TEST it is refuted outright. That is the criterion
-    #    the task set, the control (ctl_all, the whole replay) meets it
-    #    literally, and no attribution claim survives it.
-    #  - THE CONTROL IS NOT WINDOW-MATCHED. N01's firing run sits at
-    #    bag_start+0.365..0.827 s, entirely PRE-SPAWN, inside exactly the
-    #    region the scoring window's spawn floor removes from every
-    #    positive. The matched control (ctl_win) reads 0 of 5, identical to
-    #    the positives' 0 of 12. Inside the scored window the statistic is
-    #    INERT AND UNDERPOWERED at these n, which is a weaker and different
-    #    statement from "wrong". Both are true; do not quote one as the
-    #    other.
-    #  - "0 of 12 positives is below the noise floor" is fair, but only
-    #    barely, and the figures below are the ones that say so. The null
-    #    model puts the per-scenario spurious-attribution rate at
-    #    0.038-0.291, P(0 of 12 | null) = 0.160, and the null EXPECTATION
-    #    at 1.64 attributions. So an earlier claim here that "there is no
-    #    closing-ball signal in the in-window centroid stream at all" is
-    #    NOT supported and has been removed: a null that produces 0/12 one
-    #    time in six is not a floor anything is decisively below.
-    #
-    #    ^ COMPUTED FROM THIS n_win VECTOR, AND ONLY VALID AT IT:
-    #      S01=10 S02=3 S03=8 S04=11 S05=5 S06=4
-    #      S07=3  S08=7 S09=4 S10=12 S11=4 S12=5
-    #    (the measured in-window counts, corrected-window run 2026-08-17).
-    #    IF THOSE COUNTS CHANGE, ALL THREE FIGURES ABOVE ARE STALE. That is
-    #    not hypothetical: the previous version of this block shipped
-    #    "0.10-0.36 / P ~= 0.12", interpolated at the PREVIOUS window's
-    #    counts (S01=13, S10=16) and never recomputed when the fix round 1
-    #    window change moved them. Recomputed exactly, that older vector
-    #    gives 0.038-0.383 / P = 0.126 / E = 1.81 -- so the shipped floor
-    #    of 0.10 was wrong at BOTH vectors. The true floor is set by the
-    #    smallest count, n = 3 (S02 and S07), not by an eyeballed interval.
-    #    Every error here was conservative -- it under-claimed the detector
-    #    and over-claimed how decisive 0/12 is -- and they were still errors.
-    #
-    #    The null model behind those numbers ships, is re-runnable, and now
-    #    prints the vector beside the figures:
-    #      PYTHONPATH=src/huitzilin_perception \
-    #        python3 src/huitzilin_perception/test/null_attribution_mc.py
-    #    The vector and the three figures are pinned against each other by
-    #    test_the_published_null_figures_still_match_the_measured_n_win, so
-    #    a future window change that moves the counts now fails a test
-    #    instead of silently invalidating this block again.
-    #
-    # Mechanism, so the next attempt does not repeat it: successive
-    # /threat/centroid messages in this library are not one object tracked
-    # frame to frame. They are unrelated terrain patches at unrelated
-    # depths, so their apparent closure rate is arbitrary and lands inside
-    # any physically plausible band often enough to be useless. Range alone
-    # cannot establish object identity between frames. The next thing to
-    # try is the full base_link (x, y, z) the centroid already carries --
-    # bound the 3-D step displacement, not just the radial one -- but that
-    # is untested and must be validated on the tune split and against this
-    # same negative control BEFORE any attribution claim is made from it.
-    #
-    # Until then: a /threat/centroid inside the detection window is
-    # evidence that the detector fired near the right time, and nothing
-    # more. It is NOT evidence that the ball was detected. Recall measured
-    # on this library is a window statistic.
-    #
-    # AND THE WINDOW STATISTIC IS NOT A DETECTION CLAIM EITHER, from this
-    # file's own emitted numbers. In-window centroid DENSITY (n_win per
-    # second of window, corrected-window run of 2026-08-17): the ball-free
-    # N02 carries 4.00/s, which is higher than TEN of the twelve original
-    # positives (1.14-3.79/s; only S04 at 4.17 and S10 at 4.55 exceed it).
-    # A statistic that a ball-free bag reproduces is not evidence of
-    # detection, whatever its numerator reads. The one hint pointing the
-    # other way, and it is only a hint: the median positive density
-    # (1.95/s) is about 2x the negatives' median (1.00/s) -- weak, not
-    # significant at n = 5 negatives, and NOT promotable to a detection
-    # claim. It needs more ball-free bags, not another discriminator.
-    #
-    # AND THAT "2x" IS FRAGILE ENOUGH THAT IT SHOULD NOT BE QUOTED WITHOUT
-    # THIS PARAGRAPH. The five negative densities are {0, 0, 1, 1, 4}/s.
-    # The median of five values, three of which are 0 or 1, is decided by
-    # ONE detection in ONE bag: N03 carried 1 in-window detection in the
-    # previous run and 2 in this one, which alone moved the negatives'
-    # median 0.50 -> 1.00 and the ratio 3.8x -> 1.95x. Revert that single
-    # detection and the ratio returns to ~3.9x. At n = 5 the lead is
-    # noise-dominated; the honest statement is neither "4x" nor "2x" but
-    # "a single false positive in a single bag moves it by a factor of two".
-    #
-    # A CAUSAL NOTE, because the first two attempts at this got it wrong:
-    # the shrinkage is NOT the window tightening removing more from the
-    # positives. The positives' median density did not fall at all --
-    # 1.909 -> 1.947/s, it rose slightly. And the negatives' windows are
-    # byte-identical under both rules by construction: every negative
-    # carries time_to_closest_s: 0, so min(0, fall_time) = 0 and their
-    # window is [spawn, spawn+2.0] before and after. The window fix could
-    # not have touched them. The entire change is the run-to-run false
-    # positive drift documented above (N02 35->36, N03 54->56, N05 21->22).
-    #
-    # Refinement worth carrying into the re-measurement: the driver is
-    # most likely a COLD map at every replay start, not steady sweeping.
-    # insert() clears the map when stamps go backwards, so each replay
-    # starts empty and warms up. A live flight pays that warm-up once at
-    # takeoff; per-bag scoring pays it 31 times. Task 5b's per-frame funnel
-    # confirms the scale is far worse than the block below says: frames of
-    # bg=506 fg=4892 and bg=1013 fg=4159 -- both just UNDER the current
-    # fg_max_points: 5000 -- pass through and yield ball-sized clusters
-    # (best=7, extent=0.21 m). So fg_max_points is the live candidate lever.
-    # It is NOT yet safe to lower: nobody has checked whether a true
-    # acquisition frame also spikes into that range, and cutting one would
-    # cost real detections. That check needs its own tune-split runs.
-    #
-    # Re-score with the recorded topic excluded BEFORE deriving anything
-    # from this block. Note FP counts are also throughput-sensitive
-    # (cloud_queue_depth: 5 drops clouds under load), so an FP count is only
-    # comparable against another run on a comparably loaded machine.
-    # ###################################################################
-    # Investigated 2026-08-17 (Task 5, Step 0/2): T11/T12/T14 (patrol-motion
-    # tune negatives) produced FP clusters through this exact gate -- e.g.
-    # (size=43, extent=0.20 m) and (size=25, extent=0.21 m) from T14 -- so the
-    # claim above ("metric size does not [overlap]") does not hold for this FP
-    # class. Root cause: the persistent background map (bg_query stage) can
-    # only flag a voxel foreground the FIRST time the translating camera sees
-    # it, so newly-explored static terrain along a patrol leg reads as a
-    # genuine (not smeared) foreground burst, concentrated in the first ~1-2 s
-    # of a scenario's own flight path (T14: bg=10643->19584 voxels over the
-    # bag, and its FPs land only in the first 1.4 s of a 45 s replay).
-    # Measured against every T01-T14 funnel line: TP cluster extent spans
-    # 0.03-0.34 m and size spans 5-73 pts; this FP class's extent
-    # (0.08-0.21 m) and size (6-43 pts) sit entirely inside that range. No
-    # single-frame extent/size/score cut in this file separates them without
-    # also cutting real (if faint) tune-set detections, so none was made --
-    # the tune split shows 0 FN with the thresholds below, and this repo's own
-    # tuning rule is no change without a tune-split FN or FP that justifies
-    # it. Discriminating "just-mapped rock" from "ball" needs cross-frame
-    # persistence (evasion_node's min_track_updates), not a per-cloud gate;
-    # score_bags only scores the raw per-cloud /threat/centroid stream, so
-    # that fix cannot move this harness's numbers even though it is the
-    # right fix for the live dodge decision. TF_OLD_DATA staleness (odom TF
-    # going stale under patrol motion) was checked and ruled OUT as the
-    # driver: it appears throughout the tune library, including 187 times in
-    # T13 (the near-zero-FP scenario), and does not track FP severity (T11
-    # logs 2x T12's TF warnings but produces 1/36th its FP count).
+    # It does not separate the patrol-motion false-positive class, though:
+    # over T01-T14, true-ball clusters span 0.03-0.34 m / 5-73 pts and those
+    # false positives span 0.08-0.21 m / 6-43 pts — entirely inside. The cause
+    # is the persistent background map, which can only flag a voxel foreground
+    # the first time the translating camera sees it, so newly-explored terrain
+    # reads as a genuine foreground burst over the first ~1-2 s of a leg. No
+    # single-frame extent/size/score cut separates the two without also cutting
+    # faint real detections; the discriminator is cross-frame persistence
+    # (evasion_node's min_track_updates), which score_bags cannot exercise.
+    # Recall measured on this library is therefore a window statistic, not a
+    # detection claim — see docs/KNOWN_ISSUES.md.
 
     # ── Centroid publishing ───────────────────────────────────────────
     # Minimum confidence score [0–1] to publish a centroid.
@@ -415,9 +141,9 @@ detector:
     # ── Egomotion compensation ────────────────────────────────────────
     # Fold /huitzilin/odom into TF and difference clouds in the fixed frame
     # below instead of the moving camera frame. Requires odom with a valid
-    # orientation quaternion (mav_bridge ≥ the 2026-07-06 attitude fix);
-    # bags without it fall back to camera-frame differencing, which floods
-    # under patrol motion and was the cause of the 60%-recall regression.
+    # orientation quaternion (bags recorded from b0eedd5 onward); bags without
+    # it fall back to camera-frame differencing, which floods under patrol
+    # motion and was the cause of the 60%-recall regression.
     # Set false to disable (useful for debugging the raw differencer).
     compensate_egomotion: true
     odom_topic: "/huitzilin/odom"

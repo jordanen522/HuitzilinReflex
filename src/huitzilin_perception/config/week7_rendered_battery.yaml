@@ -1,156 +1,55 @@
-# RENDERED battery — the 20 m/s question asked through the whole real pipeline.
+# Rendered battery for week7_rendered.launch.py — the 20 m/s question asked
+# through the whole real pipeline: /threat/centroid is computed by the unmodified
+# detector_node.py from a cloud a Gazebo depth camera actually rendered, with
+# depth_noise_node's modelled stereo error applied. Never run it alongside the
+# oracle or synthetic-depth stacks; two publishers on /threat/centroid give the
+# tracker two uncorrelated views of one ball.
 #
-# RUN THIS ONLY UNDER week7_rendered.launch.py. Every row assumes
-# /threat/centroid is COMPUTED by the unmodified detector_node.py from a
-# PointCloud2 that a Gazebo depth camera actually rendered, after
-# depth_noise_node has applied the modelled stereo error. Never run it under
-# week6_oracle.launch.py or week6_synthetic_depth.launch.py, and never with
-# either of those stacks up: two publishers on /threat/centroid give the tracker
-# two uncorrelated views of one ball.
+# The sensor is the world file, not a launch argument — there is no
+# detection_range_m in this lane. Reach is an outcome of optics, renderer and
+# noise; sector (±13.5 x 11.0 deg) and rate (30 Hz requested, ~23 Hz delivered
+# through the ros_gz_bridge hop, so t_dead = 0.155 + 1.380/f ≈ 0.215 s) live in
+# models/iris_ar0234/model.sdf. Quote that file and the delivered rate beside
+# every number. The error is modelled rather than rendered
+# (sigma(z) = 0.30*(z/26)^2, correlated over ~7 px — an input, not a
+# measurement) and the optics are of a proposed part, so a result here is
+# evidence about the pipeline given that sensor model, not a hardware claim.
 #
-# WHAT THIS LANE IS, AND — FOR THE FIRST TIME IN THIS REPO — WHAT IT IS NOT
-#   The cloud is RENDERED. Every return is a surface the renderer saw through
-#   the camera in models/iris_ar0234/model.sdf. Nothing is asserted from
-#   /gz/dynamic_poses and nothing is fabricated from truth. That is the whole
-#   reason this file exists: the oracle lane asserts the centroid, and the
-#   synthetic-depth lane fabricates the cloud, so neither can be evidence that
-#   a depth sensor sees the ball. This one can.
+# Order of operations: the fidelity gate (G01/G02) runs FIRST, on the baseline
+# world and camera with noise off, on patrol, scored on `dodged` against the
+# Week 4 patrol envelope. Until it reproduces that envelope the plumbing is
+# unproven and the R rows mean nothing — G01 does not currently reproduce it,
+# see docs/KNOWN_ISSUES.md. Score the R rows on the counterfactual instead, per
+# docs/RESULTS.md §10, and never blend the gate's dodge counts with those saves.
 #
-#   The residual modelling assumptions, stated so they are never lost:
-#     - the ERROR is modelled, not rendered. Gazebo returns near-exact
-#       geometric depth, so depth_noise_node imposes sigma(z) = 0.30*(z/26)^2
-#       along the ray, correlated over ~7 px. sigma_ref_m and correlation_px are
-#       INPUTS. correlation_px in particular is an assumption, not a
-#       measurement, and centroid scatter is strongly sensitive to it.
-#     - the OPTICS are of a proposed part (See3CAM_20CUG + 10 mm M12), not of
-#       hardware anyone has flown.
-#   So a number here is evidence about the perception -> prediction -> flight
-#   pipeline GIVEN that sensor model. It is still not a hardware claim.
+# Running it:
+#   # gate: baseline world, noise off, patrol
+#   ros2 launch huitzilin_perception week7_rendered.launch.py with_patrol:=true \
+#       gz_cloud_topic:=/gz/oak/depth/points sigma_ref_m:=0.0 \
+#       detector_params:=.../params/detector.yaml
+#   DRONE_MODEL=iris_depth ./scripts/run_dodge_battery.sh week7
 #
-# THE SENSOR IS THE WORLD FILE, NOT A LAUNCH ARGUMENT. There is no
-# detection_range_m in this lane and that is the point: nothing declares how far
-# it sees. Reach is an OUTCOME of optics, renderer and noise. Sector (+/-13.5 x
-# 11.0 deg) and requested rate (30 Hz, ~23 Hz delivered through the
-# ros_gz_bridge PointCloudPacked hop) live in models/iris_ar0234/model.sdf.
-# QUOTE THE WORLD FILE AND THE DELIVERED RATE beside every number here; the
-# launch command alone does not identify the instrument. t_dead = 0.155 +
-# 1.380/f must be evaluated at the delivered rate, which at ~23 Hz is ~0.215 s.
+#   # envelope: ar0234 world, hover. counterfactual_min_m is not a battery
+#   # column and cannot be recovered afterwards, so start this one first.
+#   python3 scripts/hz_counterfactual.py --drone-model iris_ar0234 --out /tmp/week7_cf.csv &
+#   DRONE_MODEL=iris_ar0234 EXTRA_ARGS="-p hover_mode:=true" \
+#       ./scripts/run_dodge_battery.sh week7
 #
-# THE SLOW-BALL FLOOR IS NOT A PROBLEM IN THIS LANE, unlike the synthetic one.
-# Frame differencing needs the ball to advance more than diff_threshold_m
-# between frames: v_min = 0.10 * 23 = 2.3 m/s. Every row below is far above it.
-# (The synthetic lane's 60 Hz put that floor at 6.0 m/s, which is why its rows
-# could not go below 8 m/s.)
+# DRONE_MODEL=iris_ar0234 is required on the ar0234 arm and on hz_counterfactual;
+# both default to iris_depth, which does not exist in that world. Hover is
+# required for R01-R04 — under patrol 0 of 98 throws have arrived inside 0.109 m,
+# in hover 40/40 did. Read first_det_range_m before any save rate: with no
+# launched reach to check it against, it is the measurement of the reach itself.
 #
-# ORDER OF OPERATIONS — DO NOT SKIP, AND DO NOT REORDER
-#
-# 1. FIDELITY GATE (G01/G02). Flown on the BASELINE world with the BASELINE
-#    camera and the noise DISABLED, on PATROL, scored on `dodged`:
-#
-#      gz sim -s -r .../worlds/huitzilin_runway.sdf
-#      ros2 launch huitzilin_perception week7_rendered.launch.py \
-#          with_patrol:=true gz_cloud_topic:=/gz/oak/depth/points \
-#          sigma_ref_m:=0.0 detector_params:=.../params/detector.yaml
-#      DRONE_MODEL=iris_depth ./scripts/run_dodge_battery.sh week7
-#
-#    That arm changes exactly ONE thing against Week 4: the cloud detours
-#    through depth_noise with the noise off. G02 must reproduce the 78/78 shape
-#    at 8 m/s and G01 the 0/17 shape at 14 m/s. If it does not, the plumbing is
-#    wrong and NOTHING below means anything yet.
-#
-#    Score the gate on `dodged`, never on the counterfactual: the Week 4
-#    reference is itself a patrol dodge count, and under patrol 0 of 98 throws
-#    have ever arrived inside 0.109 m, so a counterfactual score of that cell
-#    correctly reports "no on-course throws — measured nothing". NEVER blend the
-#    gate's dodge counts with the save rates below.
-#
-# 2. THE MATCHED ENVELOPE (R01/R02/R03), on the ar0234 world, in HOVER, with
-#    every sensor and geometry parameter identical across the three rows. This
-#    is the measurement the whole exercise exists to produce, and it is designed
-#    so that the 8 -> 20 m/s comparison is a SINGLE experiment rather than two
-#    results from different eras stitched together:
-#
-#      - one sensor (the ar0234 world, unchanged between rows)
-#      - one detector params file (rendered_detector.yaml, unchanged)
-#      - one geometry: offset_forward_m 36.0 and aim_at_drone for all three
-#      - one scoring rule (below), applied identically
-#      - one session, so there is no between-run seam
-#
-#    Only speed_mps differs. Report the three rows separately and never blend
-#    them; the 2.5x claim is R03 against R01, both from this table.
-#
-# 3. THE SCORING RULE, REGISTERED HERE BEFORE ANY ROW IS FLOWN (2026-08-21):
-#
-#      on-course  :=  counterfactual_min_m <= 0.30 m
-#      save       :=  on-course AND actual_min_m > 0.30 m
-#      reported   :=  saves / on-course, per speed, with a Wilson 95 % interval
-#
-#    A fire count and a save rate are different numbers. A cell with no
-#    on-course throws measured NOTHING and must never be reported as 0/N.
-#
-#    counterfactual_min_m IS BLANK ON NO_DODGE ROWS AND THAT BLANK IS A TRAP.
-#    Joining on it naively drops every no-fire from the DENOMINATOR and turns a
-#    save rate into a rate over only the throws that fired — on one 26 m cell
-#    that converted a true 21/30 (70 %) into 21/21 (100 %). When no dodge fired
-#    the drone never deviated, so the actual path IS the counterfactual:
-#    substitute counterfactual_min_m := actual_min_m, and count a NO_DODGE
-#    inside 0.30 m as a LOSS, not as missing data.
-#
-#    counterfactual_min_m is NOT a dodge_battery column. It comes from
-#    scripts/hz_counterfactual.py, which must already be RUNNING when the
-#    battery throws — it cannot be recovered afterwards from the battery CSV:
-#
-#      python3 scripts/hz_counterfactual.py --drone-model iris_ar0234 \
-#          --out /tmp/week7_cf.csv &
-#
-#    --drone-model iris_ar0234 is REQUIRED here. It defaults to iris_depth,
-#    which does not exist in the ar0234 world.
-#
-# 4. HOVER IS NOT OPTIONAL for R01-R04. It is the only configuration that has
-#    ever put a ball on a hit course: under patrol 0 of 98 throws arrived inside
-#    0.109 m, in hover 40/40 did. Patrol's throw-window gate holds each throw
-#    until the drone reaches a ROLLING-MAX cruise (min_cruise_frac 0.95 of a
-#    3.49 m/s max against a 2.09 m/s median), so the lead extrapolates a peak
-#    the drone never sustains. Hover also drops the straight-leg requirement,
-#    which is what made long offsets unmeasurable under patrol.
-#
-#      DRONE_MODEL=iris_ar0234 EXTRA_ARGS="-p hover_mode:=true" \
-#          ./scripts/run_dodge_battery.sh week7
-#
-# 5. DRONE_MODEL=iris_ar0234 IS REQUIRED ON THE ar0234 ARM, and again on
-#    hz_counterfactual. huitzilin_runway_ar0234.sdf names its entity
-#    iris_ar0234; dodge_battery defaults drone_model to "iris_depth" and will
-#    find no drone. It does say so, but at the end of a long setup.
-#
-# 6. READ first_det_range_m BEFORE READING ANY SAVE RATE. In this lane it is not
-#    a check against a launched reach — there is none — it is the MEASUREMENT OF
-#    THE REACH ITSELF, and it is one of the two headline outputs of this file.
-#    Report its distribution per speed, not just its mean: the tca law says a
-#    save needs range = speed * (tca_required + t_dead), so at 20 m/s and
-#    t_dead ~0.215 s, P=0.90 (tca 0.88 s) needs 21.9 m of first detection. A
-#    cell whose first detections cluster below that is limited by SENSOR REACH
-#    and the save rate is downstream of it.
-#
-# THE OFFSET RULE, re-derived for THIS lane rather than copied. The ball must
-# spawn OUTSIDE anything the pipeline can see and fly in, or the pipeline is
-# handed a detection it never had to acquire. The outermost gate here is the
-# detector's roi_max_range_m (28.0 m), not the camera's 35 m far clip. Three
-# things eat the margin between spawn and first report:
-#     ball travel during spawn_dead_s (~0.27 s)   = 0.27 * speed
-#     drone closure over dead time + one frame    ~ 4.2 * (0.27 + 1/23)
-#     one frame of ball travel                    = speed / 23
-# At 20 m/s that is 5.4 + 1.3 + 0.9 = 7.6 m, so offset >= 28.0 + 7.6 = 35.6.
-# 36.0 is used, and it is used at ALL THREE SPEEDS even though 8 m/s would need
-# only ~31.8 — because a matched envelope must not vary its geometry with its
-# independent variable. In hover the cost of the longer flight time is only
-# wall-clock; there is no straight-leg requirement to violate.
-#
-# week4_battery.yaml, week6_synthetic_battery.yaml and week6_depth_battery.yaml
-# are all untouched and stay the regression/provenance paths. This file is a
-# sibling, never an edit of any of them: their counts are measured provenance.
+# Offset rule: the ball must spawn outside everything the pipeline can see. The
+# outermost gate is the detector's roi_max_range_m (28.0 m), not the camera's
+# 35 m far clip, and spawn dead time, drone closure and one frame of ball travel
+# eat another 7.6 m at 20 m/s — so offset >= 35.6. 36.0 is used at all three
+# speeds even though 8 m/s would need only ~31.8, because a matched envelope
+# must not vary its geometry with its independent variable.
 
 defaults:
-  # See the offset rule above. RAISE THIS if roi_max_range_m is raised.
+  # Offset rule above; raise this whenever roi_max_range_m is raised.
   offset_forward_m: 36.0
   offset_vertical_m: 0.0
   compensate_gravity: true
@@ -158,12 +57,11 @@ defaults:
   repeats: 3
 
 runs:
-  # ── The matched envelope. One sensor, one geometry, three speeds. ───────
-  # Equal n across the three rows is deliberate: an envelope whose arms carry
-  # different precision invites reading the difference in interval width as a
-  # difference in effect. n=30 matches the oracle lane's 28/29 cell, so the
-  # headline rendered result and the headline oracle result are directly
-  # comparable in power as well as in geometry.
+  # ── The matched envelope: one sensor, one geometry, three speeds ────────
+  # Only speed_mps differs across R01-R03; report them separately. Equal n is
+  # deliberate — unequal arms invite reading a difference in interval width as a
+  # difference in effect — and n=30 matches the oracle lane's 28/29 cell, so the
+  # two headline results are comparable in power as well as in geometry.
   - id: R01
     description: "8 m/s head-on, hover — the BASELINE arm of the 2.5x claim"
     speed_mps: 8.0
@@ -171,9 +69,9 @@ runs:
     miss_distance_m: 0.0
     expect_dodge: true
     repeats: 30
-    # 8.0 matches the Week 4 baseline (78/78 there). NOT re-using those 78: this
-    # row re-flies the baseline through the new sensor and scoring rule, since a
-    # patrol dodge count and a hover save rate are different quantities.
+    # 8.0 matches the Week 4 baseline (78/78 there), but re-flies it rather than
+    # re-using it: a patrol dodge count and a hover save rate are different
+    # quantities.
 
   - id: R02
     description: "14 m/s head-on, hover — the speed the OAK-D lane scored 0/17 at"
@@ -183,9 +81,9 @@ runs:
     expect_dodge: true
     repeats: 30
     # The intermediate point, and the most informative one if the envelope has
-    # an edge: Week 4's rendered OAK-D collapsed here (0/17) and the tca law
-    # says the cause is reach, not speed. If this lane holds at 14 m/s the law's
-    # prediction is confirmed on rendered perception for the first time.
+    # an edge: Week 4's rendered OAK-D collapsed here (0/17), and the tca law
+    # attributes that to reach rather than speed. Holding at 14 m/s here would
+    # confirm that prediction on rendered perception.
 
   - id: R03
     description: "20 m/s head-on, hover — the target case, whole real pipeline, n=30"
@@ -194,16 +92,13 @@ runs:
     miss_distance_m: 0.0
     expect_dodge: true
     repeats: 30
-    # THE ROW THE CLAIM RESTS ON.
-    #
-    # A LONG CELL HAS A FAILURE MODE A SHORT ONE DOES NOT: station drift. Read
-    # the altitude trace before reading the save count. If altitude drifts
+    # A long cell has a failure mode a short one does not: station drift. Read
+    # the altitude trace before the save count — if altitude drifts
     # monotonically the last throws are not the same experiment as the first,
-    # and the cell must be reported as two halves rather than as one rate.
-    # Check the rep index of every failure — failures clustered in the last
-    # third are drift, not envelope.
+    # and the cell must be reported as two halves rather than one rate. Failures
+    # clustered in the last third of the rep index are drift, not envelope.
 
-  # ── The negative control, and in this lane it is a REAL one ────────────
+  # ── Negative control ────────────────────────────────────────────────────
   - id: R04
     description: "20 m/s wide miss 1.5 m — must NOT dodge; real scene, real clutter"
     speed_mps: 20.0
@@ -211,23 +106,16 @@ runs:
     miss_distance_m: 1.5
     expect_dodge: false
     repeats: 15
-    # UNLIKE THE SYNTHETIC LANE, THIS IS A GENUINE FALSE-POSITIVE MEASUREMENT.
-    # week6_depth_battery.yaml's D10 carries a long note explaining that its
-    # cloud contains the ball and nothing else, so background differencing has
-    # no clutter to reject and that lane is structurally incapable of producing
-    # a false-positive number. Here the cloud contains ground plane, runway and
-    # standoffs, and the differencing stage does real work. A false dodge here
-    # means the perception stack fabricated a threat from scene clutter, which
-    # is the thing Week 4's B07 (0/12) measured and nothing since has.
-    #
-    # It still measures trigger discrimination on a detected non-threat as
-    # well — the ball IS detected — so a fire here has two possible causes and
-    # the log must be read to tell them apart. Report the two separately.
+    # A genuine false-positive measurement, which the synthetic lane cannot
+    # produce: here the cloud carries ground plane, runway and standoffs, so
+    # background differencing has real clutter to reject. A false dodge means
+    # the stack fabricated a threat from that clutter — what Week 4's B07 (0/12)
+    # measured. The ball is also detected in these throws, so a fire has two
+    # possible causes; read the log to tell them apart and report separately.
 
-  # ── Fidelity gate: the same harness against results we already have ────
-  # Flown on the BASELINE world, BASELINE camera, noise OFF, on PATROL, at
-  # detector.yaml's own 5 m ROI. Scored on `dodged` against the Week 4 patrol
-  # envelope. See the order of operations — these run FIRST.
+  # ── Fidelity gate: the same harness against results already in hand ─────
+  # Baseline world, baseline camera, noise off, patrol, at detector.yaml's own
+  # 5 m ROI. Scored on `dodged` against the Week 4 patrol envelope. Runs FIRST.
   - id: G01
     description: "14 m/s dead-centre — B03 geometry; fidelity gate, baseline camera, patrol"
     speed_mps: 14.0
