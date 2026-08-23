@@ -241,6 +241,29 @@ detector:
     # or greater point count.
     density_selection: true
 
+    # 2026-08-22 fix attempt #6: density_selection above ALSO byte-identical
+    # to attempt #4 on the RT-set (2/6 recall, 2/4 false-fire, same
+    # scenarios). Funnel diagnostic logging on RT01/RT02/RT03/RT06
+    # (debug_funnel:=true) showed ball_sized candidates DO form most
+    # frames -- attempts #3-#5 all failed because no SINGLE-FRAME geometric
+    # feature (count, extent, density) can tell the ball apart from clutter
+    # fragments that pass the same ball_sized filter with similar
+    # size/extent/density. This adds a TEMPORAL signal instead: a fresh
+    # (cold-start) track is only promoted after confirm_frames consecutive
+    # picks show frame-to-frame displacement consistent with a real ball's
+    # speed, not a near-static clutter fragment re-triggering the diff.
+    # 3 frames at this lane's ~15 Hz cloud rate is ~0.2 s of confirmation —
+    # under the tca budget this project measures in RESULTS.md (LD50 0.80 s),
+    # so it costs real save margin even if it fixes recall; that tradeoff is
+    # the reason to validate on the RT-set before flying it against a dodge
+    # battery. confirm_min/max_speed_mps bracket the modelled ball speed
+    # range (14-29 m/s) with margin on both sides — comfortably above
+    # near-static clutter jitter, comfortably below an implausible jump
+    # between two unrelated clutter blobs in one frame.
+    confirm_frames: 3
+    confirm_min_speed_mps: 3.0
+    confirm_max_speed_mps: 35.0
+
     # ── Centroid publishing ───────────────────────────────────────────────────
     min_publish_score: 0.006
 

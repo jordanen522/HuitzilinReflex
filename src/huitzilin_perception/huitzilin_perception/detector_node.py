@@ -196,6 +196,28 @@ class DetectorNode(Node):
         # elsewhere); only rendered_detector.yaml opts in, alongside
         # range_adaptive_extent.
         self.declare_parameter("density_selection", False)
+        # 2026-08-22 fix attempt #6: density_selection confirmed engaging
+        # live but ALSO byte-identical to attempt #4 on the RT-set. Funnel
+        # diagnostic logging (debug_funnel:=true) on RT01/RT02/RT03/RT06
+        # showed the real problem: ball_sized candidates DO form most
+        # frames -- this isn't a missing-candidate bug -- but single-frame
+        # geometry (count, extent, density, tried in attempts #3-#5) can't
+        # tell the ball apart from clutter fragments that pass the same
+        # ball_sized filter with statistically similar size/extent/density.
+        # A real ball is never static: at 14-29 m/s it moves ~1-2 m between
+        # depth frames, while re-triggering clutter (specular flicker, a
+        # drifting bg-map edge) does not. This adds a TEMPORAL signal
+        # instead of another geometric one: require `confirm_frames`
+        # consecutive cold-start picks (no fresh track yet) whose
+        # frame-to-frame displacement implies a speed inside
+        # [confirm_min_speed_mps, confirm_max_speed_mps] before the first
+        # publish of a new track. confirm_frames=1 (default) preserves
+        # today's exact behavior (immediate promotion, no speed check) so
+        # every non-rendered lane stays byte-identical; only
+        # rendered_detector.yaml opts in.
+        self.declare_parameter("confirm_frames", 1)
+        self.declare_parameter("confirm_min_speed_mps", 3.0)
+        self.declare_parameter("confirm_max_speed_mps", 35.0)
         # Cloud subscription reliability. TRUE is not the usual sensor-data
         # choice, and it is deliberate: /oak/points is a 7.37 MB sample
         # (640x480 x 24 B) fragmented across thousands of UDP datagrams against
@@ -262,6 +284,15 @@ class DetectorNode(Node):
         # gate distance check must agree on frame or the radius is meaningless.
         self._last_centroid: Optional[np.ndarray] = None
         self._last_centroid_time: Optional[float] = None
+
+        # ── Cold-start confirmation state (fix attempt #6) ──────────────────
+        # Separate from _last_centroid/_last_centroid_time above: this tracks
+        # an UNCONFIRMED candidate while no fresh track exists yet, so a new
+        # track is only promoted after `confirm_frames` consecutive frames
+        # show ballistic-consistent motion. See confirm_frames declaration.
+        self._pending_centroid: Optional[np.ndarray] = None
+        self._pending_time: Optional[float] = None
+        self._pending_streak: int = 0
 
         self._bg_map_far: Optional[VoxelBackgroundMap] = None
         if self._p["bg_map_far_leaf_m"] > 0.0 and self._p["bg_map_range_split_m"] > 0.0:
@@ -398,6 +429,9 @@ class DetectorNode(Node):
             "cluster_split_max_points": self.get_parameter("cluster_split_max_points").value,
             "range_adaptive_extent": self.get_parameter("range_adaptive_extent").value,
             "density_selection": self.get_parameter("density_selection").value,
+            "confirm_frames": self.get_parameter("confirm_frames").value,
+            "confirm_min_speed_mps": self.get_parameter("confirm_min_speed_mps").value,
+            "confirm_max_speed_mps": self.get_parameter("confirm_max_speed_mps").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
@@ -585,6 +619,9 @@ class DetectorNode(Node):
             # OTHER frame would compare apples to oranges.
             self._last_centroid = None
             self._last_centroid_time = None
+            self._pending_centroid = None
+            self._pending_time = None
+            self._pending_streak = 0
             self.get_logger().info(
                 f"differencing frame -> {mode} "
                 f"({'odom TF available' if mode == 'fixed' else 'no odom TF — uncompensated'})")
@@ -769,11 +806,12 @@ class DetectorNode(Node):
         # track imposes no gate; a cold start (no prior track) imposes no
         # gate either, since candidates is None below.
         stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        has_fresh_track = (self._last_centroid is not None
+                            and self._last_centroid_time is not None
+                            and (stamp_s - self._last_centroid_time)
+                                <= self._p["track_gate_stale_s"])
         candidates = ball_sized
-        if (self._last_centroid is not None
-                and self._last_centroid_time is not None
-                and (stamp_s - self._last_centroid_time)
-                    <= self._p["track_gate_stale_s"]):
+        if has_fresh_track:
             gated = [c for c in ball_sized
                      if np.linalg.norm(c.mean(axis=0) - self._last_centroid)
                         <= self._p["track_gate_radius_m"]]
@@ -814,6 +852,17 @@ class DetectorNode(Node):
                     f"< min_publish={self._p['min_publish_score']} -> reject",
                     throttle_duration_sec=self._funnel_throttle_s)
             return
+
+        if not has_fresh_track and self._p["confirm_frames"] > 1:
+            cand_centroid = best_cluster.mean(axis=0)
+            if not self._confirm_cold_start(cand_centroid, stamp_s):
+                if dbg:
+                    self.get_logger().info(
+                        f"funnel: cold-start candidate unconfirmed "
+                        f"(streak={self._pending_streak}/"
+                        f"{self._p['confirm_frames']}) -> hold",
+                        throttle_duration_sec=self._funnel_throttle_s)
+                return
 
         with prof.stage("centroid_tf"):
             centroid = best_cluster.mean(axis=0)
@@ -863,6 +912,31 @@ class DetectorNode(Node):
                 throttle_duration_sec=0.5)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _confirm_cold_start(self, centroid: np.ndarray, stamp_s: float) -> bool:
+        """Multi-frame ballistic-consistency gate for a fresh (unconfirmed)
+        track -- fix attempt #6, see confirm_frames declaration for why.
+        Requires confirm_frames consecutive cold-start picks whose
+        frame-to-frame displacement implies a plausible ball speed before
+        the first publish of a new track.
+        """
+        if self._pending_centroid is not None and self._pending_time is not None:
+            dt = stamp_s - self._pending_time
+            if dt > 0:
+                speed = float(np.linalg.norm(centroid - self._pending_centroid)) / dt
+                if (self._p["confirm_min_speed_mps"]
+                        <= speed
+                        <= self._p["confirm_max_speed_mps"]):
+                    self._pending_streak += 1
+                else:
+                    self._pending_streak = 1
+            else:
+                self._pending_streak = 1
+        else:
+            self._pending_streak = 1
+        self._pending_centroid = centroid
+        self._pending_time = stamp_s
+        return self._pending_streak >= self._p["confirm_frames"]
 
     def _write_dump(self, msg: PointCloud2) -> None:
         """Write one frame's per-stage record to debug_dump_dir.
