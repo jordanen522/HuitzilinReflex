@@ -16,7 +16,7 @@
 | ID | Requirement |
 |----|-------------|
 | REQ-07 | End-to-end latency (detect → evade command) shall be ≤ 150 ms |
-| REQ-08 | Evasion shall succeed on every hit-intent throw inside the reaction envelope, reported split by ball speed — never as a blended rate (`CLAUDE.md`) |
+| REQ-08 | Evasion shall succeed on every hit-intent throw inside the reaction envelope. Success is reported split by ball speed, never as a single blended rate across speeds |
 | REQ-09 | Payload weight overhead shall not exceed 200 g |
 
 ## Constraints

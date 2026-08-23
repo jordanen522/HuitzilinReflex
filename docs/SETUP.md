@@ -73,10 +73,16 @@ source install/setup.bash
 ## Running the Simulation
 
 Bring-up commands, the service calls, and the traps that bite (`sitl_frame.parm`,
-`--out` port fan-out) live in `CLAUDE.md`. Read its sharp edges before the first run.
+`--out` port fan-out) live in `CLAUDE.md` — read its sharp edges before the first run.
 
-Perception stack (depth world, detector, bag capture — Dell only):
-`docs/bag_capture_runbook.md`.
+Then, as needed:
+
+| Doc | Contents |
+|---|---|
+| `docs/bag_capture_runbook.md` | Perception stack: depth world, detector, bag capture (Dell only) |
+| `docs/dodge_battery_runbook.md` | Dodge battery and sweep procedure |
+| `docs/RESULTS.md` | Measured results and the conditions each was taken under |
+| `docs/KNOWN_ISSUES.md` | Open problems, chiefly in the rendered long-range sensor lane |
 
 ## Acceptance Criteria
 - `ros2 launch huitzilin_sim week2_sitl.launch.py` + the three service calls fly a

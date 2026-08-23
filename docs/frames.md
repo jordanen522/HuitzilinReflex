@@ -39,9 +39,9 @@ Both are published by `week3_perception.launch.py` (and duplicated in
 
 The mount offset is exposed as the launch arguments `camera_link_x`,
 `camera_link_y`, `camera_link_z` — override them rather than editing the launch
-file. It is still the **nominal** offset from the CAD mount, not a measured one;
-measuring it against the real airframe is Week 6 work. The optical rotation is the
-standard REP-103 body→optical rotation and is not a tunable.
+file. It is the **nominal** offset from the CAD mount, not a measured one, and has
+never been verified against a real airframe. The optical rotation is the standard
+REP-103 body→optical rotation and is not a tunable.
 
 ## TF Tree
 

@@ -1,26 +1,24 @@
 # Node Graph — Project HuitzilinReflex
 
-Active namespace is `/huitzilin/*`. Every contract below is **active** — the
-Week 5 software lane landed `payload_node` and `supervisor_node`, so nothing here
-is provisional any more. The evasion path (`/cmd/evade`) commands through the
-same `mav_bridge` velocity path and preempts `/huitzilin/cmd_vel` while fresh.
+Active namespace is `/huitzilin/*`. Every contract below is implemented; none of it
+is provisional. The evasion path (`/cmd/evade`) commands through the same
+`mav_bridge` velocity path and preempts `/huitzilin/cmd_vel` while fresh.
 
 ## Nodes
 
-| Node | Responsibility | Inputs | Outputs | Rate | Phase | Runs on |
+| Node | Responsibility | Inputs | Outputs | Rate | Status | Runs on |
 |---|---|---|---|---|---|---|
-| mav_bridge | ROS 2 ↔ ArduPilot bridge (pymavlink); single NED↔ENU conversion point | `/huitzilin/cmd_vel`; `/cmd/evade` (priority); services `/huitzilin/arm`, `/huitzilin/takeoff`, `/huitzilin/set_mode` | `/huitzilin/odom`, `/huitzilin/state`; ArduPilot FC | 30 Hz odom | **active (Wk2)** | Pi / dev PC |
-| patrol_node | Autonomous patrol path-following | `/huitzilin/odom`; service `/huitzilin/start_patrol` | position targets to FC; `/huitzilin/mission_marker` | 10 Hz | **active (Wk2)** | Pi / dev PC |
-| camera_driver | Depth + point cloud (sim: Gazebo bridge; real: OAK-D Lite) | sensor | `/oak/points`, `/oak/depth` | 15 Hz sim (30 Hz real target) | **active, sim (Wk3)** | Pi (real, Wk6) / Dell (sim) |
-| detector_node | ROI gate, egomotion-compensated differencing, clustering, centroid | `/oak/points`, `/huitzilin/odom` (TF) | `/threat/centroid` + RViz marker | per cloud | **active, sim (Wk3)** | Pi / dev PC |
-| evasion_node | Kalman filter + dodge trigger + patrol pause/resume | `/threat/centroid`, `/huitzilin/odom` | `/threat/intercept`, `/cmd/evade`, `/payload/alarm` (mock), `/threat/evade_event` | per centroid; 20 Hz while evading | **active, sim (Wk4)** | Pi / dev PC |
-| payload_node | LED strip + siren via GPIO; every backend degrades to a logging no-op if the library is missing | `/payload/alarm` | GPIO (WS2812B via level shifter; siren via transistor) | on-event, 10 Hz dead-man tick | **active (Wk5)** | Pi (real output) / anywhere (no-op) |
-| supervisor_node | 7-state machine + FMEA fault monitor; faults resolve before the threat branch, so no fault can produce EVADE | message ages on `/huitzilin/odom`, `/huitzilin/state`, `/oak/points`, `/huitzilin/patrol_state`, `/huitzilin/cmd_vel`, `/payload/alarm` | `/huitzilin/set_mode`, `/huitzilin/start_patrol` (edge-triggered) | 1 Hz | **active (Wk5)**, opt-in via `with_supervisor:=true` | Pi / dev PC |
+| mav_bridge | ROS 2 ↔ ArduPilot bridge (pymavlink); single NED↔ENU conversion point | `/huitzilin/cmd_vel`; `/cmd/evade` (priority); services `/huitzilin/arm`, `/huitzilin/takeoff`, `/huitzilin/set_mode` | `/huitzilin/odom`, `/huitzilin/state`; ArduPilot FC | 30 Hz odom | **active** | Pi / dev PC |
+| patrol_node | Autonomous patrol path-following | `/huitzilin/odom`; service `/huitzilin/start_patrol` | position targets to FC; `/huitzilin/mission_marker` | 10 Hz | **active** | Pi / dev PC |
+| camera_driver | Depth + point cloud (sim: Gazebo bridge; real: OAK-D Lite) | sensor | `/oak/points`, `/oak/depth` | 15 Hz sim (30 Hz real target) | **active, sim** | Pi (real) / Dell (sim) |
+| detector_node | ROI gate, egomotion-compensated differencing, clustering, centroid | `/oak/points`, `/huitzilin/odom` (TF) | `/threat/centroid` + RViz marker | per cloud | **active, sim** | Pi / dev PC |
+| evasion_node | Kalman filter + dodge trigger + patrol pause/resume | `/threat/centroid`, `/huitzilin/odom` | `/threat/intercept`, `/cmd/evade`, `/payload/alarm` (mock), `/threat/evade_event` | per centroid; 20 Hz while evading | **active, sim** | Pi / dev PC |
+| payload_node | LED strip + siren via GPIO; every backend degrades to a logging no-op if the library is missing | `/payload/alarm` | GPIO (WS2812B via level shifter; siren via transistor) | on-event, 10 Hz dead-man tick | **active** | Pi (real output) / anywhere (no-op) |
+| supervisor_node | 7-state machine + FMEA fault monitor; faults resolve before the threat branch, so no fault can produce EVADE | message ages on `/huitzilin/odom`, `/huitzilin/state`, `/oak/points`, `/huitzilin/patrol_state`, `/huitzilin/cmd_vel`, `/payload/alarm` | `/huitzilin/set_mode`, `/huitzilin/start_patrol` (edge-triggered) | 1 Hz | **active**, opt-in via `with_supervisor:=true` | Pi / dev PC |
 
 ## Diagram
 
 ```
-[ active ]
 supervisor_node → mode/start → patrol_node → position targets → mav_bridge → ArduPilot (pymavlink)
                                mav_bridge → /huitzilin/odom, /huitzilin/state → all
 camera_driver → /oak/points, /oak/depth → detector_node → /threat/centroid → RViz marker
@@ -36,7 +34,7 @@ directly and publishes no `/huitzilin/cmd_vel`. See `docs/state_machine.md`.
 
 ## Message & Service Contracts
 
-### Active — flight (`/huitzilin/*`, Wk2)
+### Flight (`/huitzilin/*`)
 
 | Interface | Type | Direction | QoS | Frame |
 |---|---|---|---|---|
@@ -64,13 +62,13 @@ when ArduPilot reports its 65535 mV unknown sentinel.
 consumers and both treat its absence as fatal rather than as a default:
 `supervisor_node` watches its age (`patrol_state_timeout_s: 2.0` → `COMPANION_LOSS`),
 and `throw_window.py` refuses to score a throw without it rather than assuming the
-drone was patrolling. It gates the Week 4 throw window.
+drone was patrolling. It gates the dodge-battery throw window.
 
 **Frame rule:** ArduPilot speaks NED; all ROS topics are ENU/FLU; the **only** NED↔ENU
 conversion lives in `mav_bridge` (see `docs/frames.md`). Velocity setpoints use
 `MAV_FRAME_BODY_OFFSET_NED`; absolute position setpoints use `MAV_FRAME_LOCAL_NED`.
 
-### Active — perception (sim, promoted W3-19)
+### Perception (sim)
 
 | Topic | Type | QoS | Frame |
 |---|---|---|---|
@@ -79,7 +77,7 @@ conversion lives in `mav_bridge` (see `docs/frames.md`). Velocity setpoints use
 | `/threat/centroid` | `geometry_msgs/PointStamped` | Reliable | `base_link` |
 | `/threat/marker` | `visualization_msgs/Marker` | Best-effort, keep-last 1 | `base_link` |
 
-### Active — evasion (sim, promoted W4)
+### Evasion (sim)
 
 | Interface | Type | QoS | Frame |
 |---|---|---|---|
