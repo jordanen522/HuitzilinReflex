@@ -8,10 +8,10 @@
 # by design, for the detector's own real operation. Run across a whole split
 # in one process, that same design makes later scenarios inherit background
 # state from earlier scenarios that share corridor geometry
-# (offset_forward_m), which is a harness isolation bug: the pre-registration
-# (docs/perception_eval.md sec 3) scores each scenario as an independent
-# bag, and independence requires each replay to see the cold-start background
-# the frozen detector was actually evaluated against.
+# (offset_forward_m), which is a harness isolation bug: each scenario must be
+# scored as an independent bag, and independence requires each replay to see
+# the cold-start background the detector actually evaluates against in real
+# operation.
 #
 # Diagnosed 2026-08-22 (background agent a63ca933ed20696a4): H12 scored
 # matched=0 after 11 prior scenarios shared its process, matched=4 after 2,
@@ -20,9 +20,7 @@
 # real misses, not contamination.
 #
 # THE FIX: one detector process PER SCENARIO. Same detector binary, same
-# frozen rendered_detector.yaml, same bags -- restarted, not reconfigured, so
-# this does not touch any of the 5 frozen paths in docs/perception_eval.md
-# sec 2.1 and does not burn the freeze.
+# frozen rendered_detector.yaml, same bags -- restarted, not reconfigured.
 #
 # Usage:
 #   ./scripts/run_heldout_eval.sh

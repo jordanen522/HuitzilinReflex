@@ -1,10 +1,10 @@
 """truth_attribution.py — was that detection OF THE BALL?
 
-Pure python, no ROS, so the ROS-free CI subset covers it. Implements
-docs/perception_eval.md section 3, which was committed before any of the data
-this scores existed. Nothing here may be re-tuned after seeing a result; the
-pre-registration says so, and its Amendments section is the only way to change
-a definition.
+Pure python, no ROS, so the ROS-free CI subset covers it. Scores detections
+against ground truth (/gz/dynamic_poses), not against how they moved, so a
+detection can be judged correct or spurious independent of the heuristic that
+produced it. Definitions here (match radius, K, window) should not be
+re-tuned after seeing a result on the split they're meant to score.
 
 WHY A SECOND ATTRIBUTOR. score_bags_logic.attribute_closing_ball asks whether a
 run of detections MOVES like a ball -- strictly closing, at a rate above the
@@ -155,7 +155,7 @@ def void_reason(label: str, ball_track, drone_track):
 def score_scenario(detections, ball_track, drone_track,
                    ball_speed_mps: float, window,
                    min_matched: int = DEFAULT_MIN_MATCHED) -> dict:
-    """Score one bag's detections against truth. See perception_eval.md 3.3-3.4.
+    """Score one bag's detections against ground truth, matched by radius and window.
 
     `detections` and both tracks are [(t_sim, (x, y, z)), ...] in one common
     fixed frame. `window` is the (lower, upper) strict detection window from

@@ -10,11 +10,10 @@ convention, and the sharp edges that bite anyone who checks this out and runs it
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink ·
 Python 3.12 · Ubuntu 24.04.
 
-**Status: REOPENED 2026-08-16, still open as of 2026-08-23.** Weeks 1–6 closed 2026-08-10 on
-an oracle-sensor result (28/29 below). Reopened because that number needs the real depth
-detector, not a synthetic oracle, and the real detector does not yet deliver it — see
-"Where this actually stands" below before quoting the 20 m/s number as achieved. Hardware
-bring-up is out of scope regardless.
+**Status: active development, simulation phase.** Weeks 1–4 are done and measured (below).
+The rendered long-range sensor lane is a separate, in-progress lane with open detector
+recall problems — see "Open problems" below before quoting any rendered-lane number as
+solid. Hardware bring-up (Weeks 5–9) has not started.
 
 ## The result
 
@@ -36,79 +35,42 @@ the time scales with speed. At 20 m/s that is **21.1 m** at P=0.90, and a 26 m s
 
 The bound is **sensor reach and rate**; every maneuver-side lever was measured and refuted.
 The 28/29 above is an **oracle** (synthetic, ground-truth) sensor, not the real depth
-detector — that is why this project reopened. The candidate fix, an AR0234 global-shutter
-mono + 10 mm M12 (See3CAM_20CUG, $89, 13.5 g — lighter than the 61 g OAK-D Lite, ~±13.5°
-usable sector), is modelled in simulation (`week7_rendered_battery.yaml`,
-`iris_ar0234`) with a real stereo-noise model — but the **real detector running against
-that modelled sensor has not yet been shown to hit 20 m/s**, because the detector itself has
-an open recall bug (below) that blocks running that battery meaningfully. Hardware
-bring-up (an actual physical AR0234) is separately out of scope.
+detector. A candidate sensor upgrade that would give the real detector this kind of reach,
+an AR0234 global-shutter mono + 10 mm M12 (See3CAM_20CUG, $89, 13.5 g — lighter than the
+61 g OAK-D Lite, ~±13.5° usable sector), is modelled in simulation
+(`week7_rendered_battery.yaml`, `iris_ar0234`) with a real stereo-noise model — but the real
+detector running against that modelled sensor has not yet been shown to dodge reliably,
+because the detector itself has an open recall bug (below) that blocks running that battery
+meaningfully. This is an open engineering task, not a requirement blocking anything else;
+hardware bring-up (an actual physical AR0234) is separately out of scope.
 
-### Where this actually stands (2026-08-23)
+### Open problems
 
-The two target claims — 20 m/s dodge with the real detector, and 100% recall on the 18+6
-held-out set — are **not yet met**, and are blocked on the same open problem:
-
-- The real depth detector's cluster-selection ("largest ball-sized cluster wins," pure point
-  count) is unreliable once `cluster_max_extent_m` is loosened to admit a noisy long-range
-  ball (needed for the AR0234's 26–28 m reach): a large-but-still-plausible clutter fragment
-  routinely has more points than the genuine ball cluster and wins the pick.
-- Measured on the `tune_rendered` split (RT01–RT10, disjoint from held-out, `./scripts/
-  run_heldout_eval.sh` with `SPLIT=tune_rendered BAG_PREFIX=rt_`): **2/6 positive recall
-  (RT04, RT05), 2/4 (50%) false-fire (RT09, RT10)** — identical, scenario-for-scenario, across
-  FIVE same-day fix attempts: background-map range split (`5dfc2a3`), track-continuity gate
-  (`00f6075`), egomotion-flood rescue (`ed3ac37`), per-candidate range-adaptive extent gate
-  (`c8bfb5a`), and point-density cluster selection (`c4d25cf`).
-- **This changes the diagnosis.** Two selection-tie-break redesigns in a row (point count →
-  density) reproducing byte-identical per-scenario results means the bug is not in *which*
-  candidate wins the pick — it's upstream of that, in whether a valid ball candidate exists
-  at all. RT01/RT02/RT03/RT06's `truth_score_heldout` match counts (2, 0, 0, 0 out of a
-  `min_matched=3` bar) are consistent with the ball's own cluster rarely forming or surviving
-  to `ball_sized` status in those scenarios, not with a correct candidate losing a tie-break —
-  no downstream selection rule, however scored, can pick a candidate that was never formed.
-  RT04/RT05 (5, 3 matched) recall fine, so this is scenario-specific, not universal. Per
-  `superpowers:systematic-debugging`'s own rule (3+ failed fixes → stop patching, question the
-  architecture), a 6th selection-side fix was not attempted that session.
-- **2026-08-23, fix attempt #6 — instrumented instead of patched blind, per the "question the
-  architecture" step.** `debug_funnel:=true` on RT01/RT02/RT03/RT06 showed the diagnosis above
-  was wrong in its specifics: ball-sized candidates DO form most frames (this is not a
-  missing-candidate bug). The real problem is that no *single-frame* geometric feature — point
-  count (`c4d25cf`), extent (`c8bfb5a`), density (`c4d25cf`) — can separate the ball from a
-  clutter fragment of similar size/extent/density; all three read alike in one frame. Tried a
-  genuinely different, temporal signal instead (`60575f3`): require `confirm_frames`
-  consecutive cold-start picks whose frame-to-frame displacement implies a plausible ball speed
-  (`confirm_min/max_speed_mps`, 3–35 m/s) before promoting a new track, opted in on the rendered
-  lane at `confirm_frames: 3`. **Result: also negative, and in a new way — it traded recall for
-  false-fire rather than improving both.** Re-run on `tune_rendered`: recall dropped to **1/6**
-  (RT04 only; RT01 and RT05, which partially matched before, now match 0 — the ball's real
-  encounter window in those bags is short enough that spending 3 frames on confirmation eats
-  the only frames where it was actually visible), while false-fire improved to **1/4** (RT09
-  stopped firing; RT10 still does). Net: not an improvement on either axis considered together,
-  and confirms the RT01/RT05 shortfall is a *volume* problem (too few good frames survive) more
-  than a false-candidate problem for those two scenarios specifically — RT02/RT03/RT06 remain
-  unrecalled under every fix tried and are the more likely core defect.
-- **Process error, 2026-08-22 → 08-23: the official held-out set was touched further.** A
-  background command intended for the `tune_rendered` split was mis-issued against `SPLIT=heldout`
-  and scored **H01, H02, H03** (with the unvalidated fix-#6 config, before erroring out on the
-  known node-discovery flake at H03) before being caught and killed. Combined with `H16`'s
-  earlier diagnostic use, at least four held-out bags (H01, H02, H03, H16) have now been scored
-  outside an official pass. Per `docs/perception_eval.md`, the set requires a **fresh capture**
-  before any official pass — this was already true before this incident and remains the
-  requirement, but do not treat H04–H18/HN01–HN06 as "still clean": re-verify against
-  `docs/perception_eval.md`'s own burn bookkeeping before assuming any subset is unspent.
-- **Open, next step:** RT02/RT03/RT06 have failed recall under six independent fix attempts
-  spanning both geometric and temporal discrimination — worth checking, before a 7th attempt,
-  whether their bags contain a ball encounter that's even geometrically resolvable at all (e.g.
-  by rendering the ball's ground-truth position onto their point clouds directly) rather than
-  assuming the pipeline is always at fault. RT01/RT05 look more tractable: they recall
-  partially, so the lever there is volume/frame-count, not discrimination.
-- The `week7_rendered_battery.yaml` dodge battery (`G01`/`G02` fidelity gate, `R01`–`R04`
+- **The rendered long-range sensor lane's detector recall is unreliable.** Measured on the
+  `tune_rendered` split (RT01–RT10, `./scripts/run_heldout_eval.sh` with
+  `SPLIT=tune_rendered BAG_PREFIX=rt_`): **2/6 positive recall (RT04, RT05), 2/4 false-fire
+  (RT09, RT10)**. Diagnosis so far: ball-sized candidates DO form most frames in the failing
+  scenarios (confirmed via `debug_funnel:=true`), so this isn't a missing-candidate problem.
+  No single-frame geometric feature (point count, extent, density) separates the real ball
+  from a same-sized clutter fragment — all three read alike in one frame — and a temporal
+  ballistic-consistency check traded recall for false-fire rather than improving either, so
+  it wasn't kept (see [[heldout-recall-and-bg-fix]] in project memory for the full trail).
+  RT01/RT05 partially recall, so their lever looks like frame-budget/volume, not
+  discrimination; RT02/RT03/RT06 have failed under every fix tried and haven't been checked
+  for whether their bags even contain a geometrically resolvable ball encounter — that's the
+  recommended next diagnostic step before another pipeline-side fix.
+- **The fidelity-gate G01 fire-rate discrepancy is open**: G01 (14 m/s) fires far more often
+  than the Week 4 baseline (12/17 vs. 0/17) but saves 0/17 either way — the divergence is
+  confined to whether a doomed command fires at all, not to whether anything is saved. See
+  [[fidelity-gate-split-verdict]].
+- **`week7_rendered_battery.yaml`'s dodge battery** (`G01`/`G02` fidelity gate, `R01`–`R04`
   hover envelope at 8/14/20 m/s) has never been run to completion, for the same reason: a
-  detector missing 4/6 tracked balls cannot produce a trustworthy dodge number.
-- **253 unit tests / 95+ trials are already satisfied** and needed no work this session: 636+
-  test functions exist (253 was a Week-5 snapshot the repo already flags as superseded, see
-  `README.md`), and 95 real-detector-pipeline trials are already recorded in the Week-4
-  envelope table below.
+  detector missing most tracked balls in its own tune split cannot produce a trustworthy
+  dodge number yet.
+- **Held-out bags H01, H02, H03, and H16 have been used diagnostically** (not scored as an
+  official pass) and should be treated as spent if a fresh official held-out pass is ever
+  run — see `docs/bag_capture_runbook.md`'s ground-truth scoring section for how to run one
+  and capture a clean replacement set first.
 
 Separately, the Week 4 envelope with the **real** depth detector on **patrol** — the only
 non-oracle measurement, and never to be merged with a hover/oracle table:

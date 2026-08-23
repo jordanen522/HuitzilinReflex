@@ -3,9 +3,10 @@
 held-out artifact.
 
 run_heldout_eval.sh restarts the detector process between scenarios (fixing
-the cross-scenario background-map contamination documented in
-docs/perception_eval.md's amendments) and has truth_score_heldout write one
-JSON line per scenario via -p results_jsonl:=<path>. This script reads that
+a cross-scenario background-map contamination bug, where scoring several
+scenarios in one shared process let one scenario's background map leak into
+the next) and has truth_score_heldout write one JSON line per scenario via
+-p results_jsonl:=<path>. This script reads that
 file back, checks it has exactly one line per id in the split (no duplicates,
 nothing missing -- a partial file is refused rather than silently scored as
 if it were complete), and writes the same report format truth_score_heldout

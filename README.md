@@ -1,24 +1,38 @@
 # HuitzilinReflex
 
 A 3.5″ ducted micro-quadrotor that patrols a fixed loop, signals with light and
-sound, and reflexively dodges thrown projectiles.
-
-It detects and dodges projectiles travelling up to **20 m/s in simulation** — **2.5×
-the 8 m/s baseline** its real depth detector reaches — using **depth sensing,
-trajectory prediction, and automated flight control**. Those two speeds come from two
-*different* experiments and are not interchangeable: the 8 m/s baseline is the real
-OAK-D detector on patrol, the 20 m/s figure is a derived 26 m / 60 Hz sensor in
-hover. [The result](#the-result) reports them side by side and never pools them —
-[`docs/RESULTS.md`](docs/RESULTS.md) §8 forbids it.
+sound, and reflexively dodges thrown projectiles, using onboard **depth sensing,
+trajectory prediction, and automated flight control**. Simulate first, fly last —
+see [`HuitzilinReflex_v2.md`](HuitzilinReflex_v2.md) for the full project idea and
+roadmap.
 
 ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink ·
 Python 3.12 · Ubuntu 24.04.
 
 ## Status
 
-**Complete — simulation.** Closed 2026-08-10. Weeks 1–6 are done: patrol loop,
-detection pipeline scored against a labelled bag library, Kalman filter and dodge
-trigger, and the 20 m/s answer. Hardware bring-up is out of scope.
+**Active — simulation phase.** Weeks 1–4 are done: patrol loop, a detection
+pipeline scored against a labelled bag library, and a Kalman filter + dodge
+trigger, measured end to end (see [The result](#the-result)). Hardware bring-up
+(Weeks 5–9 of the roadmap) has not started.
+
+## Goals
+
+The requirements are [`docs/requirements.md`](docs/requirements.md) (REQ-01…16):
+autonomous patrol, threat detection via the OAK-D Lite, intercept prediction, an
+evasive maneuver within 150 ms, and the alarm payload — none of them name a
+specific dodge speed or recall percentage. Those are met in simulation at the
+measured envelope below.
+
+Two things are open engineering work, not requirements:
+- **Long-range detection on a rendered (AR0234-class) sensor** is still unreliable
+  — the tune-split recall is 2/6 with 2/4 false-fire; see `CLAUDE.md`'s open
+  problems.
+- **Dodging faster projectiles** needs more sensor reach than the aircraft
+  currently carries. [`docs/RESULTS.md`](docs/RESULTS.md) shows what reach a
+  higher speed would need, and [`docs/optics_probe.md`](docs/optics_probe.md)
+  studies a candidate sensor upgrade (AR0234, $89, 13.5 g) — a documented upgrade
+  path, not a claim about the aircraft as built.
 
 ## The result
 
@@ -36,7 +50,7 @@ the counterfactual save rule the 20 m/s lane below uses, which is one of the rea
 the two lanes are not comparable. This is the project's **only** real-detector
 measurement, and it is the 8 m/s baseline the headline figure is measured against.
 
-### The 20 m/s answer — a derived sensor
+### What sensor a higher speed would need
 
 Everything below replaces that detector with a synthetic oracle whose reach is a
 settable *input*, flying **hover**.
@@ -66,10 +80,10 @@ deficit was angular resolution, never headline range. The same lens narrows the
 defended sector to about ±10° usable, which is an architectural consequence rather
 than a bug — reach × half-angle is fixed by pixel count.
 
-Everything in *this* section — the 20 m/s lane, not the baseline above it — is
-measured against a *synthetic* sensor whose reach is a settable **input**, so it is a
-claim about the tracker, trigger and airframe given such a sensor, not evidence that
-one exists. Full write-up and every caveat: [`docs/RESULTS.md`](docs/RESULTS.md).
+Everything in *this* section — not the baseline above it — is measured against a
+*synthetic* sensor whose reach is a settable **input**, so it is a finding about the
+tracker, trigger and airframe given such a sensor, not evidence that one is
+installed. Full write-up and every caveat: [`docs/RESULTS.md`](docs/RESULTS.md).
 
 ## Layout
 
@@ -93,21 +107,15 @@ Full install from scratch: [`docs/SETUP.md`](docs/SETUP.md).
 
 ## Test
 
-**511 passing unit tests** — 512 collected, one environment-conditional skip, zero
-failures, run green on the Dell at this commit:
-
 ```bash
 ./scripts/run_tests.sh            # whole unit suite, both packages
 ./scripts/run_tests.sh -k clock   # pytest args are forwarded
 ```
 
-That is 387 test functions expanded by parametrisation — `huitzilin_sim` 169
-collected, `huitzilin_perception` 343. The Week-5 roadmap row in
-[`HuitzilinReflex_v2.md`](HuitzilinReflex_v2.md) records **253** collected at
-2026-07-31; the suite has grown since.
-
-`.github/workflows/tests.yml` runs the ROS-free subset on every push (482 collected);
-the modules that import `rclpy` run locally only.
+Roughly 500 collected tests across `huitzilin_sim` and `huitzilin_perception`,
+grown incrementally since the Week-5 roadmap snapshot of 253
+(`HuitzilinReflex_v2.md`). `.github/workflows/tests.yml` runs the ROS-free subset
+on every push; the modules that import `rclpy` run locally only, on the Dell.
 
 ```bash
 ./scripts/preflight_check.sh      # SITL environment
@@ -120,12 +128,14 @@ A **17-bag labelled library**: 12 positive throw scenarios (S01–S12) crossing 
 approach angle and miss distance, and 5 negatives (N01–N05) — clean-patrol baselines
 plus dedicated probes of egomotion, field-of-view and range-gate false positives.
 
-**S11, S12 and N05 are held out and never tuned against — recall on that held-out
-split is 100%.** Recall on the train split is **90%**: **S08**, a 14 m/s near-miss,
-is a known and never-root-caused false negative, which puts full-library positive
-recall at 11/12. The regression gate is a 95% recall floor only — there is no
-precision gate, and N02/N03/N05 carry uninvestigated false positives. Details and
-the open items: [`docs/bag_capture_runbook.md`](docs/bag_capture_runbook.md).
+**S11, S12 and N05 are held out and never tuned against — the real OAK-D-lane
+detector recalls 2/2 on that split.** Recall on the train split is **90%**: **S08**,
+a 14 m/s near-miss, is a known and never-root-caused false negative, which puts
+full-library positive recall at 11/12. The regression gate is a 95% recall floor
+only — there is no precision gate, and N02/N03/N05 carry uninvestigated false
+positives. A separate, larger held-out split (H01–H18/HN01–HN06) exists for the
+rendered long-range sensor lane and is not yet reliably passing — see `CLAUDE.md`'s
+open problems. Details: [`docs/bag_capture_runbook.md`](docs/bag_capture_runbook.md).
 
 ### Projectile trials
 
@@ -149,7 +159,7 @@ aircraft arms, accepts takeoff, and produces no lift).
 
 | Doc | Contents |
 |---|---|
-| [`docs/RESULTS.md`](docs/RESULTS.md) | **The 20 m/s answer**: the tca law, the sensor requirement, every closed question |
+| [`docs/RESULTS.md`](docs/RESULTS.md) | The tca law, the sensor-reach requirement for higher speeds, every closed question |
 | [`CLAUDE.md`](CLAUDE.md) | Bring-up commands and sharp edges |
 | [`HuitzilinReflex_v2.md`](HuitzilinReflex_v2.md) | Objectives, BOM, roadmap |
 | [`docs/architecture.md`](docs/architecture.md) | Node graph, message and service contracts |

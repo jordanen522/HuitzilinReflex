@@ -1,4 +1,4 @@
-"""Truth-attributed scoring, to docs/perception_eval.md section 3. ROS-free.
+"""Truth-attributed scoring: was a detection OF THE BALL? ROS-free.
 
 WHY THIS EXISTS ALONGSIDE test_score_bags_logic.py. That file covers
 `attribute_closing_ball`, which decides whether a run of detections MOVES like a
@@ -10,9 +10,9 @@ false-positive class is newly-explored terrain along a patrol leg the difference
 is exactly the thing under test.
 
 This module answers the other question, and can only answer it because the bag
-now records /gz/dynamic_poses (scripts/capture_scenario.sh). Every threshold
-here comes from the pre-registration, which was committed before any H-bag
-existed; none of them may be re-chosen after seeing a result.
+now records /gz/dynamic_poses (scripts/capture_scenario.sh). The match radius,
+K and window here should not be re-chosen after seeing a result on the split
+they are meant to score.
 
 The control that matters most is `test_a_ball_free_scenario_matches_nothing`:
 feed real detections and an empty projectile track, and the scorer must return

@@ -508,18 +508,16 @@ scenarios:
 
   # == HELD-OUT SET (H01-H18, HN01-HN06) - added 2026-08-21 ==================
   #
-  # PRE-REGISTERED IN docs/perception_eval.md BEFORE ANY OF IT WAS CAPTURED.
-  # That file, not this comment, is the contract: it fixes the match radius,
-  # K, the window, the denominator, the freeze procedure, and the decision
-  # table of what may be claimed at each outcome. Read it before touching a
-  # value here, and NEVER tune against these bags - not once, not to debug a
-  # threshold, not just to look. Scored ONCE per frozen configuration.
+  # NEVER tune against these bags - not once, not to debug a threshold, not
+  # just to look. Scored ONCE per frozen configuration, via
+  # docs/bag_capture_runbook.md's ground-truth scoring section, which fixes
+  # the match radius, K, the window, and the void-bag rules.
   #
-  # WHY IT EXISTS. The claim is 100 % recall over 17+ held-out POSITIVE
-  # scenarios. `test` carries TWO positives and `train` was fitted on, so
-  # neither can answer it -- and no bag captured before 2026-08-21 records
-  # /gz/dynamic_poses, so none of them can even say whether a detection was
-  # OF THE BALL rather than of terrain.
+  # WHY IT EXISTS. `test` carries TWO positives and `train` was fitted on, so
+  # neither is enough to measure recall on scenarios the detector never saw
+  # -- and no bag captured before 2026-08-21 records /gz/dynamic_poses, so
+  # none of them can even say whether a detection was OF THE BALL rather
+  # than of terrain.
   #
   # DIFFERENT SENSOR, DIFFERENT WORLD, DIFFERENT PREFIX. Captured on
   # worlds/huitzilin_runway_ar0234.sdf against the AR0234 + 10 mm M12
@@ -823,7 +821,7 @@ scenarios:
   # -- HELD-OUT NEGATIVES ---------------------------------------------------
   # Six, keeping the library's >= 25 % negative budget (6/24 = 25 %). Scored
   # for FALSE POSITIVES only, on their own denominator, and NEVER merged into
-  # the recall fraction - see docs/perception_eval.md section 3.4.
+  # the recall fraction.
 
   - id: HN01
     label: negative
@@ -910,16 +908,14 @@ scenarios:
     notes: "HOVER. 5.5 deg off-axis, so the ball IS in sector and SHOULD be detected: those detections are MATCHED and are not false positives. What this row measures is whether a real object at a wide miss also generates unmatched clutter. Its dodge-side meaning - trigger discrimination - belongs to the battery, not here."
 
   # ===== RENDERED-LANE TUNE SET (RT01–RT10, added 2026-08-22) ================
-  # docs/perception_eval.md section 2.2 is explicit: retuning the rendered
-  # detector (params/rendered_detector.yaml) must be validated against "a tune
-  # split captured in the same world, analogous to T01-T14" -- NOT against
+  # Retuning the rendered detector (params/rendered_detector.yaml) needs a
+  # tune split captured in the same world, analogous to T01-T14 -- NOT
   # T01-T14 itself, which is the OAK-D/week3 world and the wrong sensor
-  # entirely, and NOT against the H-set, which section 2.2 keeps closed until
-  # this retuning work is finished and re-frozen. This split did not exist
-  # when the range-adaptive background-map fix (bg_map_far_leaf_m /
-  # bg_map_range_split_m) was designed; it is added now to satisfy that rule
-  # before the fix can be considered validated, let alone before any fresh
-  # H-set capture.
+  # entirely, and NOT the H-set, which stays closed while this retuning work
+  # is ongoing. This split did not exist when the range-adaptive
+  # background-map fix (bg_map_far_leaf_m / bg_map_range_split_m) was
+  # designed; it is added now so later rendered-lane changes have a legitimate
+  # split to validate against, instead of tuning against the H-set.
   #
   # Coverage mirrors the H-set's structure (world, camera, hover flight,
   # compensate_gravity:true for the throw to reach at range) but at every

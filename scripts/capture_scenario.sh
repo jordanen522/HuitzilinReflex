@@ -120,9 +120,8 @@ echo "[$ID] >>> PRESS Ctrl-C ~8-10 s after the spawn to stop & save the bag. <<<
 # /gz/dynamic_poses IS GROUND TRUTH AND IS NOT OPTIONAL.
 # Without it a bag can say THAT a centroid was published and never whether it
 # was OF THE BALL. Every bag captured before this line was added lacks it,
-# which is why none of them can carry the held-out recall claim -- see
-# docs/perception_eval.md section 3.1, which VOIDS any positive bag with no
-# projectile transform in this stream.
+# which is why none of them can be scored for recall -- a positive bag with no
+# projectile transform in this stream is VOID, not a scoreable miss.
 #
 # IT REQUIRES gz_pose_bridge TO BE RUNNING. Nothing else publishes it, and a
 # topic nobody publishes records as zero messages with no error: `ros2 bag

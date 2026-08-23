@@ -302,6 +302,36 @@ The current operating point is tuned and the held-out test split passes at recal
 trigger-side lever has already been measured as a null (see `CLAUDE.md`). Commit
 `detector.yaml` changes with a message naming the FN/FP they fixed.
 
+## Scoring a split against ground truth
+
+Two different scorers exist and answer different questions — don't mix them up.
+
+- **`score_bags.py` / `score_bags_logic.attribute_closing_ball`** — a range-closure-rate
+  heuristic. It asks "did a run of detections move like a ball" (in-band closing rate,
+  floored above the airframe's own max ground speed). It needs no ground truth, so it works
+  on any bag, but it can only say "something closed at a ball-like rate," never "that was
+  the ball."
+- **`truth_score_heldout.py` / `truth_attribution.py`** — matches detections to
+  `/gz/dynamic_poses` (the projectile's true position), so it can say whether a detection
+  was actually of the ball. Only usable on bags that record `/gz/dynamic_poses`
+  (`capture_scenario.sh` since the line noted above); a positive bag missing that topic is
+  VOID for this scorer, not a scoreable miss.
+
+Ground-truth scoring rules, kept here rather than in a separate contract:
+
+- **Score each scenario in its own detector process, not one shared process for a whole
+  split.** `params/rendered_detector.yaml` sets `use_persistent_bg:true` by design (real
+  operating behavior); scored across many scenarios in one process, that lets a later
+  scenario inherit background state from an earlier one that shares corridor geometry.
+  `run_heldout_eval.sh` restarts the detector per scenario for this reason — use it (or the
+  same pattern) rather than a shared-process score.
+- **Never tune against a held-out split.** Not to debug a threshold, not just to look. A
+  split's value as a recall measurement is exactly that the detector never saw it during
+  tuning; one look ends that. Use the `tune`/`tune_rendered` splits for iteration instead.
+- **A match is >= K detections within `match_radius_m` of the ball's true position inside
+  the scenario's detection window** (`truth_attribution.score_scenario`); false positives on
+  negatives are counted on their own denominator and never merged into the recall fraction.
+
 ## Open detector items
 
 - **S08 false negative** (14 m/s near-miss, train split) — never root-caused. Two blind

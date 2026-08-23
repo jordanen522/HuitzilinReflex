@@ -191,7 +191,7 @@ detector:
     # this lane's near-range behaviour) is untouched. 15.0 m is this file's
     # own registered flood-onset threshold, not a value chosen after seeing
     # held-out results. MUST be validated against T01-T14/train/test before
-    # any held-out re-score, per docs/perception_eval.md.
+    # any held-out re-score.
     bg_map_far_leaf_m: 0.45
     bg_map_range_split_m: 15.0
 

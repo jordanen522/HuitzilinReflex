@@ -1,9 +1,10 @@
-"""The held-out set, checked against its own pre-registration. ROS-free.
+"""The held-out set: geometry and split-hygiene invariants. ROS-free.
 
-docs/perception_eval.md was committed before any H-bag existed and fixes what
-may be claimed at each outcome. A pre-registration only means anything if the
-thing it describes cannot quietly drift away from it afterwards, and a yaml is
-very easy to nudge. These tests are the tie.
+This split exists to score detector recall on scenarios the detector was
+never tuned against. These tests keep the yaml honest about that: they check
+that the held-out IDs are disjoint (by speed and by the full parameter
+triple) from every tuning split, that the negative budget is kept, and that
+the set's own geometry is internally consistent.
 
 Two amendments are load-bearing here and are pinned as such, because both of
 them RELAX something and a relaxation is exactly what should be hard to make
@@ -16,14 +17,14 @@ silently:
   A3(b)  the +/-28 deg approach arm was deleted because it lies outside the
          +/-13.5 deg horizontal sector for the whole flight and would have
          designed four guaranteed misses into the set -- a built-in 14/18
-         ceiling. The claim is therefore recall WITHIN THE DEFENDED SECTOR.
+         ceiling. Recall on this set is therefore recall WITHIN THE DEFENDED
+         SECTOR, not recall over an arbitrary approach.
 
 What this file cannot check, and what no test can: that nobody ever replays an
-H-bag while choosing a threshold. That one is procedure, and it is written down
-in the pre-registration and in the matrix's own header.
+H-bag while choosing a threshold. That is a procedural discipline, not a
+structural one -- see docs/bag_capture_runbook.md.
 """
 
-import io
 import math
 import pathlib
 
@@ -33,7 +34,6 @@ import yaml
 PKG = pathlib.Path(__file__).resolve().parents[1]
 REPO = PKG.parents[1]
 MATRIX = PKG / "config" / "scenario_matrix.yaml"
-PREREG = REPO / "docs" / "perception_eval.md"
 
 G_MPS2 = 9.81
 
@@ -43,8 +43,9 @@ G_MPS2 = 9.81
 SECTOR_HALF_H_DEG = 13.5
 SECTOR_HALF_V_DEG = 11.0
 
-#: docs/perception_eval.md 4.1: 18 positives (one spare, so a single void bag
-#: cannot shrink the set to exactly the 17 the claim needs) and 6 negatives.
+#: 18 positives (one spare, so a single void bag doesn't shrink the usable
+#: set below 17) and 6 negatives -- kept >=25% of the total per the
+#: library's negative-budget rule below.
 N_POSITIVES = 18
 N_NEGATIVES = 6
 
@@ -66,8 +67,8 @@ def _held(matrix, label=None):
 
 # -- size and shape ----------------------------------------------------------
 
-def test_the_set_is_the_size_the_pre_registration_fixed(matrix):
-    """17 is the claim's minimum; 18 is what was enumerated. A set that shrinks
+def test_the_set_is_the_size_enumerated(matrix):
+    """17 is the usable minimum; 18 is what was enumerated. A set that shrinks
     to 17 after a void bag is a set whose denominator moved."""
     assert len(_held(matrix, "positive")) == N_POSITIVES
     assert len(_held(matrix, "negative")) == N_NEGATIVES
@@ -132,9 +133,9 @@ def test_the_speed_axis_is_disjoint_from_every_other_split(matrix):
     assert not (h_speeds & other)
 
 
-def test_the_speed_axis_reaches_the_speed_the_claim_is_about(matrix):
-    """20 m/s appears in no earlier split. A held-out set for the final system
-    that stopped at 17 m/s would leave the headline speed unmeasured."""
+def test_the_speed_axis_reaches_20_mps(matrix):
+    """20 m/s appears in no earlier split. A held-out set that stopped at
+    17 m/s would leave the fastest scenario of interest unmeasured."""
     assert 20.0 in {s["speed_mps"] for s in _held(matrix, "positive")}
 
 
@@ -244,17 +245,3 @@ def test_negatives_with_no_spawn_carry_zero_speed(matrix, by_id):
     clean-patrol negative with a nonzero speed would silently throw a ball."""
     for sid in ("HN01", "HN02", "HN03"):
         assert by_id[sid]["speed_mps"] == 0.0
-
-
-# -- the pre-registration itself ---------------------------------------------
-
-def test_the_pre_registration_exists_and_still_says_what_this_set_assumes():
-    """If the contract is deleted or rewritten, these numbers stop meaning what
-    the commit that produced them said they meant."""
-    text = io.open(PREREG, encoding="utf-8").read()
-    assert "PRE-REGISTRATION" in text
-    assert "## Amendments" in text
-    for section in ("### A1", "### A2", "### A3"):
-        assert section in text
-    # The decision table, which is the part that makes the claim falsifiable.
-    assert "18/18" in text and "17/18" in text

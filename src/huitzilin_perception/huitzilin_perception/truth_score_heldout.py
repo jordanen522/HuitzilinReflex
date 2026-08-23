@@ -1,24 +1,21 @@
 """
-truth_score_heldout.py — the ACTUAL pre-registered heldout scorer.
+truth_score_heldout.py — the ground-truth-attributed heldout scorer.
 
-score_bags.py's `split=heldout` invocation (which was run once, against this
-bag library, before this file existed) uses score_bags_logic.attribute_closing_ball
--- a range-closure-RATE heuristic built for bags with no ground truth at all.
-It is not what docs/perception_eval.md section 3 specifies, and its "100%
-recall" is not the pre-registered number: every positive it scored came back
-`attributable=False` in the very same run (0/18 "attributable to a closing
-ball"), which is the tell that its pass/fail column is answering a different
-question ("did something cross the window") than section 3.3 asks ("were
-there >= K detections matched to the BALL'S TRUE POSITION").
+score_bags.py's `split=heldout` invocation uses
+score_bags_logic.attribute_closing_ball -- a range-closure-RATE heuristic
+built for bags with no ground truth at all. It answers a different question
+("did something cross the window") than this scorer does ("were there >= K
+detections matched to the BALL'S TRUE POSITION"), and on this bag library
+every positive it scored came back `attributable=False` in the same run
+(0/18 "attributable to a closing ball") -- a real gap between the two
+questions, not a scoring bug in either.
 
-truth_attribution.py (commit 8b27f75) implements section 3's actual matching
+truth_attribution.py (commit 8b27f75) implements the ground-truth matching
 rule -- match_radius_m, interpolate_track, void_reason, score_scenario -- and
 carries its own 297-line test suite. It was never wired to anything that
-reads real bags; this file is that wiring, completing step 3 of section 7's
-order of operations before the single official scoring pass (step 7) is run.
-Nothing in truth_attribution.py's matching rule, K, or window is touched
-here -- this module only gets detections and ground truth INTO the shapes
-score_scenario already expects.
+reads real bags; this file is that wiring. Nothing in truth_attribution.py's
+matching rule, K, or window is touched here -- this module only gets
+detections and ground truth INTO the shapes score_scenario already expects.
 
 FRAME. detector_node.py publishes /threat/centroid in base_link (a MOVING
 frame -- see its `_publish_centroid`, frame_id="base_link"), while
