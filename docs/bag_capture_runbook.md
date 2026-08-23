@@ -77,53 +77,45 @@ missing *sidecar* silently drops the scenario from the recall math.
 ## Capturing the T-set (T01–T14, tuning split)
 
 Same bring-up as above; scenario IDs come from `scenario_matrix.yaml`'s T01–T14 rows (see
-the SPLITS block at the bottom of that file). All 14 were captured non-interactively over
-ssh (no TTY) — the points below are load-bearing for anyone repeating this without a
-controlling terminal.
+the SPLITS block at the bottom of that file). The T-set was captured non-interactively over
+ssh with no TTY; the notes below matter to anyone repeating that without a controlling
+terminal.
 
-### The SIGINT-over-ssh pattern (and the two ways it silently breaks)
+### Stopping the recorder over ssh
 
 `capture_scenario.sh` ends in `exec ros2 bag record`, so the PID you background *becomes*
-the recorder. Signal that PID directly with `kill -INT`, never a pattern match. Two failure
-modes were found and fixed this session, both silent (no error, no crash — just a recorder
-that never receives the signal, or a signal sent to the wrong PID):
+the recorder. Signal that PID directly with `kill -INT`, never a pattern match, and enable
+job control with `set -m` before backgrounding. Without job control, a non-interactive bash
+sets SIGINT/SIGQUIT to `SIG_IGN` for `&` jobs (the POSIX rule for asynchronous commands),
+and that disposition survives `exec()` into `ros2 bag record`, so `kill -INT $PID` does
+nothing. `nohup` does not fix it — it only adds a `SIGHUP` ignore on top — and neither does
+`trap - INT` in the child, because bash will not un-ignore a signal that was already
+ignored at shell entry.
 
-1. **A non-interactive, job-control-off bash sets SIGINT/SIGQUIT to `SIG_IGN` for `&`
-   background jobs** (POSIX/bash rule for asynchronous commands), and that ignored
-   disposition survives `exec()` into `ros2 bag record`. `kill -INT $PID` then does
-   nothing — confirmed via `/proc/$PID/status`'s `SigIgn` mask. `nohup CMD &` does **not**
-   fix this; it only adds its own `SIGHUP`-ignore on top, SIGINT/SIGQUIT stay ignored.
-   Neither does `trap - INT` inside the child — bash refuses to un-ignore a signal that was
-   already ignored at shell entry. **Fix: `set -m` (job control) before backgrounding.**
-   With job control active, bash does not apply the auto-ignore rule to async commands.
-2. **`setsid CMD` forks internally whenever the caller is already a process group
-   leader** (required, because `setsid()` fails otherwise) — and `set -m` makes every
-   backgrounded job its own group leader. Stacking `setsid` on top of `set -m` therefore
-   decouples `$!` (setsid's own short-lived PID) from the PID `ros2 bag record` actually
-   ends up running as; `kill -INT $!` then signals a process that's already gone.
-   **Fix: don't use `setsid`.** `set -m` already gives the job its own process group; a
-   synchronous, foreground ssh capture doesn't need a new *session* on top of that.
+Do not add `setsid` on top. It forks internally whenever the caller is already a process
+group leader, which `set -m` guarantees, so `$!` becomes setsid's own short-lived PID
+rather than the recorder's and `kill -INT $!` signals a process that is already gone.
 
-Net: `set -m`, no `setsid`, no `nohup` — a plain `CMD > log 2>&1 &` is enough once job
-control is on, and `capture_scenario.sh`'s own `exec ros2 bag record` preserves `$!` as the
-recorder's real PID. To verify live: `kill -INT $PID; sleep 1; grep SigIgn /proc/$PID/status`
-should show the SIGINT bit clear before you rely on it for anything.
+A plain `CMD > log 2>&1 &` is enough once job control is on. To verify a recorder can
+actually be signalled: `kill -INT $PID; sleep 1; grep SigIgn /proc/$PID/status` — the
+SIGINT bit must be clear.
 
-### Spawn-OK log-polling is what makes a throw capture land — not a fixed wait
+### Anchor the post-spawn wait on `Spawn OK`, not a fixed timer
 
-Do not derive the post-spawn wait from a fixed formula (e.g. `3 + time_to_closest_s + 9`
-sim-seconds off `SPAWN_LEAD`). **On this launch file, every throw goes through
-`spawn_projectile.py`'s `gz` CLI path** (see the next section for why that's correct, not a
-bug), which costs on the order of 15–20 s of *wall* time between the spawn command firing
-and the projectile actually getting its impulse. That shows up in the log as
-`wrench bridge never connected — falling back to the CLI throw`, followed a few seconds
-later by `Spawn OK`. **That warning line is expected and benign on `week3_perception.launch.py`
-— it fires on essentially every throw captured through this launch file, including every
-correctly-captured bag in the original 17-bag library, and is not itself a symptom of
-anything broken.** The bug is trusting a fixed timer across that gap, not the gap existing.
+Every throw on `week3_perception.launch.py` goes through `spawn_projectile.py`'s `gz` CLI
+path (see the next section for why that is correct rather than a bug), which costs 15–20 s
+of *wall* time between the spawn command firing and the projectile getting its impulse. The
+log shows `wrench bridge never connected — falling back to the CLI throw`, then `Spawn OK`
+a few seconds later. That warning is expected and benign on this launch file: it fires on
+essentially every throw captured through it, including every correctly-captured bag in the
+original 17-bag library.
 
-The fix — and the one that actually rescued T01–T10 of this batch — is to poll the capture
-log for the literal string `Spawn OK` before starting any post-throw countdown:
+A fixed post-spawn wait (for example `3 + time_to_closest_s + 9` sim-seconds off
+`SPAWN_LEAD`) races that gap and loses. Under fixed timing, `Recording stopped` preceded
+`Spawn OK` by 7–10 s in **11 of 11** spawn scenarios, each recording a ball sitting
+motionless at its spawn point instead of the labeled scenario; on a negative, a static new
+object in frame while patrol flies past is a capture artifact, not detector behaviour. Poll
+the capture log instead:
 
 ```bash
 until grep -q 'Spawn OK' "$LOG"; do sleep 1; done
@@ -131,62 +123,38 @@ sleep "$((TTC_S + 9))"        # THEN start the post-throw buffer
 kill -INT "$PID"
 ```
 
-Checked directly against every first-pass log before this fix was applied: `Recording
-stopped` preceded `Spawn OK` by 7–10 s in **11 of 11** spawn scenarios captured under a
-fixed-timing wait — every one of them recorded a ball sitting motionless at its spawn point
-for the whole bag, not the scenario it was supposed to capture, and (for the T-set
-negatives specifically) a static new object sitting in frame while patrol flies past it is
-a capture-artifact false positive, not a measurement of whether the detector suppresses the
-labeled scenario. Re-capturing with the poll above — same CLI throw path, just an honest
-wait — is what fixed all 11; **no bridge was involved in that fix** (see next section).
+Budget a generous poll timeout (60 s+) up front rather than tuning it per scenario. T09
+needed at least one re-capture for this spawn-timing reason.
 
-T09 needed at least one re-capture for this same spawn-timing reason during this batch.
-The specific claim that its first retry missed a 40 s poll window and a second retry
-succeeded at 60 s **cannot be verified after the fact** — the driver logs to a fixed
-per-scenario path (`/tmp/t4_capture_T09.log`) and each retry overwrites the previous
-attempt's log, so the evidence for that exact two-step timeline no longer exists. Treat T09
-as "needed at least one re-capture for a spawn-timing reason," not as a confirmed sequence,
-and budget a generous poll timeout (60 s+) up front rather than tuning it per-scenario.
+### The CLI throw path is canonical for this bag library
 
-### The CLI throw path is canonical for this bag library — do not bridge wrench topics into `week3_perception.launch.py`
-
-It's tempting to read `wrench bridge never connected` as a missing feature and wire
-`week4_evasion.launch.py`'s wrench bridge (`ros_gz_bridge parameter_bridge` on
+Do not wire `week4_evasion.launch.py`'s wrench bridge (`ros_gz_bridge parameter_bridge` on
 `/world/<world>/wrench` and `/world/<world>/wrench/persistent`) into
-`week3_perception.launch.py` so throws use the fast, same-physics-step `WrenchThrower` path
-instead of the CLI fallback. **Don't — this was considered and ruled against.** The
-original 17 bags (S01–S12, N01–N05) were captured 2026-07-15, **eleven days before
-`WrenchThrower` existed** (`37e0d34`, 2026-07-26); they went through the CLI-only path by
-construction, not by omission. T01–T10 of this batch went through the same CLI path (see
-above). **The CLI throw is what the entire 31-bag library currently shares, and that shared
-mechanism is exactly what keeps the tune and test splits comparable to each other and to
-the historical train/test split.** Bridging wrench topics into the capture launch file
-would make every *future* capture use a different throw mechanism (a true same-step impulse
-vs. a two-call CLI sequence that restores gravity ~0.25 s late and flattens the trajectory
-— see `spawn_projectile.py`'s own docstrings) than every bag currently in the library,
-trading one documented, benign log line for a fresh, silent comparability hazard.
-`week3_perception.launch.py` deliberately does not bridge the wrench topics — leave it that
-way, and read `wrench bridge never connected` as confirmation the canonical path is being
-used, not as something to fix.
+`week3_perception.launch.py` to get the fast, same-physics-step `WrenchThrower` path. The
+original 17 bags (S01–S12, N01–N05) were captured 2026-07-15, eleven days before
+`WrenchThrower` existed (`37e0d34`, 2026-07-26), so they use the CLI path by construction;
+T01–T10 use it too. The CLI throw is what the whole 31-bag library shares, and that shared
+mechanism is what keeps the tune and test splits comparable to each other and to the
+historical train/test split. Bridging the wrench topics would give every future capture a
+different throw mechanism — a true same-step impulse instead of a two-call CLI sequence
+that restores gravity ~0.25 s late and flattens the trajectory (see `spawn_projectile.py`'s
+docstrings). Read `wrench bridge never connected` as confirmation the canonical path is in
+use.
 
-**Exception, disclosed:** T12 and T13 in this batch *did* go through the fast bridge path
-(`thrown via warm bridge` in their logs). The bridge was brought up standalone — outside
-the launch file, as a bare extra `ros2 run` process, never wired into
-`week3_perception.launch.py` itself — partway through this session, to shorten a long
-pre-throw static-object window that was inflating T12's false-positive count (see below).
-It was left running for T13. **T12 and T13 are therefore the only 2 of 31 bags in the whole
-library captured via a different throw mechanism than every other bag**, including the
-other 12 in this same batch. Both are otherwise valid captures and were not re-flown
-CLI-only, since re-flying T12 costs a live patrol-motion window and T13 costs a full
-altitude excursion — but Task 5 should treat T12/T13's throw kinematics (gravity-restore
-timing in particular) as not directly comparable to any other single bag in the library,
-and should not extend this exception to future captures.
+T12 and T13 are the exception: both went through the fast bridge (`thrown via warm bridge`
+in their logs), brought up standalone as a bare `ros2 run` process outside the launch file
+to shorten a long pre-throw static-object window that was inflating T12's false-positive
+count. They are the only 2 of 31 bags in the library captured through a different throw
+mechanism. Both are otherwise valid and were not re-flown CLI-only, since re-flying T12
+costs a live patrol-motion window and T13 a full altitude excursion. Treat their throw
+kinematics — gravity-restore timing in particular — as not directly comparable to any other
+bag, and do not extend the exception to new captures.
 
 ### T13 needs altitude, and it must come back down
 
 T13 (`offset_vertical_m: -7.5`) needs the drone flying ≥ 8.0 m before the throw, or
 `capture_scenario.sh` aborts (`spawn would be at z=... < 0.5 m`). Same shape as N04's
-existing procedure, with four things worth spelling out because they cost real time here:
+procedure, with five constraints worth spelling out:
 
 - **`mav_bridge_node` reads `takeoff_alt_m` once at construction**, into a plain attribute
   — there is no parameter callback, so `ros2 param set .../takeoff_alt_m` is accepted and
@@ -208,22 +176,18 @@ existing procedure, with four things worth spelling out because they cost real t
   call.
 - Do not start patrol between takeoff and the T13 capture — patrol's waypoints are fixed at
   `d: -2.0` NED and will fly the drone straight back down to 2 m the moment it starts.
-- **Restore `takeoff_alt_m: 2.0` in the same session**, then repeat land → edit → restart
+- **Restore `takeoff_alt_m: 2.0` immediately afterwards**, repeating land → edit → restart
   T3 → arm → takeoff → start-patrol before capturing anything else.
   `git diff -- src/huitzilin_sim/params/bridge.yaml` must be empty before committing.
 
-T13's own post-throw window in this batch came out short (~2.2 s observed, against a ~10 s
-buffer the capture driver was asked for) because it **skipped the Spawn-OK-anchored polling
-described above.** T13's extra pre-recording step (the vertical-offset/altitude check) adds
-latency before `capture_scenario.sh` writes its `spawn=yes` label line; the driver's short,
-fixed pre-poll delay raced that write and lost, so the driver's branch check found no
-`spawn=yes` yet, fell through to a flat un-anchored sleep instead of polling for `Spawn OK`,
-and sent SIGINT on that flat timer instead. The throw itself is still confirmed genuine
-(ball spawned at the expected z = drone altitude − 7.5 m, thrown via the warm bridge, well
-before the recording stopped, zero false triggers), so the bag is usable — but the short
-window is a capture-driver race condition, not an unexplained anomaly. Give the pre-poll
-delay enough margin for scenario-specific startup latency (T13's altitude check in
-particular), or check for the label line rather than sleeping a fixed amount before the
+T13's altitude check adds latency before `capture_scenario.sh` writes its `spawn=yes` label
+line. A capture driver with a short fixed pre-poll delay races that write, finds no
+`spawn=yes`, and falls through to a flat un-anchored sleep instead of polling for
+`Spawn OK` — which is how the shipped T13 bag ended up with a ~2.2 s post-throw window
+against the ~10 s requested. The throw itself is genuine (ball at the expected
+z = drone altitude − 7.5 m, thrown via the warm bridge well before recording stopped, zero
+false triggers) and the bag is usable. Give the pre-poll delay margin for scenario-specific
+startup latency, or check for the label line rather than sleeping a fixed amount before the
 first `Spawn OK` check.
 
 ### T11 needs a commanded climb, not just an idle hover
@@ -244,42 +208,35 @@ ros2 topic pub -r 10 /huitzilin/cmd_vel geometry_msgs/msg/Twist '{linear: {z: -1
 process ends — no explicit stop command needed. Resume patrol (`data: true`) once the bag
 is closed.
 
-### `/threat/centroid` counts are not a detection signal — read this before Task 5 retunes
+### `/threat/centroid` message counts are not a detection signal
 
-Every T-bag in this batch shows substantial `/threat/centroid` traffic, including the
-negatives — several rows show dozens to ~100 messages, not the near-zero expected of a
-working detector on a held-out negative or during a positive's dead time. On direct
-cross-reference against the point clouds (checked on T03 and T08), the large majority of
-this traffic — on the order of 98% — is ambient noise, not the labeled throw, and this
-pattern is present across **every** T-bag, not only the highest-count rows. **A raw
-`/threat/centroid` message count is not a detection indicator by itself and must not be
-read as ground truth** for whether a scenario was "detected" — score against the labeled
-window and actual cluster geometry, not the message count.
+Every T-bag shows substantial `/threat/centroid` traffic, including the negatives — several
+rows carry dozens to ~100 messages, not the near-zero a working detector would produce on a
+negative or during a positive's dead time. Cross-referenced against the point clouds (on
+T03 and T08), the large majority of that traffic — on the order of 98% — is ambient noise
+rather than the labeled throw, and the pattern holds across every T-bag, not only the
+highest-count rows. Score against the labeled window and actual cluster geometry; a raw
+message count is not evidence that a scenario was detected.
 
-More importantly: **the false-positive rate correlates with patrol motion, across the whole
-tune set, not as an isolated fluke.** T14 (~100 messages, patrol running throughout, zero
-spawns, 45 s) against T11 (1 message, patrol *paused* for the whole capture, zero spawns,
-~14 s) is the cleanest read of this — same "nothing thrown" condition, the only structural
-difference is whether the drone is patrolling. **This is a structural, patrol-motion-
-correlated false-positive property of the detector as currently tuned, and it needs to be
-root-caused *before* Task 5 fits new thresholds against these bags — not discovered
-after.** Heavy, motion-correlated FPs on the negatives will pull any recall/precision
-tradeoff in a specific, hard-to-diagnose-after-the-fact direction if a retune is fit blind
-to the cause. This is a handoff for Task 5, not a fix made here — `detector.yaml` was
-explicitly out of scope for the capture task.
+The false-positive rate also correlates with patrol motion across the whole tune set. T14
+(~100 messages, patrol running throughout, zero spawns, 45 s) against T11 (1 message, patrol
+paused for the whole capture, zero spawns, ~14 s) isolates it: same "nothing thrown"
+condition, and the only structural difference is whether the drone is patrolling. This is a
+property of the detector as currently tuned. Root-cause it before fitting new thresholds
+against these bags — heavy motion-correlated false positives on the negatives pull the
+recall/precision tradeoff in a direction that is hard to diagnose afterwards.
 
 ### Hz gate — judge every bag, not just the throw
 
 `/oak/points` under 15 Hz sim is normal on this Dell under depth rendering (see CLAUDE.md),
 but a bag needs enough density to prove the scenario, not just to exist. Compute the actual
-rate from `ros2 bag info` (`/oak/points` message count ÷ bag duration) for every capture —
-a live `ros2 topic hz` sample taken before or after the recording can read very differently
-from what the bag itself contains, and isn't a substitute. T01–T14 all landed at
-11.5–13.4 Hz this session; treat anything under ~10 Hz as a failed capture and re-fly it,
-most urgently the short-`ttc` scenarios (T03/T07/T08), which have the least frame budget to
-lose. Hz measures whether a bag has enough data to *contain* the scenario — it says nothing
-about `/threat/centroid` quality; see the note above before drawing any detection
-conclusion from a bag that passes this gate.
+rate from `ros2 bag info` (`/oak/points` message count ÷ bag duration) for every capture. A
+live `ros2 topic hz` sample taken before or after the recording can read very differently
+from what the bag itself contains and is not a substitute. T01–T14 all landed at
+11.5–13.4 Hz; treat anything under ~10 Hz as a failed capture and re-fly it, most urgently
+the short-`ttc` scenarios (T03/T07/T08), which have the least frame budget to lose. This
+gate measures whether a bag contains enough data to hold the scenario and says nothing
+about `/threat/centroid` quality — see the note above.
 
 ## Tuning + regression
 
@@ -298,8 +255,8 @@ Knobs in `src/huitzilin_perception/params/detector.yaml`:
 | False triggers on clutter | raise `min_publish_score` or `cluster_min_points` |
 
 The current operating point is tuned and the held-out test split passes at recall 100%.
-**The library is saturated** — it cannot referee further threshold changes, and every
-trigger-side lever has already been measured as a null (see `CLAUDE.md`). Commit
+The library is saturated: it cannot referee further threshold changes, and every
+trigger-side lever has already been measured as a null (`docs/RESULTS.md` §7). Commit
 `detector.yaml` changes with a message naming the FN/FP they fixed.
 
 ## Scoring a split against ground truth
@@ -317,25 +274,29 @@ Two different scorers exist and answer different questions — don't mix them up
   (`capture_scenario.sh` since the line noted above); a positive bag missing that topic is
   VOID for this scorer, not a scoreable miss.
 
-Ground-truth scoring rules, kept here rather than in a separate contract:
+Ground-truth scoring rules:
 
 - **Score each scenario in its own detector process, not one shared process for a whole
   split.** `params/rendered_detector.yaml` sets `use_persistent_bg:true` by design (real
   operating behavior); scored across many scenarios in one process, that lets a later
   scenario inherit background state from an earlier one that shares corridor geometry.
-  `run_heldout_eval.sh` restarts the detector per scenario for this reason — use it (or the
-  same pattern) rather than a shared-process score.
-- **Never tune against a held-out split.** Not to debug a threshold, not just to look. A
-  split's value as a recall measurement is exactly that the detector never saw it during
-  tuning; one look ends that. Use the `tune`/`tune_rendered` splits for iteration instead.
+  `run_heldout_eval.sh` restarts the detector per scenario for this reason — use it, or the
+  same pattern, rather than a shared-process score.
+- **Never tune against a held-out split**, including to debug a threshold or just to look.
+  A split's value as a recall measurement is that the detector never saw it during tuning,
+  and one look ends that. Use the `tune` / `tune_rendered` splits for iteration.
 - **A match is >= K detections within `match_radius_m` of the ball's true position inside
   the scenario's detection window** (`truth_attribution.score_scenario`); false positives on
   negatives are counted on their own denominator and never merged into the recall fraction.
+
+Dodge-side scoring rules (counterfactual, speed splits, hover vs patrol) live in
+`docs/RESULTS.md` §10.
 
 ## Open detector items
 
 - **S08 false negative** (14 m/s near-miss, train split) — never root-caused. Two blind
   threshold attempts regressed other scenarios without fixing it. Any re-tune must start
   from a single-bag `debug_funnel:=true` trace on S08, not threshold guessing.
-- **N02 / N03 / N05 false positives** (patrol-turn and background-clutter triggers) —
-  they hurt precision but don't fail the recall gate. Uninvestigated.
+- **N02 / N03 / N05 false positives** (patrol-turn and background-clutter triggers) — they
+  hurt precision but do not fail the recall gate. Uninvestigated.
+- Rendered-lane recall and the spent held-out bags H01/H02/H03/H16: `docs/KNOWN_ISSUES.md`.

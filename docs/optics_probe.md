@@ -5,18 +5,14 @@ GPU) at commit `3525f72`.** Raw results: `lab/probe_out/*.result.txt`.
 Harness: `scripts/optics_probe/` (`run_probe.sh`, `count_ball_points.py`,
 `probe_world.sdf.in`).
 
-## Why this exists
+## Scope
 
-Every 20 m/s result in this repo up to now was taken through either the oracle
-(centroid *asserted* from Gazebo truth) or the synthetic-depth lane (cloud
-*fabricated* from Gazebo truth, then fed to the real detector). Both were built
-on the same stated blocker: an 80 mm ball at 26 m subtends 0.176°, which is
-sub-pixel at the depth world's 640×480 over 67.3° (0.105°/px), so no rendered
-camera in this simulation could produce a cluster to detect.
-
-That blocker is real **for the camera the aircraft carries**. It is not a
-property of rendering. This probe measures whether a *different* rendered
-camera clears it.
+Every 20 m/s result elsewhere in the repo comes from the oracle (centroid
+*asserted* from Gazebo truth) or the synthetic-depth lane (cloud *fabricated*
+from Gazebo truth, then fed to the real detector), because an 80 mm ball at 26 m
+subtends 0.176° — sub-pixel at the depth world's 640×480 over 67.3° (0.105°/px),
+so no cluster forms. That is a limit of the camera the aircraft carries, not of
+rendering. This probe measures whether a different rendered camera clears it.
 
 ## Method
 
@@ -97,24 +93,23 @@ the binding constraint for any of them. **800×650 @ 30 Hz is the recommended
 design point**: 24 points (≈5× the cluster minimum), 23 Hz delivered, and
 RTF 0.926, which keeps battery throughput close to the current lane.
 
-## What this probe does NOT establish
+## What this probe does not establish
 
 - **It is static.** Stationary camera, stationary ball, no flight dynamics, no
   motion blur, no attitude change during the throw. It measures optics only.
-- **It is noise-free.** The probe world declares no sensor noise at all, which
-  is correct for a *reach* probe — the question was whether the geometry
-  resolves — but it means these counts are an upper bound. The shipped
+- **It is noise-free**, so the counts are an upper bound. No sensor noise is
+  declared in the probe world, which is correct for a reach probe. The shipped
   `iris_depth` is barely different: a 1 cm per-pixel gaussian, ~30× too small at
   26 m and independent where the real error is correlated. A real stereo pair
   has σ = 0.30 m at 26 m, growing as z² and *common-mode* across the ball, so
-  the error lands on the centroid. A rendered lane without that is **better
-  than the real sensor** and must not be scored as if it were the real one.
-  `depth_noise.py` and `iris_ar0234` were built to close exactly this gap.
+  the error lands on the centroid. A rendered lane without that is better than
+  the real sensor and must not be scored as if it were. `depth_noise.py` and
+  `iris_ar0234` close that gap.
 - **It says nothing about detection, tracking, or dodging** — only that enough
   points exist for clustering to be possible.
-- **It is not evidence about the physical part.** That a simulated 27.0° camera
-  at 800×650 resolves the ball at 26 m is not evidence that a $89 AR0234 with a
-  10 mm M12 lens detects an 80 mm ball at 26 m in daylight.
+- **It is not evidence about the physical part.** A simulated 27.0° camera at
+  800×650 resolving the ball at 26 m says nothing about whether a $89 AR0234
+  with a 10 mm M12 lens detects an 80 mm ball at 26 m in daylight.
 
 ---
 
@@ -148,18 +143,13 @@ Three things this establishes:
    correlation cell, so the centroid partially averages. At 26 m it spans ~5 px
    and gets a single disparity solution, which is the regime that matters.
 
-### What this cost, and why the probe exists
+### Depth axis convention
 
-The first run of this A/B returned **std 0.0000 m on the noised arm** — the
-stage was publishing a noiseless sensor while reporting a clean run. Gazebo's
-`PointCloudPacked` stays in the sensor **body** frame (X-forward), and the node
-read depth from column 2; near boresight the body-frame Z is ~0, so σ(z)
-collapsed and every return moved by ~0.0001 m. The cloud was well formed, the
-point count was right, and the detector would have been perfectly happy.
-
-Every unit test passed throughout, because they all built their clouds with the
-same z-is-depth assumption as the code under test. **No unit test on a
-synthetic array could have caught this.** `depth_noise_node` now selects the
-axis from `cloud_convention` (`detector.yaml`'s existing `gz_flu | optical`
-vocabulary) and logs an ERROR naming the parameter if the first cloud comes
-back unchanged.
+Gazebo's `PointCloudPacked` stays in the sensor **body** frame (X-forward). An
+earlier `depth_noise_node` read depth from column 2, so near boresight the
+body-frame Z was ~0, σ(z) collapsed, every return moved by ~0.0001 m, and the
+stage published a noiseless sensor while reporting a clean run — well-formed
+cloud, correct point count, std 0.0000 m on the noised arm. The node now selects
+the axis from `cloud_convention` (`detector.yaml`'s existing `gz_flu | optical`
+vocabulary) and logs an ERROR naming the parameter if the first cloud comes back
+unchanged.

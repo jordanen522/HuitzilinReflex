@@ -2,11 +2,8 @@
 
 Owns: bring-up, smoke test, battery, and sweep procedure for the evasion loop, plus how
 to read the miss decomposition. Native-Ubuntu Dell only (live Gazebo depth).
-The tca law, the capability envelope and every lever this harness retired live in
-`docs/RESULTS.md`.
-
-**If you are here to measure escape or saves rather than to exercise the loop, read §4
-first** — §1–§3 are the wrong instrument for that question.
+The tca law, the capability envelope, every lever this harness retired, and the scoring
+rules live in `docs/RESULTS.md`.
 
 ## 1. Bring-up (4 terminals)
 
@@ -64,44 +61,37 @@ motion means the bridge priority path; no commands means the trigger never fired
 - **No hard success gate**: exit ≠ 0 only for harness errors (no odom / no pose stream /
   spawn failures).
 - The report prints a blended on-target rate. Do not quote it — split by ball speed
-  (`CLAUDE.md`); the blend hides both halves of the envelope.
+  (`docs/RESULTS.md` §10); the blend hides both halves of the envelope.
 
 ## 4. Measuring escape or saves — hover, oracle, counterfactual
 
-§1–§3 measure the *shipped* loop end to end. They are the wrong instrument for the
-question "how much did the dodge actually buy", and Week 6 established three rules for
-that. Skipping any of them produces a number that looks fine and means nothing.
+§1–§3 exercise the shipped loop end to end. They are the wrong instrument for "how much
+did the dodge actually buy". For that:
 
-**Rule 1 — HOVER, always.** Patrol has never delivered a ball on a hit course at range:
-0 of 98 throws arrived inside 0.109 m, against 40/40 with hover.
+- **Hover, always.** Patrol has never delivered a ball on a hit course at range: 0 of 98
+  throws arrived inside 0.109 m, against 40/40 with hover.
 
-```bash
-EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6
-```
+  ```bash
+  EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6
+  ```
 
-The cause is the throw-window gate, not the lead direction (~5° off, not the ~90° an
-ordinal-matching artefact once suggested): the gate holds each throw until the drone hits
-a **rolling-max** cruise (`min_cruise_frac` 0.95 of a 3.49 m/s max, against a 2.09 m/s
-median), so the lead extrapolates a peak the drone never sustains — over-lead +1.5 m at
-1.2 s of ball flight, +2.6 m at 1.5 s, 96–98% along-track. Hover also drops the
-straight-leg requirement, which is what made ranges ≥ 18 m unmeasurable under patrol
-(9/10 throws skipped). **Hover is the trustworthy instrument, not the generous one** — it
-exposes a real dead time out to t ≈ 0.20 s that patrol hides.
-
-**Rule 2 — score on the counterfactual, never on `dodged`.** A throw is on a hit course
-only if `counterfactual_min_m` ≤ 0.30 m; a save is that *and* `actual_min_m` > 0.30 m.
-A fire count and a save rate are different numbers. **A cell with no on-course throws
-measured nothing — never report it as 0/N.**
-
-**Rule 3 — escape displacement cannot referee a lever.** Patrol's counterfactual
-extrapolates a straight line through a vehicle that is tracking waypoints, so the
-vehicle's own curvature lands in the escape term: median fit residual **0.0112 m patrol
-vs 0.0011 m hover**, and at matched tca 0.385 s the two disagree **19x**. Worse, two
-*identical* control arms once drifted **1.58x** apart — larger than the effect they were
-controlling for. So: measure in hover, A/B within one session, fly the control twice, and
-prefer the dataflash velocity step (`PSCN`/`PSCE` `DVN`/`DVE` vs `VN`/`VE`), which compares
-command against achievement inside a single dodge and has no session drift.
-**Any past null scored on patrol escape displacement with n ≤ 8 is unsafe.**
+  The cause is the throw-window gate; dodge direction is only ~5° off. The gate holds each
+  throw until the drone hits a **rolling-max** cruise (`min_cruise_frac` 0.95 of a 3.49 m/s
+  max, against a 2.09 m/s median), so the lead extrapolates a peak the drone never
+  sustains — over-lead +1.5 m at 1.2 s of ball flight, +2.6 m at 1.5 s, 96–98% along-track.
+  Hover also drops the straight-leg requirement, which is what made ranges ≥ 18 m
+  unmeasurable under patrol (9/10 throws skipped). Hover is the trustworthy instrument, not
+  the generous one: it exposes a dead time out to t ≈ 0.20 s that patrol hides.
+- **Score on the counterfactual, never on `dodged`.** On a hit course means
+  `counterfactual_min_m` ≤ 0.30 m; a save is that *and* `actual_min_m` > 0.30 m. A cell
+  with no on-course throws measured nothing and is not reported as 0/N.
+- **Escape displacement cannot referee a lever.** Patrol's counterfactual extrapolates a
+  straight line through a vehicle tracking waypoints, so the vehicle's own curvature lands
+  in the escape term: median fit residual 0.0112 m patrol vs 0.0011 m hover, and at matched
+  tca 0.385 s the two disagree 19x. Two identical control arms have drifted 1.58x apart,
+  larger than the effect they were controlling for. Measure in hover, A/B within one run,
+  fly the control twice, and prefer the dataflash velocity step (`PSCN`/`PSCE` `DVN`/`DVE`
+  vs `VN`/`VE`), which compares command against achievement inside a single dodge.
 
 ### The oracle sensor
 
@@ -113,36 +103,21 @@ ros2 launch huitzilin_perception week6_oracle.launch.py \
   with_patrol:=true detection_range_m:=20.0
 ```
 
-- **`detection_range_m` is an INPUT, not a result.** A dodge scored under the oracle is a
-  claim about the tracker, trigger and airframe *given* a sensor with that reach — never
-  evidence such a sensor exists. Quote the range beside every number.
-- **A sensor is reach, sector AND rate.** The command above pins reach only;
-  `oracle_rate_hz` (default 14.5) and `fov_half_angle_deg` (in
-  `params/oracle_detector.yaml`, default 45.0) take their defaults silently. Pinning one
-  axis describes a different instrument — a gate pinned to the real detector's 3.4 m reach
-  still failed because it flew the wrong optics and rate against its reference. Quote all
-  three beside every number.
-- **`counterfactual_min_m` is blank on `NO_DODGE` rows.** Joining on it naively drops every
-  no-fire out of the denominator and reports a save rate over only the throws that fired —
-  it turned a true 21/30 into 21/21 once. Substitute `counterfactual_min_m := actual_min_m`
-  on those rows and score a `NO_DODGE` inside the hit radius as a loss.
-- **Run the fidelity gate first**, in the **same mode** as the run it validates.
-  `detection_range_m:=3.4` must reproduce the measured shape before anything the oracle
-  says about 20 m/s is believable. B11/B12 are patrol and geometrically identical to
-  B02/B03 by design; a hover gate cannot validate a patrol run.
-- **Read once at startup, no parameter callback.** `ros2 param set` is accepted and
-  silently ignored — every range change needs a full stack restart. Pass it as a float:
-  `detection_range_m:=5` is inferred as an integer and rejected.
-- **`oracle_detector` and `detector` must never run together** — both publish
-  `/threat/centroid`, so the tracker would get two uncorrelated views of one ball.
-  `week6_oracle.launch.py` never includes `week3_perception`, so there is nothing to
-  forget to disable.
 - **Raise `offset_forward_m` with the range**: `offset_forward_m ≥ detection_range_m +
   8.5` at 20 m/s. Below that the ball enters the gate from *inside* it and the cell
   quietly measures a shorter sensor than its label. Verify every run —
   `first_det_range_m` in the CSV must match the launched `detection_range_m` to ~0.2 m.
+- **Run the fidelity gate first**, in the **same mode** as the run it validates.
+  `detection_range_m:=3.4` must reproduce the measured shape before anything the oracle
+  says about 20 m/s is believable. B11/B12 are patrol and geometrically identical to
+  B02/B03 by design; a hover gate cannot validate a patrol run.
 - If throws come back mostly `SKIPPED, not thrown`, suspect the throw window and waypoint
-  spacing, never the tracker. **A skip is absence of data, never a failed dodge.**
+  spacing, never the tracker. A skip is absence of data, never a failed dodge.
+
+The oracle's own traps — `detection_range_m` being a read-once input rather than a result,
+a sensor being reach *and* sector *and* rate, the blank `counterfactual_min_m` on
+`NO_DODGE` rows, and never running `oracle_detector` alongside `detector` — are in
+`CLAUDE.md`'s sharp edges; the scoring consequences are in `docs/RESULTS.md` §10.
 
 ## 5. Parameter sweep
 
@@ -156,16 +131,14 @@ edit that file, not this sentence, to change the grid) over B02/B03/B06 via
 on the live evasion node — no restarts. Results → `/tmp/week4_sweep.{txt,csv}`. Write the
 winning combo into `params/evasion.yaml` and re-run the full battery to confirm.
 
-**Both shipped axes are already measured nulls**, and `dodge_speed_mps` has since been
-re-refuted properly — a within-session hover A/B at 1.5 / 3.0 / 6.0 found **4x the command
-buys 1.095x the escape** (saves 6/10, 6/9, 6/10; escape ~ `command^0.065`). Running the
-grid as it stands re-derives a known answer — the baseline won on every column. It is kept
-as the worked example of the sweep format. Change the axes before spending a session on it,
-and check the null list in `CLAUDE.md` first. Note that this harness sweeps by `ros2 param
-set` on the live node, which is the right shape for evasion params but **cannot** sweep
-`detection_range_m` — the oracle reads that once at startup (§4). The
-battery restores baseline evasion params afterwards; if a sweep aborts partway, restart
-T3 before the confirmation battery.
+Both shipped axes are measured nulls (`docs/RESULTS.md` §7) — the baseline won on every
+column, and the grid is kept only as the worked example of the sweep format. Change the
+axes before running it.
+
+This harness sweeps by `ros2 param set` on the live node, which is the right shape for
+evasion params but **cannot** sweep `detection_range_m` — the oracle reads that once at
+startup (§4). The battery restores baseline evasion params afterwards; if a sweep aborts
+partway, restart T3 before the confirmation battery.
 
 ## 6. Reading the miss decomposition
 
