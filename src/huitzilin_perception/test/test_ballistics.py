@@ -87,7 +87,7 @@ def test_aim_at_drone_false_is_week3_identical():
     np.testing.assert_allclose(a.velocity, b.velocity)
 
 
-# --- Target lead (W4 live bring-up, 2026-07-26) ------------------------------
+# --- Target lead (W4 live bring-up,) ------------------------------
 # Aiming at where the drone IS misses a patrolling drone by |v| * t_flight.
 # Measured on the Dell with a single clean stack: patrol flies 2.5-3.2 m/s and
 # 8 m/s "direct hit" runs missed by 1.3-2.6 m.
@@ -172,7 +172,7 @@ def test_lead_scales_with_latency():
 # The point the throw was actually aimed at. Without it exposed, a battery can
 # only compare the measured miss against the SPEC, which conflates "the lead
 # predicted the wrong place" with "the geometry about the predicted place was
-# wrong". The hover control (2026-07-27) proved the geometry exact, so what is
+# wrong". The hover control proved the geometry exact, so what is
 # left to measure is the aim point against where the drone truly went.
 
 def test_aim_point_is_the_drone_itself_without_a_lead():

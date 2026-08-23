@@ -1,9 +1,9 @@
 """
-Run-loop tests for score_bags.ScorerNode — Task 5c fix round 3, MEDIUM-1.
+Run-loop tests for score_bags.ScorerNode — the earlier revision a later revision, MEDIUM-1.
 
 WHAT THIS FILE EXISTS FOR
 -------------------------
-Fix round 2 made strict_window_bounds() raise on an inverted detection
+strict_window_bounds() raises on an inverted detection
 window. That raise is correct and must stay: an inverted window admits
 nothing, so scoring under it posts a silent false negative. But the raise
 reached run()'s scenario loop UNGUARDED, so one broken sidecar aborted the
@@ -15,8 +15,8 @@ library's job is to raise. The defect is in the CALLER's blast radius, which
 lives in score_bags.py. So these tests drive the real ScorerNode.run(),
 ScorerNode._score_one() and ScorerNode._report().
 
-Fix round 4 adds two more invariants to the same file, both about the
-same thing -- run() must not lose the artifact. The first is MEDIUM-A:
+Two further invariants cover the same thing -- run() must not lose the
+artifact. The first:
 print(report) ran ahead of the artifact write and outside any try, so a
 non-UTF-8 console killed _report() before the file existed. The second
 is the §11 enforcement: a source-level check that no window-refusing
@@ -299,7 +299,7 @@ def test_a_well_formed_library_run_is_untouched_by_the_guard(tmp_path):
     assert "PASS" in report
 
 
-# --- The console is the secondary sink (fix round 4, MEDIUM-A) ---------------
+# --- The console is the secondary sink (a later revision, MEDIUM-A) ---------------
 
 class _NonUtf8Stdout:
     """
@@ -485,7 +485,7 @@ def test_no_window_refusing_call_in_score_bags_sits_outside_a_guard():
         f"try that absorbs the refusal, at line(s) {offenders} of "
         f"{_score_bags.__file__}. An unguarded refusal escapes the scenario "
         f"loop in run() and kills the whole scoring run before _report() "
-        f"writes the artifact (Task 5c MEDIUM-1). Wrap the call and return "
+        f"writes the artifact. Wrap the call and return "
         f"self._unusable_window_row(...), as the two sites in _score_one do."
     )
 

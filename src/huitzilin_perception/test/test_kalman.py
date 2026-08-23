@@ -96,7 +96,7 @@ def test_track_times_out_and_reseeds():
 # --- Reseed counters ---------------------------------------------------------
 # A reseed puts the velocity state back to ZERO, and a zero-velocity estimate
 # makes predict_closest_approach report tca ~ 0 with a miss equal to the current
-# range, which the trigger reads as "not a threat". Measured 2026-07-27: the
+# range, which the trigger reads as "not a threat". Measured: the
 # published predicted miss tracks the ball's current range on inbound throws —
 # exactly that signature. These counters make a mid-flight reseed visible instead
 # of inferred. They are lifetime totals, so reset() must NOT clear them.
@@ -237,7 +237,7 @@ def test_plan_dodge_end_to_end_hit_geometry():
     assert np.linalg.norm(plan.direction) == pytest.approx(1.0)
 
 
-# --- Ground clearance (W4 live bring-up, 2026-07-26) -------------------------
+# --- Ground clearance (W4 live bring-up,) -------------------------
 # The drone dodged itself into the runway from 2 m: a gravity-compensated
 # throw arrives descending, so the perpendicular escape points DOWN.
 
@@ -283,7 +283,7 @@ def test_clearance_straight_down_escape_becomes_horizontal():
     assert d[2] == pytest.approx(0.0)
 
 
-# --- Escape BEARING, not just escape magnitude (2026-08-07) ------------------
+# --- Escape BEARING, not just escape magnitude ------------------------------
 # clamp_dodge_to_clearance is threat-blind by construction: it is handed a
 # direction, never a geometry. Where a re-aim had no horizontal bearing of its
 # own to keep -- a straight-down or straight-up escape -- it used to invent a
@@ -400,7 +400,7 @@ def test_plan_dodge_applies_clearance_when_altitude_given():
 
 
 # --- Escape must not depend on which way the drone was already flying --------
-# Measured 2026-07-27 (scripts/hz_cmd_path_probe.py, 16 dodges): escape at 1.0 s
+# Measured (scripts/hz_cmd_path_probe.py, 16 dodges): escape at 1.0 s
 # correlates r = -0.911 with the alignment between the commanded escape
 # direction and the drone's own cruise, and battery min_dist correlates
 # r = -0.67 with the same quantity. The cause is arithmetic, not control.
@@ -475,7 +475,7 @@ def test_dodge_velocity_command_normalises_direction():
     assert cmd == pytest.approx(np.array([0.0, 0.0, 1.5]))
 
 
-# --- The dodge-authority mechanism (2026-07-27) ------------------------------
+# --- The dodge-authority mechanism -------------------------------------------
 # Measured live: the detector publishes the TRUE ball on 5-6 consecutive frames
 # from ~4.7 m inwards, yet the track that fires a dodge is invariably exactly 3
 # updates and 0.132 s old. These tests pin why, in the tracker rather than the

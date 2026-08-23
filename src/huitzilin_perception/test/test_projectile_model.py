@@ -11,8 +11,8 @@ That was "fixed" once already, with
     <surface><collide_bitmask>0x00</collide_bitmask></surface>
 
 which is the WRONG PARENT -- collide_bitmask is a child of <surface><contact>.
-SDFormat dropped it, warned on every spawn, and the ball went on colliding until
-2026-08-07, when a dataflash log showed six of eight throws producing an
+SDFormat dropped it, warned on every spawn, and the ball went on colliding. A
+dataflash log then showed six of eight throws producing an
 uncommanded roll excursion of 33-48 deg (past ATC_ANGLE_MAX=30) beginning
 0.27-0.47 s after each dodge -- the ball-arrival window -- and the last one
 rolling to 180 deg and crashing. All five sweep cells died that way, taking

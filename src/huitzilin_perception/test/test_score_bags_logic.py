@@ -315,7 +315,7 @@ def test_fall_time_none_restores_the_nominal_event_edge():
 
 
 def test_late_clamp_never_pushes_the_upper_edge_below_the_lower():
-    # Fix round 2, MEDIUM-2: this test used to sweep ttc at window_s = 4.0
+    # This test used to sweep ttc at window_s = 4.0
     # ONLY, so it asserted a property over a grid on which the property is
     # unconditionally true and passed without ever visiting the region where
     # it is false. Same shape as the M-7/F-5 defect. The grid now sweeps
@@ -344,7 +344,7 @@ def test_late_clamp_never_pushes_the_upper_edge_below_the_lower():
 
 
 def test_an_inverted_strict_window_raises_instead_of_admitting_nothing():
-    # The concrete case from the fix round 1 review, verified on this box:
+    # The concrete case from the a later revision review, verified on this box:
     #   strict_window_bounds(100.0, 1.5, window_s=0.25)
     #     -> lower = +4.250, upper = +3.889   (width -0.361 s)
     # The old (pre-clamp) rule could not produce it: both of its edges hung
@@ -361,12 +361,12 @@ def test_an_inverted_strict_window_raises_instead_of_admitting_nothing():
 
 def test_a_large_time_to_closest_also_inverts_the_window():
     # The SECOND route, found by running the guard rather than reading the
-    # algebra (fix round 2). Once min(window_s, post_event_s) saturates at
+    # algebra (a later revision). Once min(window_s, post_event_s) saturates at
     # post_event_s, the late edge stops growing with window_s while the
     # floor keeps reaching forward, so a large enough ttc inverts the window
     # at the SHIPPED window_s = 4.0:
     #   ttc > fall_time_s + POST_EVENT_TOLERANCE_S + window_s  ->  6.639 s
-    # The fix round 1 review characterised the hazard as "small window_s"
+    # The a later revision review characterised the hazard as "small window_s"
     # only; it is a surface, not a single crossover.
     threshold = FLAT_THROW_FALL_TIME_S + POST_EVENT_TOLERANCE_S + 4.0
     assert threshold == pytest.approx(6.639, abs=1e-3)
@@ -437,7 +437,7 @@ def test_strict_window_rejects_cold_map_burst_at_bag_start():
     # CRITICAL-1, stated as the failure it prevents. detector.yaml:229-231
     # documents this library's dominant FP class as a cold-background-map
     # burst in the first ~1-2 s of a replay. Here the detector NEVER sees
-    # the ball; all it emits is that burst. Under Task 5b's symmetric gate
+    # the ball; all it emits is that burst. Under the earlier revision's symmetric gate
     # this scored a true positive and read as 100% recall.
     cold_burst = [100.05, 100.31, 100.62, 100.94, 101.27, 101.40]
     assert is_in_window_symmetric_legacy(
@@ -485,8 +485,8 @@ def test_strict_window_false_far_from_closest_approach_but_inside_loose_window()
     # loose (bag-start-anchored) gate but is nowhere near when the ball was
     # actually present must fail the strict gate.
     # ttc is the library MAXIMUM (S01, 1.5 s). It used to be 8.0 here, which
-    # is four times anything scenario_matrix.yaml contains and — as fix round
-    # 2's inversion guard now shows — is not merely unrealistic but an
+    # is four times anything scenario_matrix.yaml contains and — as the
+    # inversion guard now shows — is not merely unrealistic but an
     # inverted window under the clamped late edge (see
     # test_an_inverted_strict_window_raises_instead_of_admitting_nothing).
     # A real library value makes this discriminator STRONGER, not weaker: it
@@ -556,7 +556,7 @@ def test_count_in_window_counts_rather_than_just_deciding():
     assert count_in_window([], *strict) == 0
 
 
-# --- format_closure_rate (fix round 1, LOW-2) --------------------------------
+# --- format_closure_rate (a later revision, LOW-2) --------------------------------
 
 def test_format_closure_rate_says_when_there_was_no_in_band_run():
     # A bare "rate=0.00" reads as a measured zero closure. It is not: it is
@@ -612,14 +612,14 @@ def test_longest_closing_run_finds_longest_among_several():
 
 
 def test_closing_run_is_broken_by_a_time_gap():
-    # Task 5c: without a gap bound, two detections seconds apart counted as
-    # one "closing step" — Task 5b's 8 s window made that routine.
+    # the earlier revision: without a gap bound, two detections seconds apart counted as
+    # one "closing step" — the earlier revision's 8 s window made that routine.
     ranges = [(100.0, 5.0), (100.067, 4.0), (106.0, 3.0)]
     assert longest_closing_run(ranges) == 2
 
 
 def test_max_detection_gap_is_still_derived_from_the_roi_and_airframe_max():
-    # Narrowed (fix round 1, LOW-4): this locks the CONSTANT against silent
+    # Narrowed (a later revision, LOW-4): this locks the CONSTANT against silent
     # retuning and nothing more. The second assertion it used to carry
     # (MAX_DETECTION_GAP_S >= 5.00 / V_AIRFRAME_MAX_MPS) was implied by the
     # first and exercised no code at all. The property it was gesturing at
@@ -677,7 +677,7 @@ def test_run_closure_rate_of_short_run_is_zero():
     assert run_closure_rate([]) == 0.0
 
 
-# --- attribute_closing_ball (Task 5c CRITICAL-2) -----------------------------
+# --- attribute_closing_ball -----------------------------
 #
 # The refuted rule tested only the SIGN of successive range differences.
 # Under patrol the drone translates toward newly-explored terrain, whose
@@ -804,7 +804,7 @@ def test_out_of_band_step_splits_a_run_instead_of_destroying_it():
     # single bad frame in the middle of a long track cannot veto a real
     # detection.
     #
-    # Fixed in fix round 1 (MEDIUM-7): the previous version's "impossible
+    # Fixed in a later revision (MEDIUM-7): the previous version's "impossible
     # jump" (t 100.1333 -> 100.30, r 3.7333 -> 2.0) was 10.40 m/s, INSIDE
     # the (3.49, 11.49] band, so the two halves were simply joined into one
     # 6-point run and the assertion passed without ever exercising the
@@ -835,13 +835,13 @@ def test_out_of_band_step_still_fails_when_neither_half_is_long_enough():
     assert result["best_run"] == 2
 
 
-# --- the null model (fix round 1, MEDIUM-5) ----------------------------------
+# --- the null model (a later revision, MEDIUM-5) ----------------------------------
 
 def test_monte_carlo_harness_reproduces_the_published_5b_noise_rate():
     # The harness is shipped so this number can be re-derived rather than
     # believed. The 5b sign rule is distribution-free (it reads only the
     # sign of successive differences), so this figure is an exact check on
-    # the harness: the Task 5b reviewer published 0.91 at n=15 over 200 000
+    # the harness: the the earlier revision reviewer published 0.91 at n=15 over 200 000
     # trials, and it is the number that explains 5b's "11 of 12
     # attributable" as noise. Seeded, so this does not flake.
     p = null_attribution_mc.p_fires(
@@ -859,9 +859,9 @@ def test_monte_carlo_harness_reproduces_the_published_5c_noise_rate():
 
 
 def test_the_published_null_figures_still_match_the_measured_n_win():
-    # THE STALENESS GUARD (fix round 2, F2-1). The defect this catches is not
+    # THE STALENESS GUARD (a later revision, F2-1). The defect this catches is not
     # arithmetic — it is that detector.yaml's three null figures were computed
-    # at one n_win vector, the fix round 1 window change moved that vector,
+    # at one n_win vector, the a later revision window change moved that vector,
     # and nothing anywhere noticed. The figures were prose; prose cannot fail.
     #
     # Recomputed here from null_attribution_mc.MEASURED_N_WIN, so any future

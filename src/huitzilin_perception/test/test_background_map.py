@@ -135,7 +135,7 @@ def test_revisited_region_stays_background():
 
     The rolling deque only holds bg_history_frames, so on the return leg the
     scene it already saw is novel again and the foreground floods — that is the
-    2026-07-26 patrol blindness. The persistent map reports ~nothing.
+    patrol blindness. The persistent map reports ~nothing.
     """
     wall = _grid(0.0, 8.0, 0.0, 1.0, 0.0, 0.05)
     window = 2.0

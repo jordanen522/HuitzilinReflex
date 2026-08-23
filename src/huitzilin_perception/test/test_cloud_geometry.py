@@ -128,7 +128,7 @@ def test_camera_frame_differencing_floods_under_translation():
     fg = foreground_mask(curr, prev, threshold=0.15)
     # >20% of the scene turns "foreground" from egomotion alone. At real cloud
     # sizes (50-90k ROI points) that is >>5000, i.e. the fg_max_points skip
-    # that threw away half of all frames in the 2026-07-06 regression run.
+    # that threw away half of all frames in the regression run.
     assert fg.mean() > 0.2
 
 
@@ -167,7 +167,7 @@ def test_voxel_downsample_keeps_small_object():
     assert out.shape[0] >= 2  # 80 mm ball must survive 0.02 m voxels
 
 
-# --- voxel_downsample: pinned before the 2026-07-27 speed rewrite ------------
+# --- voxel_downsample: pinned before the speed rewrite ------------
 # Measured hot stage: 66-74 ms per call on patrol clouds against a 77 ms/frame
 # wall budget, so one stage was the whole latency overrun. These tests pin the
 # CONTRACT (one point per occupied voxel, member centroid, lexicographic row

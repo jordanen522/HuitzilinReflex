@@ -3,8 +3,8 @@
 Runs without ROS:
     python -m pytest src/huitzilin_perception/test/test_stage_profiler.py
 
-What is being pinned: the instrument itself, because this session already
-shipped two pieces of *misleading* instrumentation — a sim-time compute figure
+What is being pinned: the instrument itself, because two pieces of
+*misleading* instrumentation shipped once — a sim-time compute figure
 that structurally reads 0 ms, and a derived rtf of 0.00 from it. A profiler
 that silently mis-attributes time is worse than none, since the whole point is
 to decide which detector stage to optimise.

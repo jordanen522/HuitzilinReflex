@@ -57,7 +57,7 @@ def generate_launch_description() -> LaunchDescription:
     pkg_perception = get_package_share_directory("huitzilin_perception")
     pkg_sim = get_package_share_directory("huitzilin_sim")
 
-    # ── Arguments ─────────────────────────────────────────────────────────────
+    # Arguments
     args = [
         DeclareLaunchArgument("mode", default_value="live",
                               description="live | score"),
@@ -104,7 +104,7 @@ def generate_launch_description() -> LaunchDescription:
     mode         = LaunchConfiguration("mode")
     with_patrol  = LaunchConfiguration("with_patrol")
 
-    # ── 1. ros_gz_image bridge — depth image ──────────────────────────────────
+    # 1. ros_gz_image bridge — depth image
     depth_image_bridge = Node(
         package="ros_gz_image",
         executable="image_bridge",
@@ -117,7 +117,7 @@ def generate_launch_description() -> LaunchDescription:
         condition=_eq_condition(mode, "live"),
     )
 
-    # ── 2. ros_gz_bridge — point cloud + camera_info ──────────────────────────
+    # 2. ros_gz_bridge — point cloud + camera_info
     gz_bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
@@ -137,7 +137,7 @@ def generate_launch_description() -> LaunchDescription:
         condition=_eq_condition(mode, "live"),
     )
 
-    # ── 2b. Clock bridge — gz /clock → ROS /clock (sim time source) ──────────
+    # 2b. Clock bridge — gz /clock → ROS /clock (sim time source)
     # Without this, every use_sim_time node (both bridges, both TF publishers,
     # detector) blocks on a /clock that never advances (frozen at t=0), so the
     # detector never fires /threat/centroid and /clock is absent from recorded
@@ -153,7 +153,7 @@ def generate_launch_description() -> LaunchDescription:
         condition=_eq_condition(mode, "live"),
     )
 
-    # ── 3+4. Static TF: base_link → camera_link → camera_optical_frame ────────
+    # 3+4. Static TF: base_link → camera_link → camera_optical_frame
     #
     # camera_link: forward + up of base_link (provisional mount offset)
     # camera_optical_frame: standard optical rotation (REP-103)
@@ -186,7 +186,7 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
-    # ── 5. Detector node ──────────────────────────────────────────────────────
+    # 5. Detector node
     detector = Node(
         package="huitzilin_perception",
         executable="detector",
@@ -198,7 +198,7 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    # ── Optional: score_bags node (score mode) ────────────────────────────────
+    # Optional: score_bags node (score mode)
     scorer = Node(
         package="huitzilin_perception",
         executable="score_bags",
@@ -215,7 +215,7 @@ def generate_launch_description() -> LaunchDescription:
         condition=_eq_condition(mode, "score"),
     )
 
-    # ── Optional: Week 2 patrol stack ─────────────────────────────────────────
+    # Optional: Week 2 patrol stack
     patrol_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_sim, "launch", "week2_sitl.launch.py")
@@ -247,7 +247,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
 
-# ── Helper: string equality condition ─────────────────────────────────────────
+# Helper: string equality condition
 # Returns a ready-to-use Condition (do NOT wrap the result in IfCondition again).
 # EqualsSubstitution + IfCondition is the supported Jazzy pattern; the older
 # LaunchConfigurationEquals is deprecated and slated for removal.

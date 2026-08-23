@@ -57,7 +57,7 @@ USAGE (Dell, after the world + SITL are up — docs/dodge_battery_runbook.md)
       sensor_params:=$(ros2 pkg prefix huitzilin_perception)/share/\
 huitzilin_perception/params/synthetic_depth_oakd_gate.yaml
 
-THE FIDELITY GATE PINS THE SENSOR, NOT ONLY ITS REACH (measured 2026-08-16)
+THE FIDELITY GATE PINS THE SENSOR, NOT ONLY ITS REACH (measured)
 --------------------------------------------------------------------------
 QUOTING detection_range_m ALONE DESCRIBES THE WRONG INSTRUMENT. "The sensor" is
 reach AND sector AND rate, and this file's shipped params model the PROPOSED
