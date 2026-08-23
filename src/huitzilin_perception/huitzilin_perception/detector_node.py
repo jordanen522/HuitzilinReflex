@@ -106,6 +106,23 @@ class DetectorNode(Node):
         self.declare_parameter("cluster_min_points", 5)
         self.declare_parameter("cluster_max_points", 500)
         self.declare_parameter("min_publish_score", 0.3)
+        # Track-continuity gate (2026-08-22, RT01-RT06 debug evidence). Cluster
+        # selection below is pure "largest ball-sized cluster, every frame,
+        # independently" -- no memory of where the ball was last seen. Once any
+        # frame's spurious ground-level clutter cluster is >= the real (often
+        # shrinking, harder-to-segment-near-ground) ball cluster, the detector
+        # snaps to it and never returns: RT04 got 5 correct consecutive matches
+        # (err 0.03-0.10 m) then permanently jumped to a z~0 clutter cluster at
+        # its 6th frame; RT01 the same after only 2 good frames. The spurious
+        # clusters sit 10-40+ m from the true position -- far outside any
+        # plausible one-frame ball displacement (~15 Hz, <=19 m/s -> <=1.3 m/
+        # frame even with an occasional dropped frame). When a recent
+        # publish exists, restrict the largest-cluster pick to candidates
+        # within this radius of it; only fall back to the unrestricted pick
+        # once the track has gone stale (allows cold-start / re-acquisition
+        # after the ball is genuinely lost, e.g. left the FOV).
+        self.declare_parameter("track_gate_radius_m", 4.0)
+        self.declare_parameter("track_gate_stale_s", 1.0)
         self.declare_parameter("threat_centroid_topic", "/threat/centroid")
         self.declare_parameter("marker_topic", "/threat/marker")
         self.declare_parameter("compensate_egomotion", True)
@@ -205,6 +222,14 @@ class DetectorNode(Node):
             ttl_s=self._p["bg_map_ttl_s"],
             max_voxels=self._p["bg_map_max_voxels"],
         )
+        # ── Track-continuity gate state ─────────────────────────────────────
+        # Last published centroid, in the SAME frame the per-frame `centroid`
+        # is computed in below (fixed/odom frame when self._bg_mode=="fixed",
+        # else whatever frame the camera-mode path uses) -- both sides of the
+        # gate distance check must agree on frame or the radius is meaningless.
+        self._last_centroid: Optional[np.ndarray] = None
+        self._last_centroid_time: Optional[float] = None
+
         self._bg_map_far: Optional[VoxelBackgroundMap] = None
         if self._p["bg_map_far_leaf_m"] > 0.0 and self._p["bg_map_range_split_m"] > 0.0:
             self._bg_map_far = VoxelBackgroundMap(
@@ -319,6 +344,8 @@ class DetectorNode(Node):
             "cluster_min_points": self.get_parameter("cluster_min_points").value,
             "cluster_max_points": self.get_parameter("cluster_max_points").value,
             "min_publish_score":  self.get_parameter("min_publish_score").value,
+            "track_gate_radius_m": self.get_parameter("track_gate_radius_m").value,
+            "track_gate_stale_s": self.get_parameter("track_gate_stale_s").value,
             "threat_centroid_topic": self.get_parameter("threat_centroid_topic").value,
             "marker_topic":       self.get_parameter("marker_topic").value,
             "compensate_egomotion": self.get_parameter("compensate_egomotion").value,
@@ -518,6 +545,11 @@ class DetectorNode(Node):
             self._bg_map.clear()
             if self._bg_map_far is not None:
                 self._bg_map_far.clear()
+            # A mode switch changes which frame `centroid` is computed in
+            # (see cluster-selection below); a track-gate reference from the
+            # OTHER frame would compare apples to oranges.
+            self._last_centroid = None
+            self._last_centroid_time = None
             self.get_logger().info(
                 f"differencing frame -> {mode} "
                 f"({'odom TF available' if mode == 'fixed' else 'no odom TF — uncompensated'})")
@@ -653,7 +685,41 @@ class DetectorNode(Node):
         if not ball_sized:
             return
 
-        best_cluster = max(ball_sized, key=lambda c: c.shape[0])
+        # Track-continuity gate: restrict the largest-cluster pick to
+        # candidates near the last publish, so a bigger unrelated clutter
+        # cluster can't hijack an established track (see declare_parameter
+        # for the evidence). Only applies while the track is fresh; a stale
+        # track imposes no gate; a cold start (no prior track) imposes no
+        # gate either, since candidates is None below.
+        stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        candidates = ball_sized
+        if (self._last_centroid is not None
+                and self._last_centroid_time is not None
+                and (stamp_s - self._last_centroid_time)
+                    <= self._p["track_gate_stale_s"]):
+            gated = [c for c in ball_sized
+                     if np.linalg.norm(c.mean(axis=0) - self._last_centroid)
+                        <= self._p["track_gate_radius_m"]]
+            # No fallback to the unrestricted list here: the failure this
+            # gate exists to stop happens EXACTLY in the frames where the
+            # real ball cluster has shrunk below cluster_min_points/fallen
+            # out of ball_sized for a frame or two -- gated is empty in
+            # precisely that case, and falling back to ball_sized would hand
+            # the pick straight back to whatever distant clutter cluster is
+            # currently largest, reproducing the original bug. Reject the
+            # frame instead: no publish beats a wrong publish, and the next
+            # frame gets another chance while the track is still fresh.
+            if not gated:
+                if dbg:
+                    self.get_logger().info(
+                        "funnel: track-gate rejected all candidates "
+                        f"(dt={stamp_s - self._last_centroid_time:.2f}s) "
+                        "-> skip frame rather than snap",
+                        throttle_duration_sec=self._funnel_throttle_s)
+                return
+            candidates = gated
+
+        best_cluster = max(candidates, key=lambda c: c.shape[0])
         score = best_cluster.shape[0] / self._p["cluster_max_points"]
         if d is not None:
             d["best_size"] = int(best_cluster.shape[0])
@@ -669,6 +735,12 @@ class DetectorNode(Node):
 
         with prof.stage("centroid_tf"):
             centroid = best_cluster.mean(axis=0)
+            # Update the gate reference here, in the same frame `centroid` is
+            # in, regardless of whether the downstream base_link TF below
+            # succeeds -- a transient TF failure shouldn't also throw away
+            # otherwise-valid track continuity.
+            self._last_centroid = centroid
+            self._last_centroid_time = stamp_s
             if self._bg_mode == "fixed":
                 # cluster lives in the fixed odom frame
                 T_bl_fixed = self._lookup_matrix(
@@ -686,7 +758,6 @@ class DetectorNode(Node):
             return
 
         if dbg:
-            stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             wall_ms = (time.monotonic() - t0) * 1000.0
             # transport = how stale the cloud already was on arrival. Measured
             # 53-348 ms (typically >300) while compute ran 63-354 ms wall

@@ -181,8 +181,25 @@ for SID in $SCENARIO_IDS; do
     exit 1
   fi
 
+  # kill only sends the signal -- it does not block until the process is
+  # actually gone. A python/rclpy node can take real wall-clock time to tear
+  # down its DDS publishers, and the next scenario's warmup+detector start
+  # immediately after this returns. If the old detector is still alive when
+  # the next one starts, both briefly publish to the same reliable
+  # /threat/centroid topic, and the new scorer's subscriber (queue depth 10)
+  # can pick up a few of the dying process's late messages as if they were
+  # the new scenario's own detections -- the exact cross-scenario
+  # contamination this per-scenario-restart harness exists to prevent, just
+  # at the restart boundary instead of within one long-lived process.
+  # Escalate to SIGKILL and confirm death before moving on.
   kill "$DETECTOR_PID" 2>/dev/null || true
-  pkill -f "huitzilin_perception/detector" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    kill -0 "$DETECTOR_PID" 2>/dev/null || break
+    sleep 0.5
+  done
+  kill -9 "$DETECTOR_PID" 2>/dev/null || true
+  pkill -9 -f "huitzilin_perception/detector" 2>/dev/null || true
+  sleep 1
   DETECTOR_PID=""
   echo ""
 done
