@@ -229,6 +229,18 @@ detector:
     # is the gate that decides what actually looks like the ball.
     range_adaptive_extent: true
 
+    # 2026-08-22 fix attempt #4: range_adaptive_extent above confirmed
+    # engaging live, zero effect on RT-set recall/false-fire — a same-range
+    # clutter fragment passes its own distance-scaled tolerance exactly as
+    # easily as the ball, so extent alone can't discriminate them. The
+    # `max(candidates, key=len)` pick below still hands it to whichever
+    # survivor has the most points, and a diffuse clutter fragment often
+    # beats the ball's tight, dense return on raw count even though it's
+    # less ball-like. This switches the tie-breaker to point density
+    # (points / extent^3), so a compact blob outranks a sparse one of equal
+    # or greater point count.
+    density_selection: true
+
     # ── Centroid publishing ───────────────────────────────────────────────────
     min_publish_score: 0.006
 

@@ -179,6 +179,23 @@ class DetectorNode(Node):
         # non-rendered lane stays byte-identical; only rendered_detector.yaml
         # opts in.
         self.declare_parameter("range_adaptive_extent", False)
+        # 2026-08-22, same-day follow-up: range_adaptive_extent confirmed
+        # engaging live (funnel logs show candidates dropped) but produced a
+        # BYTE-IDENTICAL RT-set result (2/6 recall, 2/4 false-fire). Root
+        # cause: a same-range clutter fragment passes its OWN distance-scaled
+        # extent tolerance exactly as easily as the real ball does -- extent
+        # alone cannot discriminate two things admitted by the same rule.
+        # `best_cluster = max(candidates, key=len)` below picks the biggest
+        # surviving cluster; a clutter fragment at the same range as the ball
+        # is frequently sparser but larger (a wall/prop edge sheds more
+        # points over a bigger footprint), so it still out-points the ball's
+        # tight, dense return. This is fix attempt #4's finding: switch the
+        # tie-breaker from raw point count to point density
+        # (points / extent^3) so a compact blob outranks a diffuse one of
+        # equal or greater point count. False by default (byte-identical
+        # elsewhere); only rendered_detector.yaml opts in, alongside
+        # range_adaptive_extent.
+        self.declare_parameter("density_selection", False)
         # Cloud subscription reliability. TRUE is not the usual sensor-data
         # choice, and it is deliberate: /oak/points is a 7.37 MB sample
         # (640x480 x 24 B) fragmented across thousands of UDP datagrams against
@@ -380,6 +397,7 @@ class DetectorNode(Node):
             "cluster_split_tol_m": self.get_parameter("cluster_split_tol_m").value,
             "cluster_split_max_points": self.get_parameter("cluster_split_max_points").value,
             "range_adaptive_extent": self.get_parameter("range_adaptive_extent").value,
+            "density_selection": self.get_parameter("density_selection").value,
         }
 
     # ── Odom callback ─────────────────────────────────────────────────────────
@@ -778,7 +796,12 @@ class DetectorNode(Node):
                 return
             candidates = gated
 
-        best_cluster = max(candidates, key=lambda c: c.shape[0])
+        if self._p["density_selection"]:
+            best_cluster = max(
+                candidates,
+                key=lambda c: c.shape[0] / max(cluster_extent(c) ** 3, 1e-6))
+        else:
+            best_cluster = max(candidates, key=lambda c: c.shape[0])
         score = best_cluster.shape[0] / self._p["cluster_max_points"]
         if d is not None:
             d["best_size"] = int(best_cluster.shape[0])
