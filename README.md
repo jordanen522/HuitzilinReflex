@@ -1,89 +1,86 @@
 # HuitzilinReflex
 
 A 3.5″ ducted micro-quadrotor that patrols a fixed loop, signals with light and
-sound, and reflexively dodges thrown projectiles, using onboard **depth sensing,
-trajectory prediction, and automated flight control**. Simulate first, fly last —
-see [`HuitzilinReflex_v2.md`](HuitzilinReflex_v2.md) for the full project idea and
-roadmap.
+sound, and reflexively dodges thrown projectiles, using onboard depth sensing,
+trajectory prediction and automated flight control. The project simulates first and
+flies last; [`HuitzilinReflex_v2.md`](HuitzilinReflex_v2.md) has the full project
+description and roadmap.
 
-ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink ·
-Python 3.12 · Ubuntu 24.04.
+ROS 2 Jazzy, Gazebo Harmonic, ArduPilot Copter 4.5+ SITL, pymavlink, Python 3.12,
+Ubuntu 24.04.
 
 ## Status
 
-**Active — simulation phase.** Weeks 1–4 are done: patrol loop, a detection
-pipeline scored against a labelled bag library, and a Kalman filter + dodge
-trigger, measured end to end (see [The result](#the-result)). Hardware bring-up
-(Weeks 5–9 of the roadmap) has not started.
+Active, simulation phase. Weeks 1–4 are done: patrol loop, a detection pipeline
+scored against a labelled bag library, and a Kalman filter plus dodge trigger,
+measured end to end (see [Results](#results)). Hardware bring-up (Weeks 5–9 of the
+roadmap) has not started.
+
+Open problems are tracked in
+[`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
 
 ## Goals
 
-The requirements are [`docs/requirements.md`](docs/requirements.md) (REQ-01…16):
-autonomous patrol, threat detection via the OAK-D Lite, intercept prediction, an
-evasive maneuver within 150 ms, and the alarm payload — none of them name a
-specific dodge speed or recall percentage. Those are met in simulation at the
-measured envelope below.
+The requirements are REQ-01 through REQ-16 in
+[`docs/requirements.md`](docs/requirements.md): autonomous patrol, threat detection via
+the OAK-D Lite, intercept prediction, an evasive maneuver within 150 ms, and the alarm
+payload. None of them names a specific dodge speed or recall percentage. All are met in
+simulation at the envelope measured below.
 
-Two things are open engineering work, not requirements:
-- **Long-range detection on a rendered (AR0234-class) sensor** is still unreliable
-  — the tune-split recall is 2/6 with 2/4 false-fire; see `CLAUDE.md`'s open
-  problems.
-- **Dodging faster projectiles** needs more sensor reach than the aircraft
-  currently carries. [`docs/RESULTS.md`](docs/RESULTS.md) shows what reach a
-  higher speed would need, and [`docs/optics_probe.md`](docs/optics_probe.md)
-  studies a candidate sensor upgrade (AR0234, $89, 13.5 g) — a documented upgrade
-  path, not a claim about the aircraft as built.
+Two things are open engineering work rather than requirements:
 
-## The result
+- Long-range detection on a rendered, AR0234-class sensor is unreliable. Recall on
+  the tune split is 2/6 with 2/4 false-fire; see
+  [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
+- Dodging faster projectiles needs more sensor reach than the aircraft carries.
+  [`docs/RESULTS.md`](docs/RESULTS.md) derives the reach a higher speed would need,
+  and [`docs/optics_probe.md`](docs/optics_probe.md) studies a candidate sensor
+  upgrade (AR0234, $89, 13.5 g). That upgrade is a documented path, not a
+  description of the aircraft as built.
 
-Two envelopes. They use a different sensor, a different flight mode and a different
-scoring rule, so they are reported one after the other and never merged into a single
-table — that rule is [`docs/RESULTS.md`](docs/RESULTS.md) §8, not a stylistic choice.
+## Results
 
-### The baseline — the aircraft as built
+There are two measurement lanes. They use a different sensor, a different flight mode
+and a different scoring rule, so they are reported separately and not compared
+row-for-row.
 
-The real OAK-D Lite depth detector at its measured ~3.4 m reach, flying **patrol**,
-over five batteries — **95 hit-intent throws** plus 12 clear-miss controls:
-**78/78 dodges at ≤ 8 m/s** (B01, B02, B04, B05, B06), **0/17 at 14 m/s** (B03), and
-**0 false dodges** in the 12 controls (B07). Scored on `dodged` — a *fire* count, not
-the counterfactual save rule the 20 m/s lane below uses, which is one of the reasons
-the two lanes are not comparable. This is the project's **only** real-detector
-measurement, and it is the 8 m/s baseline the headline figure is measured against.
+### Real detector, patrol
 
-### What sensor a higher speed would need
+The OAK-D Lite depth pipeline at its measured ~3.4 m reach, flying patrol: 95
+hit-intent throws plus 12 clear-miss controls over five batteries, scored on `dodged`.
 
-Everything below replaces that detector with a synthetic oracle whose reach is a
-settable *input*, flying **hover**.
+| Ball speed | Scenarios | Dodges |
+|---|---|---|
+| ≤ 8 m/s | B01, B02, B04, B05, B06 | 78/78 |
+| 14 m/s | B03 | 0/17 |
+| false dodges | B07 | 0/12 |
 
-**A save is a sigmoid in time-to-closest-approach, and the threshold does not
-depend on ball speed.** Over 310 on-course hover throws from 30 cells:
+This is the only measurement of the detection pipeline itself.
 
-    logit P(save) = -22.271 + 27.910 × tca      LD50 0.798 s (CI 0.779–0.817)
+### Oracle sensor, hover
 
-P = 0.5 at 0.80 s, 0.9 at 0.88 s, and 155/155 above 1.00 s. Adding ball speed as a
-second covariate across nine speeds from 14 to 29 m/s contributes nothing
-(z = +0.93, not significant). Only the range needed to *buy* that time scales with
-speed:
+Replacing the detector with a synthetic sensor whose reach is a settable input makes
+the sensor requirement measurable. Over 310 on-course hover throws, the probability of
+a save is a sigmoid in time-to-closest-approach with an LD50 of 0.798 s, and adding
+ball speed as a covariate contributes nothing across nine speeds from 14 to 29 m/s.
+Only the range needed to buy that time scales with speed:
 
-    range = speed × (tca_required + t_dead)     t_dead = 0.178 s at 60 Hz
+| Quantity | Value |
+|---|---|
+| Required reach at 20 m/s, P = 0.90 | 21.1 m |
+| Saves at 26 m reach, 20 m/s, head-on | 28/29 |
+| False dodges in clear-miss cells | 0 in 31 |
+| Maximum ball speed as built (~3.4 m OAK-D Lite) | ~3.2 m/s |
 
-At 20 m/s that is **21.1 m** of reach, and a 26 m sensor scores **28/29** head-on in
-hover. False dodges were measured in *separate* clear-miss cells, not in that one:
-**0 in 31**, while the 0.5 m near-miss control still fired 6/6. So the binding
-constraint is **sensor reach and rate** — every maneuver-side lever was measured and
-refuted, and the vehicle already over-delivers on the velocity step it is commanded.
+The binding constraint is sensor reach and rate. Every maneuver-side lever was measured
+and came back null. Closing the gap to 20 m/s needs an AR0234 global-shutter mono on a
+10 mm M12 lens (See3CAM_20CUG, $89, 13.5 g, against the 61 g OAK-D Lite it replaces):
+the deficit is angular resolution, not headline range. The same lens narrows the
+defended sector to roughly ±10° usable, because reach times half-angle is fixed by
+pixel count.
 
-The aircraft **as built** carries a ~3.4 m OAK-D Lite, which caps it at ~3.2 m/s. The
-part that closes the gap is an **AR0234 global-shutter mono on a 10 mm M12 lens**
-(See3CAM_20CUG, $89, 13.5 g — *lighter* than the 61 g OAK-D Lite it replaces): the
-deficit was angular resolution, never headline range. The same lens narrows the
-defended sector to about ±10° usable, which is an architectural consequence rather
-than a bug — reach × half-angle is fixed by pixel count.
-
-Everything in *this* section — not the baseline above it — is measured against a
-*synthetic* sensor whose reach is a settable **input**, so it is a finding about the
-tracker, trigger and airframe given such a sensor, not evidence that one is
-installed. Full write-up and every caveat: [`docs/RESULTS.md`](docs/RESULTS.md).
+Fit coefficients, dead-time budget, the sensor spec table, the measured nulls and the
+scoring rules are in [`docs/RESULTS.md`](docs/RESULTS.md).
 
 ## Layout
 
@@ -112,10 +109,9 @@ Full install from scratch: [`docs/SETUP.md`](docs/SETUP.md).
 ./scripts/run_tests.sh -k clock   # pytest args are forwarded
 ```
 
-Roughly 500 collected tests across `huitzilin_sim` and `huitzilin_perception`,
-grown incrementally since the Week-5 roadmap snapshot of 253
-(`HuitzilinReflex_v2.md`). `.github/workflows/tests.yml` runs the ROS-free subset
-on every push; the modules that import `rclpy` run locally only, on the Dell.
+28 `test_*.py` modules across `huitzilin_sim` and `huitzilin_perception`.
+`.github/workflows/tests.yml` runs the ROS-free subset on every push; the modules
+that import `rclpy` run locally only, on the Dell.
 
 ```bash
 ./scripts/preflight_check.sh      # SITL environment
@@ -124,42 +120,43 @@ on every push; the modules that import `rclpy` run locally only, on the Dell.
 
 ### Detection scoring
 
-A **17-bag labelled library**: 12 positive throw scenarios (S01–S12) crossing speed,
-approach angle and miss distance, and 5 negatives (N01–N05) — clean-patrol baselines
-plus dedicated probes of egomotion, field-of-view and range-gate false positives.
+A 17-bag labelled library: 12 positive throw scenarios (S01–S12) crossing speed,
+approach angle and miss distance, and 5 negatives (N01–N05), covering clean-patrol
+baselines plus probes of egomotion, field-of-view and range-gate false positives.
 
-**S11, S12 and N05 are held out and never tuned against — the real OAK-D-lane
-detector recalls 2/2 on that split.** Recall on the train split is **90%**: **S08**,
-a 14 m/s near-miss, is a known and never-root-caused false negative, which puts
-full-library positive recall at 11/12. The regression gate is a 95% recall floor
-only — there is no precision gate, and N02/N03/N05 carry uninvestigated false
-positives. A separate, larger held-out split (H01–H18/HN01–HN06) exists for the
-rendered long-range sensor lane and is not yet reliably passing — see `CLAUDE.md`'s
-open problems. Details: [`docs/bag_capture_runbook.md`](docs/bag_capture_runbook.md).
+S11, S12 and N05 are held out and never tuned against; the OAK-D-lane detector recalls
+2/2 on that split. Recall on the train split is 90%. S08, a 14 m/s near-miss, is a
+known false negative that was never root-caused, putting full-library positive recall
+at 11/12. The regression gate is a 95% recall floor only: there is no precision gate,
+and N02, N03 and N05 carry uninvestigated false positives. A separate, larger held-out
+split (H01–H18, HN01–HN06) covers the rendered long-range sensor lane and does not yet
+pass reliably; see [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md). Procedure:
+[`docs/bag_capture_runbook.md`](docs/bag_capture_runbook.md).
 
 ### Projectile trials
 
-Reported as two denominators, never pooled: **310 on-course hover throws** under the
-synthetic oracle across 30 cells at swept ranges (26 m is the *derived design point*
-of §4, not the range they were all flown at), counterfactual-scored — the sigmoid
-above — and **95 hit-intent patrol throws** against the real ~3.4 m detector,
-fire-scored. Several hundred further throws were flown and excluded by rule —
-off-course, high fit residual, or from cells quarantined for stack contamination.
+Two denominators, reported separately. 310 on-course hover throws under the synthetic
+oracle across 30 cells at swept ranges, counterfactual-scored; 26 m is the design point
+derived in `docs/RESULTS.md` §4, not the range every cell was flown at. And 95
+hit-intent patrol throws against the real ~3.4 m detector, fire-scored. Several hundred
+further throws were flown and excluded by the per-throw gates in `docs/RESULTS.md` §10:
+off-course, high fit residual, or from cells whose implied update rate exceeded the
+launched oracle rate.
 
 ## Run
 
-Bring-up is three terminals (Gazebo, SITL, ROS launch) and three service calls in
-a fixed order. The exact commands, the service *types* — which are not
-interchangeable — and the traps that bite live in
-[`CLAUDE.md`](CLAUDE.md). Read its sharp edges before the first run; several of
-them fail silently rather than loudly, `FRAME_CLASS=0` most notoriously (the
-aircraft arms, accepts takeoff, and produces no lift).
+Bring-up is three terminals (Gazebo, SITL, ROS launch) followed by three service calls
+in a fixed order. The commands and the exact service types are in
+[`docs/SETUP.md`](docs/SETUP.md). Read the sharp-edges list before the first run:
+several failure modes are silent, notably `FRAME_CLASS=0`, where the aircraft arms,
+accepts takeoff and produces no lift.
 
 ## Documentation
 
 | Doc | Contents |
 |---|---|
-| [`docs/RESULTS.md`](docs/RESULTS.md) | The tca law, the sensor-reach requirement for higher speeds, every closed question |
+| [`docs/RESULTS.md`](docs/RESULTS.md) | Measured envelopes, the tca law, the sensor-reach requirement |
+| [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Open problems in the rendered long-range sensor lane |
 | [`CLAUDE.md`](CLAUDE.md) | Bring-up commands and sharp edges |
 | [`HuitzilinReflex_v2.md`](HuitzilinReflex_v2.md) | Objectives, BOM, roadmap |
 | [`docs/architecture.md`](docs/architecture.md) | Node graph, message and service contracts |
@@ -172,11 +169,11 @@ aircraft arms, accepts takeoff, and produces no lift).
 
 ## Safety
 
-The payload is a **signal only** — it is never used to follow or harass a person.
-Flight is netted or tethered, inside a 10 m geofence with a 5 m ceiling, with a
-dedicated kill-switch in hand for every powered test. The rules are binding, not
-aspirational: see [`docs/SAFETY_CASE.md`](docs/SAFETY_CASE.md).
+The payload is a signal only. It is never used to follow or harass a person. Flight is
+netted or tethered, inside a 10 m geofence with a 5 m ceiling, with a dedicated
+kill-switch in hand for every powered test. These rules are binding; see
+[`docs/SAFETY_CASE.md`](docs/SAFETY_CASE.md).
 
-The evasive maneuver is for projectiles only. No fault condition can produce one —
-that is asserted over every state × fault × armed combination, not argued by
-inspection.
+The evasive maneuver is for projectiles only. No fault condition can produce one, which
+is asserted in tests over every combination of state, fault and armed status rather
+than argued by inspection.

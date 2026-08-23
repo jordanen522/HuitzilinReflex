@@ -91,37 +91,31 @@ Node graph, topics, rates, and the full contract table: `docs/architecture.md`.
 
 ## 5. Roadmap (Simulation-First)
 
-Weeks 1–4 pure simulation; hardware bring-up parallel on the bench (props off); real
-flight staged late. Each week has a Definition of Done.
+Weeks 1–4 are pure simulation, hardware bring-up runs in parallel on the bench with props
+off, and real flight is staged late.
 
-**Done** (results and the Week 4 envelope: `CLAUDE.md`):
+Completed milestones:
 
-| Week | Delivered |
+| Milestone | Landed |
 |---|---|
-| 0 — Procurement ✔ | Full BOM ordered (Appendix A); all Week-5 hardware in hand |
-| 1 — Architecture, safety case, sim env ✔ | SITL + Gazebo + ROS 2 up; scripted arm/takeoff/hold via pymavlink |
-| 2 — ROS 2 ↔ pymavlink bridge + patrol ✔ | Autonomous closed patrol loop, logged telemetry (43 laps, mean 29.51 s). Airframe fidelity deferred to Weeks 7–8 |
-| 3 — Perception pipeline ✔ (2026-07-15) | Simulated OAK-D depth, synthetic scenarios, detection node, 17-bag labeled library + regression harness; held-out test recall 100% |
-| 4 — Evasion logic & KF in the loop ✔ (2026-07-27) | Predictive KF + multi-hypothesis tracker + dodge trigger; closed detection → intercept → velocity-spike → alarm (mocked GPIO) over a 7-scenario battery. All four DoD criteria met; result is a capability envelope bounded by sensing, so Week 6 is what moves it |
-| 5 — Software lane ✔ (2026-07-31) | Supervisor state machine, payload node, clock guard, hardware config overlays, hardware preflight; 253 unit tests |
-| 6 — The 20 m/s answer ✔ (2026-08-10) | The project's central question, answered in simulation ahead of the hardware — see below and `docs/RESULTS.md` |
+| Procurement | Full BOM ordered (Appendix A); all Week-5 hardware in hand |
+| Architecture, safety case, simulation environment | SITL, Gazebo and ROS 2 up; scripted arm, takeoff and hold via pymavlink |
+| ROS 2 to pymavlink bridge and patrol | Autonomous closed patrol loop with logged telemetry: 43 laps, mean 29.51 s. Airframe fidelity deferred |
+| Perception pipeline | Simulated OAK-D depth, synthetic scenarios, detection node, 17-bag labelled library and regression harness; held-out recall 100% |
+| Evasion logic and Kalman filter in the loop | Predictive Kalman filter, multi-hypothesis tracker and dodge trigger, closing detection to intercept to velocity spike to alarm (mocked GPIO) over a 7-scenario battery. The resulting envelope is bounded by sensing |
+| Software lane | Supervisor state machine, payload node, clock guard, hardware config overlays, hardware preflight |
+| Sensor-requirement study | The reach and rate a 20 m/s dodge needs, measured in simulation ahead of the hardware |
 
-**Week 6 answered the project's central question.** A save is a **sigmoid in
-time-to-closest-approach**, `logit P = −22.271 + 27.910·tca`, LD50 **0.798 s**, measured
-over 310 on-course hover throws and independent of ball speed across nine speeds from 14
-to 29 m/s. In hover `range = speed × (tca_required + t_dead)`, and every maneuver-side
-lever is refuted. As built the maximum dodgeable ball speed is **~3.2 m/s**; 20 m/s needs
-**21.1 m** of reach on an 80 mm ball, and a 26 m sensor scores 28/29 head-on. That reach is
-bought by an **AR0234 global-shutter mono + 10 mm M12** (See3CAM_20CUG, $89, 13.5 g —
-*lighter* than the OAK-D Lite it replaces), at the cost of narrowing the defended sector to
-~±10° usable. The deficit was angular resolution, never headline range. Full derivation:
-`docs/RESULTS.md`.
+The sensor-requirement study is the one that answers the project's central question:
+probability of a save is a sigmoid in time-to-closest-approach with an LD50 of 0.798 s,
+independent of ball speed, so a 20 m/s dodge needs 21.1 m of reach on an 80 mm ball where
+the as-built OAK-D Lite caps the aircraft at ~3.2 m/s. The full derivation, the sensor
+spec it implies, and the sector cost are in `docs/RESULTS.md`.
 
-**Weeks 7–9 — out of scope.** The project closed at the end of the simulation phase on
-2026-08-10. The remaining weeks were physical: HITL and tethered hover, incremental real
-flight inside a netted enclosure with soft projectiles, and a sim-vs-real validation retro.
-They are not cancelled for cause — the simulation phase answered what it set out to answer.
-What hardware would still have to settle is recorded in `docs/RESULTS.md` §9.
+**Weeks 7–9 are out of scope for the simulation phase.** They are the physical work: HITL
+and tethered hover, incremental real flight inside a netted enclosure with soft
+projectiles, and sim-versus-real validation. What hardware would have to settle is listed
+in `docs/RESULTS.md` §9.
 
 ---
 
@@ -160,13 +154,13 @@ enclosure and kill-switch discipline is what actually bounds evasion testing.
 | 20 | Samsung 30Q 18650 cell | 2 | $13.98 | 18650 Battery Store |
 | | **Item subtotal (pre-tax/shipping)** | | **$1,149.21** | |
 
-**The one BOM change the campaign concluded, not purchased:** replace the OAK-D Lite
-(item 5) with a **stereo pair of e-con See3CAM_20CUG** (AR0234 global shutter, mono,
-$89 each, 13.5 g each) on matched **10 mm M12** lenses, on a rigid thermally-stable
-baseline bar. Net ~$218 and roughly **−15 g** — the upgrade is lighter than the part it
-replaces. This is what buys 26 m of reach on an 80 mm ball and so the 20 m/s objective;
-the OAK-D Lite's measured ~3.4 m caps the aircraft at ~3.2 m/s. Note the See3CAM_**24**CUG
-is colour — verified; do not order it for this role. Reasoning and the sector cost:
+**Proposed BOM change, not purchased.** Replace the OAK-D Lite (item 5) with a stereo
+pair of e-con See3CAM_20CUG (AR0234 global shutter, mono, $89 each, 13.5 g each) on
+matched 10 mm M12 lenses, mounted on a rigid, thermally stable baseline bar. Net ~$218
+and roughly −15 g, so the upgrade is lighter than the part it replaces. This is what
+buys 26 m of reach on an 80 mm ball, and therefore the 20 m/s objective; the OAK-D
+Lite's measured ~3.4 m caps the aircraft at ~3.2 m/s. The See3CAM_24CUG is the colour
+variant and is the wrong part for this role. Reasoning and the sector cost:
 `docs/RESULTS.md` §4.1 and §5.
 
 *Prices June 2026, several on sale. Not yet purchased: 3.3→5 V level shifter for the LED
