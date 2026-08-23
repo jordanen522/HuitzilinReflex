@@ -114,7 +114,7 @@ synthetic_depth_publisher:
     # 80 mm ball — models/projectile/model.sdf.
     ball_radius_m: 0.04
 
-    # ── The OAK-D Lite as rendered, all three axes ───────────────────────────
+    # The OAK-D Lite as rendered, all three axes
     # AXIS 1 — REACH. 3.4 m is the real depth detector's MEASURED reach, not a
     # design figure: it is what the rendered pipeline actually delivered, and it
     # is the number CLAUDE.md quotes when it says the aircraft as built is
@@ -144,7 +144,7 @@ synthetic_depth_publisher:
     # never binds at any range the gate flies.
     max_points_per_ball: 5000
 
-    # ── Depth error ──────────────────────────────────────────────────────────
+    # Depth error
     # Unchanged from synthetic_depth.yaml on purpose. sigma_depth(z) =
     # depth_sigma_m * (z / depth_sigma_ref_range_m)^2 applied along each
     # return's own bearing ray. At the gate's 3.4 m this collapses to
@@ -159,7 +159,7 @@ synthetic_depth_publisher:
     # every upstream stage healthy. Change only deliberately.
     per_point_depth_frac: 0.0
 
-    # ── AXIS 3 — RATE ────────────────────────────────────────────────────────
+    # AXIS 3 — RATE
     # 15 Hz, because that is what the rendered lane delivers and therefore what
     # Week 4 measured. Delivered rate is 60/ceil(60/requested), so 15.0 is
     # exact. Overridden by the launch file's sensor_rate_hz — see the header.

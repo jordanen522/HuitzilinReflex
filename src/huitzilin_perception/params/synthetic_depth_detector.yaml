@@ -75,7 +75,7 @@
 detector:
   ros__parameters:
 
-    # ── Diagnostics — all off, same as detector.yaml ──────────────────────────
+    # Diagnostics — all off, same as detector.yaml
     # debug_dump_dir costs ~40 ms/frame and invalidates every latency number
     # from the run. debug_funnel is chatty but cheap (1.4-2.3 ms/frame);
     # turn it on to read per-stage survivor counts for one specific throw.
@@ -87,14 +87,14 @@ detector:
     profile_window_frames: 30
     debug_dump_dir: ""
 
-    # ── Cloud transport ───────────────────────────────────────────────────────
+    # Cloud transport
     # Must match synthetic_depth.yaml's cloud_reliable / cloud_queue_depth. A
     # reliability mismatch means the subscription never connects to the
     # publisher and the topic looks alive while delivering nothing.
     cloud_reliable: true
     cloud_queue_depth: 5
 
-    # ── Input cloud axis convention ───────────────────────────────────────────
+    # Input cloud axis convention
     # synthetic_depth_publisher emits points in the gz sensor body frame
     # (X fwd, Y left, Z up) under the header frame camera_optical_frame, which
     # is exactly what ros_gz_bridge produces from the rendered depth camera.
@@ -102,7 +102,7 @@ detector:
     # would rotate the cloud 90 degrees and nothing would clear the ROI gate.
     cloud_convention: "gz_flu"
 
-    # ── ROI / range gate ──────────────────────────────────────────────────────
+    # ROI / range gate
     roi_min_range_m: 0.30
     roi_max_range_m: 28.00   # CHANGED from 5.00 — see the header for the rule
                              # that ties this to detection_range_m.
@@ -113,12 +113,12 @@ detector:
     # synthetic_depth.yaml, not here.
     roi_half_angle_deg: 45.0
 
-    # ── Voxel downsampling ────────────────────────────────────────────────────
+    # Voxel downsampling
     # 0.02 m resolves the 80 mm ball into ~27 voxels at 26 m (measured in
     # test_synthetic_depth.py); 0.05 m is coarser than the ball itself.
     voxel_leaf_m: 0.02
 
-    # ── Background model / frame differencing ────────────────────────────────
+    # Background model / frame differencing
     use_persistent_bg: false  # CHANGED from true — see the header.
     bg_map_leaf_m: 0.10       # inert while use_persistent_bg is false
     bg_map_ttl_s: 20.0        # inert
@@ -139,7 +139,7 @@ detector:
     # a ball-only cloud (peak ~32 post-voxel returns), kept for parity.
     fg_max_points: 5000
 
-    # ── Euclidean clustering ──────────────────────────────────────────────────
+    # Euclidean clustering
     cluster_tolerance_m: 0.20
     cluster_min_points: 5     # the 26 m ball yields ~27 post-voxel returns
     cluster_max_points: 500
@@ -154,15 +154,15 @@ detector:
     # synthetic_depth.yaml.
     cluster_max_extent_m: 0.35
 
-    # ── Centroid publishing ───────────────────────────────────────────────────
+    # Centroid publishing
     # ~3 pts; cluster_min_points is the size floor, not this.
     min_publish_score: 0.006
 
-    # ── Output topics ─────────────────────────────────────────────────────────
+    # Output topics
     threat_centroid_topic: "/threat/centroid"
     marker_topic: "/threat/marker"
 
-    # ── Egomotion compensation ────────────────────────────────────────────────
+    # Egomotion compensation
     # Requires odom with a valid orientation quaternion AND the
     # base_link -> camera_link -> camera_optical_frame static TF chain, which
     # week6_synthetic_depth.launch.py publishes for exactly this reason. Without

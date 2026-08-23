@@ -64,7 +64,7 @@ synthetic_depth_publisher:
     # 80 mm ball — models/projectile/model.sdf.
     ball_radius_m: 0.04
 
-    # ── The modelled optics: AR0234 class + 10 mm M12 (RESULTS.md §4.1/§5) ────
+    # The modelled optics: AR0234 class + 10 mm M12 (RESULTS.md §4.1/§5)
     # 26 m is the derived requirement at 20 m/s (P=0.95 even at the 90th
     # percentile dead time). The same lens narrows the cone to ±13.5° x ±11.0°,
     # and that loss is the whole price of the reach: `reach x half-angle ~ 351
@@ -90,7 +90,7 @@ synthetic_depth_publisher:
     # make something detect.
     max_points_per_ball: 5000
 
-    # ── Depth error ──────────────────────────────────────────────────────────
+    # Depth error
     # sigma_depth(z) = depth_sigma_m * (z / depth_sigma_ref_range_m)^2, applied
     # ALONG each return's own bearing ray. z = f*b/d, so a fixed disparity error
     # becomes a range error growing as z^2. Pinned to the 0.30 m at 26 m spec'd
@@ -115,7 +115,7 @@ synthetic_depth_publisher:
     # Measured in test_synthetic_depth.py. Change this only deliberately.
     per_point_depth_frac: 0.0
 
-    # ── Rate ─────────────────────────────────────────────────────────────────
+    # Rate
     # Gazebo's SceneBroadcaster runs at 60 Hz, so the delivered rate is
     # 60/ceil(60/requested) and nothing can outrun it. 60 Hz is the sensor
     # requirement in RESULTS.md §4.1 and the rate the headline 26 m / 20 m/s

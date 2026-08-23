@@ -26,7 +26,7 @@
 #      the row measured a SHORTER sensor than it claims and the offset rule
 #      below was violated -- fix the offset and re-fly, do not report the row.
 #
-# THE OFFSET RULE (measured 2026-08-08 over 13 flown cells). offset_forward_m
+# THE OFFSET RULE (measured over 13 flown cells). offset_forward_m
 # must clear the oracle gate by a margin, or the ball is already inside the
 # gate when the oracle unmutes and the cell silently delivers less reach than
 # it configures. Three things eat the margin between spawn and first report:
@@ -74,7 +74,7 @@ defaults:
   repeats: 3
 
 runs:
-  # ── the question ───────────────────────────────────────────────────────
+  # the question
   - id: B08
     description: "Head-on 20 m/s, true hit — the target case"
     speed_mps: 20.0
@@ -110,7 +110,7 @@ runs:
     # more opportunity to fire wrongly. Anything other than 0 here is a
     # regression that no 20 m/s success rate compensates for.
 
-  # ── continuity: the same harness against results we already have ───────
+  # continuity: the same harness against results we already have
   - id: B11
     description: "14 m/s dead-centre — B03 geometry; fidelity gate at range 3.4"
     speed_mps: 14.0

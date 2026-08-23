@@ -7,7 +7,7 @@
 
 evasion:
   ros__parameters:
-    # ── Kalman filter (fixed at node start) ──────────────────────────────
+    # Kalman filter (fixed at node start)
     process_accel_std: 3.0     # m/s^2 accel noise; absorbs drag/stereo mismatch
     meas_std_m: 0.15           # centroid measurement noise (stereo + clustering)
     # (forward, left, up) sigma in base_link, for a sensor whose depth and
@@ -18,7 +18,7 @@ evasion:
     meas_std_xyz_m: [0.0, 0.0, 0.0]
     init_vel_std: 15.0         # m/s prior; covers throws up to 14 m/s
     track_timeout_s: 0.5       # sim s of silence before a track is dropped
-    # ── Multi-hypothesis association (fixed at node start) ───────────────
+    # Multi-hypothesis association (fixed at node start)
     # The tracker keeps several candidate tracks instead of forcing one filter
     # to represent whatever centroid arrived last. Root cause it fixes
     # (measured): the detector emits ~1.4 false
@@ -34,13 +34,13 @@ evasion:
     # accepts anything in the room. 0.75 m covers 11 m/s of ball travel at the
     # 15 Hz detector rate, with the gate's margin on top.
     max_assoc_sigma_m: 0.75
-    # ── Trigger policy ───────────────────────────────────────────────────
+    # Trigger policy
     min_track_updates: 3       # confirmations before a dodge may fire
     threat_radius_m: 0.75      # predicted pass inside this radius -> dodge
     trigger_horizon_s: 1.5     # only dodge if TCA is sooner than this
     prediction_horizon_s: 3.0  # numeric closest-approach search window
     latency_budget_s: 0.15     # centroid stamp -> dodge command, sim s
-    # ── Dodge maneuver ───────────────────────────────────────────────────
+    # Dodge maneuver
     dodge_speed_mps: 1.5       # master doc: ~1.5 m/s velocity spike
     dodge_duration_s: 1.0      # how long the spike streams
     dodge_floor_m: 1.0         # SAFETY: no dodge may descend below this AGL.
@@ -59,7 +59,7 @@ evasion:
                                # 1.5 m/s dodge shed 2.5-3.9 m/s and left the
                                # drone ON the predicted line whenever the
                                # escape pointed along the cruise (measured
-                               # 2026-07-27: escape vs alignment r = -0.911,
+                               # escape vs alignment r = -0.911,
                                # min_dist r = -0.67). Cruise 4.2 + escape 1.5
                                # asks for 5.7; the cap is spent on the cruise
                                # term, never on the escape.
@@ -70,7 +70,7 @@ evasion:
     evade_cmd_rate_hz: 20.0    # /cmd/evade stream rate while evading
     auto_resume_patrol: true   # call /huitzilin/start_patrol true after recovery
 
-    # ── acceleration feedforward ────────────────────────────────────────────
+    # acceleration feedforward
     # A velocity-only setpoint makes the position controller discover the
     # acceleration for itself, and it does so gently: escape displacement was
     # measured rising at ~2 m/s^2 while the tilt ceiling permits
@@ -86,7 +86,7 @@ evasion:
     evade_accel_ff_mps2: 0.0
     evade_accel_topic: "/cmd/evade_accel"
 
-    # ── ALERT cue ───────────────────────────────────────────────────────────
+    # ALERT cue
     # Confirmation is the most expensive term in the reaction budget: three
     # updates at the measured 14.5 Hz cost 0.21 s, most of a 14 m/s ball's
     # flight inside detection range.
@@ -102,7 +102,7 @@ evasion:
     alert_min_track_updates: 2
     cue_timeout_s: 2.0
 
-    # ── vertical escape ─────────────────────────────────────────────────────
+    # vertical escape
     # Vertical is the axis a quadrotor is fastest on: collective thrust needs
     # no tilt, while a lateral escape must tilt before it translates. Off by
     # default because the measured null (|u_z| vs min_dist, r = -0.077) says

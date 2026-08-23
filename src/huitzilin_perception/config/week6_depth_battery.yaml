@@ -108,7 +108,7 @@ defaults:
   repeats: 3
 
 runs:
-  # ── the question ───────────────────────────────────────────────────────
+  # the question
   - id: D08
     description: "Head-on 20 m/s, true hit — the target case, through the REAL detector, n=30"
     speed_mps: 20.0
@@ -156,7 +156,7 @@ runs:
     # more warning and therefore more opportunity to fire wrongly, so anything
     # other than 0 here is worth reporting whatever the save rate above says.
 
-  # ── Fidelity gate: the same harness against results already in hand ─────
+  # Fidelity gate: the same harness against results already in hand
   # Flown on patrol at detection_range_m:=3.4 — the real rendered detector's
   # measured reach — not at 26.0 and not in hover. Scored on `dodged` against
   # the Week 4 patrol envelope (78/78 at <= 8 m/s, 0/17 at 14 m/s). Runs FIRST.

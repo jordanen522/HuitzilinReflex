@@ -2,8 +2,8 @@
 # iris_ar0234 depth camera -> ros_gz_bridge -> depth_noise_node -> here.
 #
 # DERIVED FROM params/detector.yaml AT REVISION e44032e. detector_node.py was
-# byte-identical for the other three lanes through 2026-08-21; as of
-# 2026-08-22 it carries the range-adaptive background-map fix below
+# byte-identical for the other three lanes until it gained the range-adaptive
+# background-map fix below
 # (bg_map_far_leaf_m/bg_map_range_split_m), opt-in and defaulted to 0.0/0.0 —
 # every other lane's behaviour is UNCHANGED unless it sets both explicitly,
 # which only this file does. This is a STANDALONE params file, not a partial
@@ -68,8 +68,7 @@
 # different experiment.
 #
 # ###################################################################
-# A PREDICTION, REGISTERED BEFORE THE FIRST RUN OF THIS FILE (2026-08-21),
-# so that if it comes true it is a prediction and not a rationalisation.
+# EXPECTED FAILURE MODE, written down before this file was first run.
 #
 # diff_threshold_m is 0.10 m and FIXED, while this lane's depth error is
 # 0.30 m at 26 m and grows as z^2. Frame differencing calls a return
@@ -81,7 +80,7 @@
 # and fills the lower band from there to the 35 m clip. A large share of
 # those pixels sit past 15 m.
 #
-# I THEREFORE EXPECT THIS FILE, AS WRITTEN, TO FLOOD: fg_max_points (5000)
+# This file, as written, is therefore expected to FLOOD: fg_max_points (5000)
 # tripped on most frames, few or no clusters, and few or no detections at
 # range. detector.yaml's own roi_max_range_m comment records the same
 # failure at a mere 8.0 m ROI on the wider OAK-D lens (S02 funnel:
@@ -105,7 +104,7 @@
 detector:
   ros__parameters:
 
-    # ── Diagnostics — all off, same as detector.yaml ──────────────────────────
+    # Diagnostics — all off, same as detector.yaml
     # debug_dump_dir costs ~40 ms/frame and invalidates every latency number
     # from the run. debug_funnel is chatty but cheap (1.4-2.3 ms/frame) and is
     # the tool that answers the prediction above — turn it on for a diagnostic
@@ -118,7 +117,7 @@ detector:
     profile_window_frames: 30
     debug_dump_dir: ""
 
-    # ── Cloud transport ───────────────────────────────────────────────────────
+    # Cloud transport
     # RELIABLE, and that is load-bearing rather than a default worth inheriting.
     # This lane's cloud is 800x650 organized XYZ = ~6.2 MB per message, far past
     # the 64 kB UDP datagram limit, so every frame is fragmented and BEST_EFFORT
@@ -138,7 +137,7 @@ detector:
     cloud_reliable: true
     cloud_queue_depth: 5
 
-    # ── Input cloud axis convention ───────────────────────────────────────────
+    # Input cloud axis convention
     # gz-sim PointCloudPacked stays in the gz sensor body frame (X fwd, Y left,
     # Z up); <optical_frame_id> renames the header only. depth_noise_node
     # preserves that convention exactly — it scales points along the ray and
@@ -148,7 +147,7 @@ detector:
     # sensor while reporting a clean run (docs/optics_probe.md).
     cloud_convention: "gz_flu"
 
-    # ── ROI / range gate ──────────────────────────────────────────────────────
+    # ROI / range gate
     roi_min_range_m: 0.30
     roi_max_range_m: 28.00   # CHANGED from 5.00 — see the header.
 
@@ -157,14 +156,14 @@ detector:
     # modelled sector lives in models/iris_ar0234/model.sdf, not here.
     roi_half_angle_deg: 45.0
 
-    # ── Voxel downsampling ────────────────────────────────────────────────────
+    # Voxel downsampling
     # 0.02 m resolves the 80 mm ball; 0.05 m is coarser than the ball itself.
     # The ball carries ~24 raw returns at 26 m through this lens (measured,
     # lab/probe_out/ar0234_800_26m.result.txt), so voxelization must not thin
     # it below cluster_min_points.
     voxel_leaf_m: 0.02
 
-    # ── Background model / frame differencing ────────────────────────────────
+    # Background model / frame differencing
     use_persistent_bg: true   # unchanged — see the header for why this lane
                               # keeps it while the synthetic lane drops it.
     bg_map_leaf_m: 0.10       # keep equal to diff_threshold_m
@@ -172,11 +171,11 @@ detector:
     bg_map_max_voxels: 400000
     bg_history_frames: 5
 
-    # 2026-08-22 — THE PREDICTION ABOVE CAME TRUE, confirmed live via
+    # CONFIRMED: the flood above happened, seen live via
     # debug_funnel on heldout_H16 (fg up to 176,191 points, most frames
     # skipped). Root cause, traced to the actual live code path (this lane
     # runs use_persistent_bg:true with a valid odom TF, so it is
-    # VoxelBackgroundMap.foreground()'s voxel-occupancy dilation that gates
+    # VoxelBackgroundMap.foreground's voxel-occupancy dilation that gates
     # foreground here, NOT diff_threshold_m above -- that key is dead on this
     # configuration): bg_map_leaf_m is a FIXED 0.10 m, giving a fixed
     # leaf..leaf*sqrt(3) dilation tolerance, while modelled depth error grows
@@ -203,7 +202,7 @@ detector:
 
     fg_max_points: 5000
 
-    # ── Euclidean clustering ──────────────────────────────────────────────────
+    # Euclidean clustering
     cluster_tolerance_m: 0.20
     cluster_min_points: 5
     cluster_max_points: 500
@@ -218,25 +217,25 @@ detector:
     # 28 m ball isn't fragmented at the split step).
     cluster_max_extent_m: 0.64   # CHANGED from 0.35 — see the header.
 
-    # 2026-08-22 RT-set recall root cause: the single 0.64 m ceiling above,
+    # RT-set recall root cause: the single 0.64 m ceiling above,
     # applied to every cluster regardless of its own range, let near/mid-
     # range clutter fragments (up to 0.64 m across) into ball_sized
     # candidacy, where they out-pointed the genuine (small, close-range)
-    # ball cluster. This applies required_cluster_max_extent_m() PER
+    # ball cluster. This applies required_cluster_max_extent_m PER
     # CANDIDATE at its own detection range instead — e.g. ~0.10 m at 5 m,
     # 0.64 m only right at the 28 m ROI ceiling — so cluster_max_extent_m
     # above still bounds what cluster_and_split will even consider, but this
     # is the gate that decides what actually looks like the ball.
     range_adaptive_extent: true
 
-    # ── Centroid publishing ───────────────────────────────────────────────────
+    # Centroid publishing
     min_publish_score: 0.006
 
-    # ── Output topics ─────────────────────────────────────────────────────────
+    # Output topics
     threat_centroid_topic: "/threat/centroid"
     marker_topic: "/threat/marker"
 
-    # ── Egomotion compensation ────────────────────────────────────────────────
+    # Egomotion compensation
     # Needs odom with a valid orientation quaternion AND the
     # base_link -> camera_link -> camera_optical_frame static TF chain, which
     # week7_rendered.launch.py publishes for exactly this reason. Without the

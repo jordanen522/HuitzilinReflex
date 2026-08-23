@@ -11,7 +11,7 @@
 detector:
   ros__parameters:
 
-    # ── Diagnostics ───────────────────────────────────────────────────────────
+    # Diagnostics
     # Per-stage survivor counts (raw -> range -> angle -> voxel -> fg ->
     # clusters -> ball_sized -> score). Chatty; enable only while diagnosing a
     # specific throw. Not a latency suspect — measured at 1.4-2.3 ms/frame.
@@ -32,7 +32,7 @@ detector:
     # consistency number from a dumping run is valid. Empty string = off.
     debug_dump_dir: ""
 
-    # ── Cloud transport ───────────────────────────────────────────────────────
+    # Cloud transport
     # /oak/points is a 7.37 MB sample and BEST_EFFORT loses ~75% of it to UDP
     # fragmentation (3.99 Hz vs 14.43 Hz reliable). Set false on real hardware,
     # where DepthAI publishes best-effort. The queue depth drops clouds under
@@ -40,14 +40,14 @@ detector:
     cloud_reliable: true
     cloud_queue_depth: 5
 
-    # ── Input cloud axis convention ───────────────────────────────────
+    # Input cloud axis convention
     # gz-sim PointCloudPacked stays in the gz sensor body frame (X fwd, Y left,
     # Z up); <optical_frame_id> renames the header only. "gz_flu" remaps points
     # to REP-103 optical at ingest. Set "optical" for a real OAK-D (DepthAI
     # already outputs optical-convention clouds).
     cloud_convention: "gz_flu"
 
-    # ── ROI / range gate ──────────────────────────────────────────────
+    # ROI / range gate
     # Keep only points within this depth range (metres).
     # Reliable OAK-D Lite working band; clip edges that are too noisy.
     roi_min_range_m: 0.30
@@ -61,12 +61,12 @@ detector:
     # Points outside this cone ahead of the camera are discarded.
     roi_half_angle_deg: 45.0   # widened 40->45 for oblique misses (S04)
 
-    # ── Voxel downsampling ────────────────────────────────────────────
+    # Voxel downsampling
     # Leaf size for voxel grid downsampling (metres).
     # Larger = faster but misses small objects.
     voxel_leaf_m: 0.02   # 0.05 m voxels are coarser than the 80 mm ball and collapse it to 1-2 points; 0.02 m resolves ~10-20.
 
-    # ── Background model / frame differencing ────────────────────────────────
+    # Background model / frame differencing
     # Persistent voxel-hashed background map in the fixed frame, replacing the
     # rolling deque below. The deque only remembers 0.267 s, so terrain the
     # camera newly sees while patrolling reads as novel, fg floods to ~48k
@@ -91,7 +91,7 @@ detector:
     # projectile. Also bounds clustering cost.
     fg_max_points: 5000
 
-    # ── Euclidean clustering ──────────────────────────────────────────
+    # Euclidean clustering
     # Points within this radius (metres) are merged into the same cluster.
     cluster_tolerance_m: 0.20
 
@@ -129,16 +129,16 @@ detector:
     # Recall measured on this library is therefore a window statistic, not a
     # detection claim — see docs/KNOWN_ISSUES.md.
 
-    # ── Centroid publishing ───────────────────────────────────────────
+    # Centroid publishing
     # Minimum confidence score [0–1] to publish a centroid.
     # (Score = normalised cluster size; keeps the largest coherent blob.)
     min_publish_score: 0.006  # ~3 pts; let cluster_min_points be the size floor, not the score gate.
 
-    # ── Output topic ──────────────────────────────────────────────────────────
+    # Output topic
     threat_centroid_topic: "/threat/centroid"
     marker_topic: "/threat/marker"
 
-    # ── Egomotion compensation ────────────────────────────────────────
+    # Egomotion compensation
     # Fold /huitzilin/odom into TF and difference clouds in the fixed frame
     # below instead of the moving camera frame. Requires odom with a valid
     # orientation quaternion (bags recorded from b0eedd5 onward); bags without

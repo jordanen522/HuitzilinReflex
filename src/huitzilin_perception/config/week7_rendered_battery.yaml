@@ -57,7 +57,7 @@ defaults:
   repeats: 3
 
 runs:
-  # ── The matched envelope: one sensor, one geometry, three speeds ────────
+  # The matched envelope: one sensor, one geometry, three speeds
   # Only speed_mps differs across R01-R03; report them separately. Equal n is
   # deliberate — unequal arms invite reading a difference in interval width as a
   # difference in effect — and n=30 matches the oracle lane's 28/29 cell, so the
@@ -98,7 +98,7 @@ runs:
     # and the cell must be reported as two halves rather than one rate. Failures
     # clustered in the last third of the rep index are drift, not envelope.
 
-  # ── Negative control ────────────────────────────────────────────────────
+  # Negative control
   - id: R04
     description: "20 m/s wide miss 1.5 m — must NOT dodge; real scene, real clutter"
     speed_mps: 20.0
@@ -113,7 +113,7 @@ runs:
     # measured. The ball is also detected in these throws, so a fire has two
     # possible causes; read the log to tell them apart and report separately.
 
-  # ── Fidelity gate: the same harness against results already in hand ─────
+  # Fidelity gate: the same harness against results already in hand
   # Baseline world, baseline camera, noise off, patrol, at detector.yaml's own
   # 5 m ROI. Scored on `dodged` against the Week 4 patrol envelope. Runs FIRST.
   - id: G01

@@ -4,7 +4,7 @@
 # Each entry drives spawn_projectile.py and labels the resulting rosbag.
 #
 # FIELDS
-# ------
+#
 # id           : unique string ID (used as bag filename prefix + label key)
 # label        : "positive" | "negative"
 # description  : human-readable summary
@@ -19,7 +19,7 @@
 # notes        : anything the detector needs to watch out for
 #
 # COVERAGE DESIGN — ORIGINALS (S01–S12, N01–N05)
-# ----------------------------------------------
+#
 # Positives (should trigger /threat/centroid):
 #   - Speed: slow (4 m/s), medium (8 m/s), fast (14 m/s)
 #   - Angle: head-on (0°), oblique left (−30°), oblique right (+30°)
@@ -34,8 +34,8 @@
 #   - Object far below glide path (outside ROI range gate)
 #   Budget ≥ 25% negatives to keep false-positive rate meaningful.
 #
-# COVERAGE DESIGN — TUNE SET (T01–T14, added 2026-08-16)
-# -----------------------------------------------------
+# COVERAGE DESIGN — TUNE SET (T01–T14)
+#
 # Purpose: give threshold fitting a set of its own, so the 17 originals can be
 # scored as genuine held-out data. See the SPLITS block below for why that was
 # not true before.
@@ -92,7 +92,7 @@
 #     entries are left exactly as they were captured.
 #
 # roi_max_range_m COUPLING WARNING (T-positives)
-# ------------------------------------------------
+#
 # Every T-positive spawns outside the shipped roi_max_range_m (5.00 m), at
 # offset_forward_m 6.6-8.5 m, specifically so its bag contains the
 # acquisition transient (design requirement 5, capture_scenario.sh). Raising
@@ -111,13 +111,13 @@
 # constraint does not exist.
 #
 # ROSBAG NAMING CONVENTION
-# ------------------------
+#
 # week3_<id>_<YYYYMMDD_HHMMSS>.mcap
 # Label sidecar: week3_<id>.label.yaml (same directory)
 
 scenarios:
 
-  # ── POSITIVES: head-on, varying speed ────────────────────────────────────
+  # POSITIVES: head-on, varying speed
   - id: S01
     label: positive
     description: "Head-on, slow (4 m/s), direct hit"
@@ -154,7 +154,7 @@ scenarios:
     time_to_closest_s: 0.43
     notes: "Fast object — will cross the frame quickly; fewer frames to cluster."
 
-  # ── POSITIVES: oblique approach ──────────────────────────────────────────
+  # POSITIVES: oblique approach
   - id: S04
     label: positive
     description: "Oblique right (+30°), medium speed, direct hit"
@@ -191,7 +191,7 @@ scenarios:
     time_to_closest_s: 0.43
     notes: "Worst-case oblique fast; widest ROI half-angle may be needed."
 
-  # ── POSITIVES: near-miss (dangerous — must detect) ────────────────────────
+  # POSITIVES: near-miss (dangerous — must detect)
   - id: S07
     label: positive
     description: "Head-on, medium, near-miss (0.5 m)"
@@ -216,7 +216,7 @@ scenarios:
     time_to_closest_s: 0.43
     notes: "Fast near-miss — hardest detection window."
 
-  # ── POSITIVES: wider miss (should detect, Week 4 decides to dodge) ────────
+  # POSITIVES: wider miss (should detect, Week 4 decides to dodge)
   - id: S09
     label: positive
     description: "Head-on, medium, wide miss (1.5 m)"
@@ -241,7 +241,7 @@ scenarios:
     time_to_closest_s: 1.25
     notes: "Edge-of-regime: slow + oblique + wide miss. Still positive label."
 
-  # ── TRAIN/TEST SPLIT POSITIVE (held-out) ─────────────────────────────────
+  # TRAIN/TEST SPLIT POSITIVE (held-out)
   - id: S11
     label: positive
     description: "Head-on, medium speed, direct hit — held-out test set"
@@ -266,7 +266,7 @@ scenarios:
     time_to_closest_s: 0.5
     notes: "Held-out. Challenges oblique detection at high speed."
 
-  # ── NEGATIVES: no object ─────────────────────────────────────────────────
+  # NEGATIVES: no object
   - id: N01
     label: negative
     description: "No object spawned, drone patrolling normally"
@@ -328,11 +328,11 @@ scenarios:
     time_to_closest_s: 0
     notes: "Held-out. 60-second clean patrol segment. FP rate measured here."
 
-  # ===== TUNE SET (T01–T14) ================================================
+  # TUNE SET (T01–T14)
   # The only split thresholds may be fitted against. Parameter values are
   # disjoint from S01–S12 / N01–N05 by construction — see COVERAGE DESIGN.
 
-  # ── TUNE POSITIVES: head-on, varying speed ───────────────────────────────
+  # TUNE POSITIVES: head-on, varying speed
   - id: T01
     label: positive
     description: "Head-on, slow (6 m/s), direct hit"
@@ -369,7 +369,7 @@ scenarios:
     time_to_closest_s: 0.5
     notes: "Fast anchor (8.5 / 17.0 = 0.50 s). Range gate entered at ~0.21 s, so only ~0.24 s (~3.6 clouds) inside the ROI — the frame-count-limited end of the tune set."
 
-  # ── TUNE POSITIVES: oblique approach ─────────────────────────────────────
+  # TUNE POSITIVES: oblique approach
   - id: T04
     label: positive
     description: "Shallow oblique right (+15°), medium speed"
@@ -430,7 +430,7 @@ scenarios:
     time_to_closest_s: 0.4
     notes: "Worst case: fast AND oblique. True closest approach 6.8*sin(22°) = 2.55 m. Inside both gates for only ~0.19 s (~3 clouds), so this is the scenario cluster_min_points changes will move first (min_track_updates lives in evasion.yaml / evasion_node.py, not the detector -- score_bags scores only /threat/centroid from the detector, so this split cannot referee that threshold). Expect it to be the tune set's own S08 if anything is."
 
-  # ── TUNE POSITIVES: wider miss ───────────────────────────────────────────
+  # TUNE POSITIVES: wider miss
   - id: T09
     label: positive
     description: "Head-on, slow, wide miss (2.0 m)"
@@ -455,7 +455,7 @@ scenarios:
     time_to_closest_s: 1.1
     notes: "Edge-of-regime like S10 (slow + oblique + wide miss) at disjoint values. The miss offset partly CANCELS the crossing geometry here: 6.6*sin(-35°) + 0.9*cos(-35°) = -3.79 + 0.74 = -3.05 m, so the true approach is 3.05 m and not the nominal 0.9 m."
 
-  # ── TUNE NEGATIVES ───────────────────────────────────────────────────────
+  # TUNE NEGATIVES
   - id: T11
     label: negative
     description: "No object, drone changing altitude (vertical egomotion)"
@@ -506,7 +506,7 @@ scenarios:
     notes: "No spawn. 45 s of straight-leg patrol with no manoeuvre. This is the tune set's false-positive floor — the analogue of N01/N05, which are now off-limits for tuning."
 
 
-  # == HELD-OUT SET (H01-H18, HN01-HN06) - added 2026-08-21 ==================
+  # HELD-OUT SET (H01-H18, HN01-HN06)
   #
   # NEVER tune against these bags - not once, not to debug a threshold, not
   # just to look. Scored ONCE per frozen configuration, via
@@ -515,7 +515,7 @@ scenarios:
   #
   # WHY IT EXISTS. `test` carries TWO positives and `train` was fitted on, so
   # neither is enough to measure recall on scenarios the detector never saw
-  # -- and no bag captured before 2026-08-21 records /gz/dynamic_poses, so
+  # -- and none of the earlier bags record /gz/dynamic_poses, so
   # none of them can even say whether a detection was OF THE BALL rather
   # than of terrain.
   #
@@ -564,7 +564,7 @@ scenarios:
   # detection_window_s - and it is NOT the truth used for attribution, which
   # comes from /gz/dynamic_poses.
 
-  # -- HELD-OUT POSITIVES ---------------------------------------------------
+  # HELD-OUT POSITIVES
 
   - id: H01
     label: positive
@@ -818,7 +818,7 @@ scenarios:
     time_to_closest_s: 1.550
     notes: "HOVER. vz0 7.60 m/s, apex 2.95 m at 15.5 m, max elevation 10.8 deg against a +/-11 deg sector. True launch speed 21.40 m/s, +7.0% over the label."
 
-  # -- HELD-OUT NEGATIVES ---------------------------------------------------
+  # HELD-OUT NEGATIVES
   # Six, keeping the library's >= 25 % negative budget (6/24 = 25 %). Scored
   # for FALSE POSITIVES only, on their own denominator, and NEVER merged into
   # the recall fraction.
@@ -907,7 +907,7 @@ scenarios:
     time_to_closest_s: 1.550
     notes: "HOVER. 5.5 deg off-axis, so the ball IS in sector and SHOULD be detected: those detections are MATCHED and are not false positives. What this row measures is whether a real object at a wide miss also generates unmatched clutter. Its dodge-side meaning - trigger discrimination - belongs to the battery, not here."
 
-  # ===== RENDERED-LANE TUNE SET (RT01–RT10, added 2026-08-22) ================
+  # RENDERED-LANE TUNE SET (RT01–RT10)
   # Retuning the rendered detector (params/rendered_detector.yaml) needs a
   # tune split captured in the same world, analogous to T01-T14 -- NOT
   # T01-T14 itself, which is the OAK-D/week3 world and the wrong sensor
@@ -1072,9 +1072,9 @@ scenarios:
     time_to_closest_s: 1.556
     notes: "HOVER. atan(11.5/28.0) = 22.3 deg, outside the horizontal sector for the whole flight, at the far-map's own range -- tests that sector rejection still holds when the far map is the one running."
 
-# ── SPLITS ────────────────────────────────────────────────────────────────────
+# SPLITS
 # tune  : T01–T14. The ONLY split detector thresholds may be fitted against.
-#         Added 2026-08-16 for exactly that purpose; no threshold has been
+#         Added for exactly that purpose; no threshold has been
 #         fitted to it yet at the time of writing.
 # train : S01–S10, N01–N04. HISTORICAL, and tuned-against: Week 3 fitted the
 #         shipped detector.yaml on these bags scenario by scenario (its comments
