@@ -48,7 +48,7 @@ __all__ = [
     "void_reason",
 ]
 
-# ── the constants of the match gate, all from the pre-registration ──────────
+# ── the constants of the match gate ──────────────────────────────────────
 
 #: Sigmas of modelled depth error admitted as "the same object". 3 sigma admits
 #: ~99.7 % of true detections; it is the reason a correct detection at 26 m,
@@ -130,17 +130,17 @@ def void_reason(label: str, ball_track, drone_track):
     """Why this scenario cannot be scored at all, or None if it can.
 
     VOID IS NOT A FAILURE AND NOT A PASS. It means the bag cannot answer the
-    question, so it is re-captured -- and per the pre-registration it stays in
-    the denominator while that happens, so voiding can never shrink a set.
+    question, so it is re-captured -- and it stays in the denominator while
+    that happens, so voiding can never shrink a set.
 
     Two conditions:
       - a POSITIVE with no projectile truth. There is nothing to match against,
         and scoring it would silently record a legitimate detection as a miss.
         Negatives are exempt: most of them have no projectile on purpose, and
         voiding them would delete the false-positive measurement.
-      - ANY scenario with no drone truth (pre-registration amendment A2). The
-        match radius needs each detection's range from the camera, which comes
-        from the drone's own transform, so without it there is no gate to apply.
+      - ANY scenario with no drone truth. The match radius needs each
+        detection's range from the camera, which comes from the drone's own
+        transform, so without it there is no gate to apply.
     """
     if not drone_track:
         return ("no drone transform in /gz/dynamic_poses — the match radius "

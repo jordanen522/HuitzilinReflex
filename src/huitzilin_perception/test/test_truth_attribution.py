@@ -70,8 +70,8 @@ def test_match_radius_at_short_range_is_the_floor():
 
 
 def test_match_radius_adds_one_frame_of_stamp_skew():
-    """20 m/s x 20 ms = 0.40 m. Not negligible at the speed under study, and
-    fixed in the pre-registration rather than fitted to a miss."""
+    """20 m/s x 20 ms = 0.40 m. Not negligible at the speed under study, and a
+    constant chosen up front rather than fitted to a miss."""
     assert (match_radius_m(26.0, 20.0) - match_radius_m(26.0, 0.0)
             == pytest.approx(20.0 * STAMP_SKEW_S))
 
