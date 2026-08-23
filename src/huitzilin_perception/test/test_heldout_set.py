@@ -52,7 +52,7 @@ N_NEGATIVES = 6
 
 @pytest.fixture(scope="module")
 def matrix():
-    return yaml.safe_load(io.open(MATRIX, encoding="utf-8"))
+    return yaml.safe_load(MATRIX.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
