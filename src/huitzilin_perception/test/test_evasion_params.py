@@ -107,7 +107,7 @@ def test_unknown_keys_are_accepted_but_not_added_to_the_shadow_dict():
     assert "not_a_parameter" not in n._p
 
 
-# ── anisotropic measurement covariance (meas_std_xyz_m) ──────────────────────
+# --- anisotropic measurement covariance (meas_std_xyz_m) ---------------------
 #
 # The gap this closes: nothing ever passed the tracker a per-measurement R,
 # so the filter always trusted an isotropic meas_std_m even when the real

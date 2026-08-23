@@ -52,7 +52,7 @@ import yaml
 from huitzilin_perception.score_bags_logic import SPAWN_LEAD_S
 
 
-# ── ROS import surface, only if the real one is missing ───────────────────────
+# --- ROS import surface, only if the real one is missing ---------------------
 
 _STUBBED: list = []
 
@@ -117,7 +117,7 @@ def teardown_module(module):
         sys.modules.pop("huitzilin_perception.score_bags", None)
 
 
-# ── A ScorerNode with every I/O path replaced, and nothing else ───────────────
+# --- A ScorerNode with every I/O path replaced, and nothing else -------------
 
 BAG_START = 1000.0
 GOOD_TTC = 1.5
@@ -199,7 +199,7 @@ def _sidecar(window_s, ttc=GOOD_TTC):
     return {"detection_window_s": window_s, "time_to_closest_s": ttc}
 
 
-# ── The tests ────────────────────────────────────────────────────────────────
+# --- The tests ---------------------------------------------------------------
 
 def test_one_inverted_window_does_not_abort_the_whole_scoring_run(tmp_path):
     """
@@ -299,7 +299,7 @@ def test_a_well_formed_library_run_is_untouched_by_the_guard(tmp_path):
     assert "PASS" in report
 
 
-# ── The console is the secondary sink (fix round 4, MEDIUM-A) ────────────────
+# --- The console is the secondary sink (fix round 4, MEDIUM-A) ---------------
 
 class _NonUtf8Stdout:
     """
@@ -386,7 +386,7 @@ def test_the_degraded_console_still_carries_every_number(
     )
 
 
-# ── §11 enforcement: no unguarded window-refusing call site ──────────────────
+# --- §11 enforcement: no unguarded window-refusing call site ----------------
 #
 # Round 3 guarded the two calls in _score_one that can refuse a window, and
 # nothing stopped a THIRD from being added outside a try — which restores

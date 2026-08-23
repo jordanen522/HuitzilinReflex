@@ -1,56 +1,37 @@
-"""
-null_attribution_mc.py — the Monte Carlo harness behind Task 5c's null table.
+"""Monte Carlo null model for closing-ball attribution.
 
-NOT a pytest module (no `test_` prefix, so pytest does not collect it).
-test_score_bags_logic.py imports it and pins one published figure; run it
+Not a pytest module (no `test_` prefix, so pytest does not collect it).
+test_score_bags_logic.py imports it and pins the published figures; run it
 standalone to reproduce the whole table:
 
     PYTHONPATH=src/huitzilin_perception \
       python3 src/huitzilin_perception/test/null_attribution_mc.py
 
-Shipped because two load-bearing claims rest on it (Task 5c fix round 1,
-MEDIUM-5): "the reimplementation of the 5b rule reproduces the reviewer's
-published table", and "at the measured in-window counts the 5c rule's noise
-attribution rate is <interval>, so 0 of 12 is below the noise floor". Neither
-could be re-run by anyone before this file existed -- and the first time
-anyone did re-run the second one, in fix round 2, the shipped interval turned
-out to be wrong (see MEASURED_N_WIN below). Running this file prints both.
+The null model: a bag's in-window /threat/centroid stream, if it contains no
+ball and no tracking whatsoever, is n detections whose ranges are independent
+draws with no closing physics at all.
 
-THE NULL MODEL
---------------
-A bag's in-window /threat/centroid stream, if it contains no ball and no
-tracking whatsoever, is n detections whose ranges are independent draws with
-no closing physics at all:
+  - n detections at the depth camera's DEPTH_CLOUD_HZ (15 Hz), consecutive and
+    evenly spaced -- the arrival pattern most favourable to the rules, since
+    gaps only break runs.
+  - ranges iid Uniform[roi_min_range_m, roi_max_range_m] = [0.30, 5.00] m, the
+    ROI band the detector can report at all.
+  - no correlation between successive ranges. This is what makes the model
+    conservative in the direction that matters: real false-positive ranges are
+    clustered (successive terrain patches at similar depths), and clustering
+    produces MORE long monotone runs than independence, not fewer.
 
-  - n detections, timestamps at the depth camera's DEPTH_CLOUD_HZ (15 Hz),
-    consecutive and evenly spaced — the densest, most favourable-to-the-rule
-    arrival pattern, since gaps only break runs.
-  - ranges iid Uniform[roi_min_range_m, roi_max_range_m] = [0.30, 5.00] m,
-    the ROI band the detector can report at all.
-  - no correlation between successive ranges. This is the assumption that
-    makes the model CONSERVATIVE in the direction that matters: real FP
-    ranges are clustered (successive terrain patches at similar depths), and
-    clustering produces MORE long monotone runs than independence, not
-    fewer. So the real spurious-attribution rate should be at least this
-    high, and the measured control is indeed worse than this null predicts.
+200_000 trials per (n, rule) point, seeded, so the table is reproducible.
 
-TRIAL COUNT: 200_000 per (n, rule) point, the same count the Task 5b
-reviewer used, seeded so the table is reproducible.
+The model is not a model of the detector. It answers one question -- how often
+does a decision rule fire on structureless input? -- which a rule claiming to
+identify a closing ball must answer before its firing count means anything.
 
-WHAT THE MODEL IS NOT
----------------------
-It is not a model of the detector. It answers exactly one question — "how
-often does this decision rule fire on structureless input?" — which is the
-question a rule that claims to identify a closing ball has to answer before
-its firing count means anything.
-
-Note the 5b sign rule is SCALE- AND DISTRIBUTION-FREE: it reads only the
-sign of successive differences, so its curve depends on n alone and not on
-the range bounds. That is why its reproduction of the reviewer's published
-figures is an exact check on this harness rather than a coincidence of
-parameter choice. The 5c rate rule is not scale-free — it depends on the
-range bounds, the sample rate and the band — so its column is only as good
-as the three constants above.
+The sign rule is scale- and distribution-free: it reads only the sign of
+successive differences, so its curve depends on n alone and not on the range
+bounds. The rate rule is not scale-free -- it depends on the range bounds, the
+sample rate and the speed band -- so its column is only as good as the three
+constants below.
 """
 
 from __future__ import annotations
@@ -70,25 +51,17 @@ ROI_MAX_RANGE_M = 5.00   # detector.yaml
 DEFAULT_TRIALS = 200_000
 DEFAULT_SEED = 20260817
 
-# ── the published figures, and the measurement they were computed FROM ──────
+# --- the published figures, and the measurement they were computed FROM ------
 #
-# Task 5c fix round 2, HIGH (F2-1). The three null-model figures quoted in
-# detector.yaml were computed at ONE PARTICULAR n_win vector and then went
-# stale when the fix round 1 window change moved that vector -- the previous
-# round's (13, 3, 8, 11, 5, 4, 3, 7, 4, 16, 4, 5) became the one below, and
-# nobody recomputed. The published interval's floor of 0.10 was in fact never
-# right at EITHER vector; the true floor sits at n = 3 (S02 and S07).
-#
-# So the vector lives here, in code, next to the figures it produces, and
-# test_score_bags_logic.py recomputes the figures from it and asserts they
-# still match. A future window change now has to move all three together or
-# fail a test -- which is what the earlier version of this block was supposed
-# to guarantee and could not, being prose.
+# The three null-model figures detector.yaml quotes are only valid at ONE n_win
+# vector, and any change to the scoring window moves that vector. So the vector
+# lives here in code, beside the figures it produces, and test_score_bags_logic
+# recomputes the figures from it and asserts they still match -- a window change
+# now has to move all three together or fail a test.
 #
 # PROVENANCE: n_win per original positive, S01..S12, from the corrected-window
-# scoring run of 2026-08-17 (Dell artifacts week3_regression_20260817_163942
-# train + _164822 test, tabulated in task-5c-fix1-report.md section 9). These
-# are MEASURED counts, an input to the null model and not an output of it.
+# scoring run (Dell artifacts week3_regression_20260817_163942 train + _164822
+# test). These are MEASURED counts, an input to the null model, not an output.
 MEASURED_N_WIN = (10, 3, 8, 11, 5, 4, 3, 7, 4, 12, 4, 5)
 MEASURED_N_WIN_IDS = ("S01", "S02", "S03", "S04", "S05", "S06",
                       "S07", "S08", "S09", "S10", "S11", "S12")
@@ -114,11 +87,9 @@ def null_stream(
 
 
 def fires_sign_rule(points: list[tuple[float, float]]) -> bool:
-    """
-    Task 5b's refuted rule: a run of >= 3 strictly decreasing ranges, sign
-    only, with NO gap bound (5b had none). At 15 Hz every gap is 0.067 s, so
-    passing float("inf") only makes the reproduction exact by construction
-    rather than by luck.
+    """The refuted sign rule: a run of >= 3 strictly decreasing ranges, sign
+    only, with no gap bound. At 15 Hz every gap is 0.067 s, so max_gap_s=inf
+    makes the reproduction exact by construction rather than by luck.
     """
     return longest_closing_run(points, max_gap_s=float("inf")) >= \
         DEFAULT_MIN_CLOSING_RUN
@@ -128,10 +99,9 @@ def fires_rate_rule(
     points: list[tuple[float, float]],
     ball_speed_mps: float = LIBRARY_MAX_BALL_SPEED_MPS,
 ) -> bool:
-    """
-    Task 5c's replacement, run at the LIBRARY MAXIMUM band (3.49, 20.49] —
-    the most permissive band any scenario gets, so the noise rate reported
-    is an upper bound over the library rather than a best case.
+    """The replacement rate rule, run at the library-maximum band
+    (3.49, 20.49] -- the most permissive band any scenario gets, so the noise
+    rate reported is an upper bound over the library, not a best case.
     """
     return attribute_closing_ball(points, ball_speed_mps)["attributable"]
 
@@ -153,18 +123,18 @@ def table(ns=(5, 10, 15, 20, 30, 50), trials: int = DEFAULT_TRIALS) -> None:
 
 
 def null_summary(n_win=MEASURED_N_WIN, trials: int = DEFAULT_TRIALS) -> dict:
-    """
-    The three figures detector.yaml quotes, computed from ONE n_win vector.
+    """The three figures detector.yaml quotes, computed from ONE n_win vector.
 
     Returns {"n_win", "rates", "rate_min", "rate_max", "p_none", "expected"}.
 
-      rates    -- P(the 5c rate rule fires | null) per scenario, in n_win order
+      rates    -- P(the rate rule fires | null) per scenario, in n_win order
       p_none   -- P(zero of the len(n_win) positives attributes | null),
                   the scenarios treated as independent draws
       expected -- E[number of attributions | null] = sum(rates)
 
-    p_none is the probability the OBSERVED 0-of-12 arises from pure noise, so
-    it is the number that says how decisive 0/12 is. It is NOT a small number.
+    p_none is the probability the observed 0-of-12 arises from pure noise, so
+    it is what says how decisive 0/12 is. At the measured n_win it is 0.160 --
+    not a small number.
     """
     rates = [p_fires(fires_rate_rule, n, trials) for n in n_win]
     p_none = 1.0

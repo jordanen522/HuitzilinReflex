@@ -1,74 +1,22 @@
 #!/usr/bin/env python3
-"""hz_counterfactual.py — did the DODGE produce the miss, or did the throw?
+"""Separate a dodge that saved the aircraft from a throw that was never on target.
 
-The gap this closes. dodge_battery scores success as
-`dodged and min_dist_m > hit_radius_m`, and only evaluates off_target when NO
-dodge fired (dodge_battery.py line 811). So on every run that DID dodge, a
-throw that was never going to hit is indistinguishable from a dodge that
-saved the aircraft. A 78/78 built that way may be measuring the harness's aim
-error rather than the vehicle.
+Reads /gz/dynamic_poses and the evade event stream from a live run and writes one
+CSV row per throw: actual_min_m (closest ball-drone approach as flown),
+counterfactual_min_m (closest approach against the pre-dodge cruise velocity
+extrapolated forward), delta_m, fit_resid_m, and a verdict
+(WOULD_HAVE_MISSED / DODGE_SAVED / DODGE_FAILED / DODGE_HURT / NO_DODGE).
+The ball is ballistic and unaffected by the dodge, so its recorded track is
+already the counterfactual ball path; only the drone is extrapolated, and both
+minima are taken over the same full episode.
 
-Method. The ball is ballistic and completely unaffected by the dodge, so its
-RECORDED ground-truth track is already the counterfactual ball path -- nothing
-needs propagating or modelling (no drag or gravity assumptions enter). Only the
-drone has to be counterfactualised: fit its constant velocity over the window
-before the dodge command and extrapolate that straight line forward. That is
-precisely "what if it had kept cruising".
-
-    actual_min_m         = min |ball(t) - drone_actual(t)|          over t
-    counterfactual_min_m = min |ball(t) - drone_cruising(t)|        over t
-    delta_m              = actual - counterfactual      (dodge's contribution)
-
-Both minima are taken over the SAME full episode. Before the dodge commits the
-two paths are identical by construction -- the cruise line is fitted to the
-actual pre-dodge samples -- so the counterfactual inherits the actual pre-dodge
-distances and only diverges after t0. Taking one minimum over the whole track
-and the other over the tail would silently favour whichever window happened to
-contain the close pass.
-
-Verdicts, against hit_radius:
-    WOULD_HAVE_MISSED  counterfactual  > R   -- throw was never on target
-    DODGE_SAVED        counterfactual <= R < actual
-    DODGE_FAILED       both <= R
-    DODGE_HURT         counterfactual  > R >= actual    (made it worse)
-    NO_DODGE           no dodge fired; actual is the whole story
-
-SCORING TRAP -- READ THIS BEFORE COMPUTING ANY SAVE RATE.
-`counterfactual_min_m` is emitted BLANK on NO_DODGE rows (there is no dodge to
-counterfactualise). Join naively on that column and every blank drops out, which
-silently deletes each no-fire from the DENOMINATOR and reports a save rate over
-only the throws that fired. That is not a save rate. On the 26 m / 20 m/s D08
-cell it turned a true 21/30 (70%) into a flattering 21/21 (100%) -- better than
-the oracle's own 28/29, and entirely an artifact of a blank cell.
-
-The rule: on a NO_DODGE row the drone never deviated, so the actual path IS the
-counterfactual path. Those rows are fully scoreable -- substitute
-`counterfactual_min_m := actual_min_m` -- and a NO_DODGE row inside the hit
-radius is a LOSS, not missing data. The blank stays blank here on purpose, so
-the recorded CSVs stay byte-reproducible against the runs that produced them;
-the substitution belongs in whatever scores them.
-
-BALL NAMES. Both spawner conventions are matched, because this repo has two and
-they disagree: dodge_battery names its ball ball_<rid>_r<rep>_<epoch> and
-spawn_projectile names its own projectile_<scenario>_<epoch>. Matching only the
-latter is what made the oracle blind under the battery. The battery's name also
-carries the scenario and repeat, which is the join key back to the battery CSV
--- without it these verdicts cannot be split by ball speed, and a blended
-dodge rate is exactly the number this project refuses to report.
-
-CLOCK. Ball and drone arrive in the SAME TFMessage, so their relative geometry
-is exact whatever clock is used. Only the join to the evade event needs a
-common timebase, and /gz/dynamic_poses carries Gazebo's clock while the event
-carries ROS sim time. Following hz_dodge_response.py, poses are keyed by
-ROS-sim ARRIVAL time for that join only. Acceptable here for the same reason:
-the extrapolation window is ~0.2 s. No velocity is ever derived from arrival
-times (CLAUDE.md).
-
-LIMIT, stated because it is load-bearing: the extrapolation is a straight line,
-so a drone that would have TURNED during the window is approximated. Over the
-~0.3 s that matters at cruise this is small, but it is an approximation, not
-ground truth. `fit_resid_m` is reported per episode so a bad fit is visible
-rather than assumed away.
+`counterfactual_min_m` is emitted BLANK on NO_DODGE rows and stays blank on
+purpose, so recorded CSVs remain reproducible. Whoever scores them must
+substitute `counterfactual_min_m := actual_min_m` on those rows -- the drone
+never deviated, so the flown path IS the counterfactual -- and count a NO_DODGE
+inside the hit radius as a loss. Dropping the blanks deletes every no-fire from
+the denominator and reports a fire-conditional rate as a save rate.
+Full scoring rules: docs/RESULTS.md §10.
 """
 
 from __future__ import annotations
@@ -99,8 +47,8 @@ FIT_WINDOW_S = 0.20      # pre-dodge samples fitted for the cruise baseline
 EPISODE_GAP_S = 1.5      # ball unseen this long -> episode over
 HIT_RADIUS_M = 0.30
 
-# Must stay in step with dodge_battery.py and spawn_projectile.py. See the
-# module docstring for what matching only one of them costs.
+# Two spawners, two naming conventions, both live: matching only one leaves the
+# scorer blind to every ball the other spawned. Keep in step with both.
 DEFAULT_BALL_PREFIXES = ("ball_", "projectile_")
 
 # dodge_battery.py:704  name = f"ball_{rid}_r{rep}_{int(time.time())}"
@@ -159,6 +107,11 @@ class Counterfactual(Node):
             "counterfactual scoring -> %s | drone '%s' balls %s R=%.2f m"
             % (out_path, drone_model, list(self._ball_prefixes), hit_radius))
 
+    # Poses carry Gazebo's clock and evade events carry ROS sim time, so both
+    # are keyed by ROS-sim ARRIVAL time to give the join a common timebase.
+    # Sound only because the fit window is ~0.2 s; never derive a velocity from
+    # these timestamps. Ball and drone share one TFMessage, so their relative
+    # geometry is exact regardless of which clock stamps it.
     def _now(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9
 
@@ -221,12 +174,9 @@ class Counterfactual(Node):
         dodge = next(((i, td) for i, (td, _) in enumerate(self._dodges)
                       if t_start - 0.5 <= td <= t_end + 0.5), None)
         if dodge is None:
-            # The blank counterfactual here is the SCORING TRAP in the module
-            # docstring: no dodge fired, so the actual path IS the
-            # counterfactual. Whoever scores this must substitute
-            # `counterfactual_min_m := actual_min_m` on these rows. Dropping
-            # them as missing data deletes every no-fire from the denominator
-            # and reports 100% where the truth was 70%.
+            # Blank counterfactual, deliberately: see the module docstring.
+            # The scorer substitutes actual_min_m here; dropping the row
+            # deletes a no-fire from the denominator.
             self._emit(name, sid, rep, "", actual, "", "", "NO_DODGE",
                        "", 0, len(track))
             return
@@ -244,9 +194,9 @@ class Counterfactual(Node):
         A = np.stack([np.ones_like(ts), ts - t0], axis=1)
         coef, *_ = np.linalg.lstsq(A, ps, rcond=None)
         p0, v0 = coef[0], coef[1]
-        # How straight the pre-dodge cruise actually was. A drone mid-turn
-        # gives a large residual, and the straight-line extrapolation that
-        # follows is then an approximation the reader must be told about.
+        # How straight the pre-dodge cruise was. A drone mid-turn gives a large
+        # residual, flagging the straight-line extrapolation below as an
+        # approximation rather than ground truth.
         resid = float(np.max(np.linalg.norm(ps - (A @ coef), axis=1)))
 
         # Before t0 the counterfactual path IS the actual path, so it inherits

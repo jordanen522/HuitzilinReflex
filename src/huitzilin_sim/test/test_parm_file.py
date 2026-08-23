@@ -61,7 +61,7 @@ def test_negative_and_exponent_values_parse():
     assert parse_parm("A -1\nB 1e3\n") == {"A": -1.0, "B": 1000.0}
 
 
-# ── diff_params ──────────────────────────────────────────────────────────────
+# --- diff_params -------------------------------------------------------------
 
 def test_matching_readback_reports_nothing():
     assert diff_params({"A": 1.0}, {"A": 1.0}) == []

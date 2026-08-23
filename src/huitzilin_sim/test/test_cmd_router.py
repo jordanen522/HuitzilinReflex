@@ -29,7 +29,7 @@ def _state(**kw):
     return RouterState(**kw)
 
 
-# ── priority ─────────────────────────────────────────────────────────────────
+# --- priority ----------------------------------------------------------------
 
 def test_fresh_evade_beats_fresh_cmd_vel():
     """The whole point of a separate evade topic."""
@@ -57,7 +57,7 @@ def test_evade_goes_stale_just_past_the_timeout():
     assert r.action is Action.HANDBACK
 
 
-# ── the handback edge ────────────────────────────────────────────────────────
+# --- the handback edge -------------------------------------------------------
 
 def test_expired_dodge_emits_exactly_one_zero():
     """Two zeros would be harmless; none would leave AP coasting at dodge
@@ -91,7 +91,7 @@ def test_no_handback_if_no_dodge_was_ever_active():
     assert r.action is Action.SILENCE
 
 
-# ── silence vs zero-hold ─────────────────────────────────────────────────────
+# --- silence vs zero-hold ----------------------------------------------------
 
 def test_never_commanded_means_silence_not_a_zero_hold():
     """Position-mode patrol drives ArduPilot over its own MAVLink link. A
@@ -109,7 +109,7 @@ def test_stale_cmd_vel_becomes_a_zero_hold_not_a_coast():
     assert r.sends is True
 
 
-# ── what the fast evade timer is allowed to touch ────────────────────────────
+# --- what the fast evade timer is allowed to touch ---------------------------
 
 def test_evade_route_is_idempotent_while_the_dodge_is_live():
     """The fast timer re-routes at 50 Hz. Each pass must yield the same
@@ -133,7 +133,7 @@ def test_ignoring_a_non_evade_route_leaves_the_state_untouched():
     assert route(s, 5.0, TIMEOUT).action is Action.HANDBACK
 
 
-# ── guards on the checks themselves ──────────────────────────────────────────
+# --- guards on the checks themselves -----------------------------------------
 
 def test_sends_is_false_only_for_silence():
     for action in Action:
@@ -149,7 +149,7 @@ def test_router_state_is_immutable():
         s.evade_active = True
 
 
-# ── acceleration feedforward ─────────────────────────────────────────────────
+# --- acceleration feedforward ------------------------------------------------
 #
 # The accel arrives on its own topic, so it has its own freshness. The rules
 # that matter are about what it must NOT be attached to.

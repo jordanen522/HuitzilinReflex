@@ -1,29 +1,26 @@
-"""
-Unit tests for score_bags_logic.py — Task 5b, extended by Task 5c.
+"""Unit tests for score_bags_logic.py.
 
 Runs without ROS (pure Python, no rclpy import anywhere in the module under
 test): part of the ROS-free CI subset picked up automatically by
 .github/workflows/tests.yml's deny-list (it imports nothing that needs ROS).
 
-Three regression guards here are load-bearing, one per defect this file's
-history is made of:
+Three guards here are load-bearing, one per way this scorer has been caught
+scoring itself:
 
-  test_build_bag_play_cmd_never_omits_exclude_topics — Defect 1 (5b). The
-  original _replay_bag built a `ros2 bag play` command with no
-  --exclude-topics at all, so a T-bag's own recorded /threat/centroid track
-  replayed straight back onto the bus and score_bags counted it as a
-  detection by the detector under test.
+  test_build_bag_play_cmd_never_omits_exclude_topics — _replay_bag once built
+  a `ros2 bag play` command with no --exclude-topics at all, so a T-bag's own
+  recorded /threat/centroid track replayed straight back onto the bus and
+  score_bags counted it as a detection by the detector under test.
 
-  test_compute_exclude_topics_rejects_partial_discovery — HIGH-1 (5c). The
-  same defect, restored silently: a publisher enumeration of
-  ['/parameter_events', '/rosout'] is non-empty and contains nothing
-  forbidden, so it passed every guard while excluding nothing that matters.
+  test_compute_exclude_topics_rejects_partial_discovery — the same defect,
+  restored silently: a publisher enumeration of ['/parameter_events',
+  '/rosout'] is non-empty and contains nothing forbidden, so it passes every
+  guard while excluding nothing that matters.
 
-  test_strict_window_rejects_cold_map_burst_at_bag_start — CRITICAL-1 (5c).
-  5b's symmetric gate opened at (or within half a second of) bag start for
-  every positive in the library, so the cold-background-map FP burst
-  detector.yaml documents in the first ~1-2 s of every replay could pass a
-  positive whose ball was never detected at all.
+  test_strict_window_rejects_cold_map_burst_at_bag_start — the older symmetric
+  gate opened at (or within half a second of) bag start for every positive in
+  the library, so the cold-background-map false-positive burst in the first
+  ~1-2 s of every replay could pass a positive whose ball was never detected.
 """
 
 import math
@@ -74,7 +71,7 @@ import null_attribution_mc  # noqa: E402
 LIBRARY_TTCS = (0.0, 0.4, 0.43, 0.5, 0.7, 0.75, 0.875, 1.1, 1.25, 1.5)
 
 
-# ── compute_exclude_topics ──────────────────────────────────────────────────
+# --- compute_exclude_topics --------------------------------------------------
 
 def test_compute_exclude_topics_returns_sorted_deduped_list():
     result = compute_exclude_topics(["/threat/marker", "/threat/centroid",
@@ -114,8 +111,9 @@ def test_compute_exclude_topics_rejects_any_list_without_centroid():
 
 
 def test_forbidden_topics_are_exactly_clock_and_oak_points():
-    # Locks the two topics the task-5b-brief's ambiguity resolution names
-    # explicitly — nothing more, nothing less.
+    # Locks the forbidden set exactly: excluding either of these breaks the
+    # replay itself rather than isolating the detector. Nothing more, nothing
+    # less.
     assert FORBIDDEN_EXCLUDE_TOPICS == frozenset({"/clock", "/oak/points"})
 
 
@@ -123,7 +121,7 @@ def test_required_topics_are_exactly_the_scored_topic():
     assert REQUIRED_EXCLUDE_TOPICS == frozenset({"/threat/centroid"})
 
 
-# ── build_bag_play_cmd — the regression test for Defect 1 itself ───────────
+# --- build_bag_play_cmd: the replay must never feed the bag's own track back -
 
 def test_build_bag_play_cmd_never_omits_exclude_topics():
     cmd = build_bag_play_cmd(
@@ -152,7 +150,7 @@ def test_build_bag_play_cmd_includes_bag_path_and_clock_flag():
     assert "--clock" in cmd
 
 
-# ── clock_msg_to_sim_t (Task 5c MEDIUM-4) ──────────────────────────────────
+# --- clock_msg_to_sim_t -------------------------------------------------------
 #
 # This one line fixes the absolute position of every window in the library.
 # A nanosecond-scaling slip would move all seventeen in lockstep.
@@ -171,7 +169,7 @@ def test_clock_msg_to_sim_t_nanosec_scale_is_1e9_not_1e6():
     assert clock_msg_to_sim_t(0, 1_000_000) == pytest.approx(0.001)
 
 
-# ── strict_window_bounds (Task 5c CRITICAL-1) ──────────────────────────────
+# --- strict_window_bounds -----------------------------------------------------
 
 def test_strict_window_lower_bound_never_precedes_spawn():
     # THE required guard. window_s (4.0) exceeds every time_to_closest_s in
@@ -227,7 +225,7 @@ def test_strict_window_upper_never_exceeds_sidecar_window():
     assert upper == pytest.approx(100.0 + SPAWN_LEAD_S + 0.5 + 0.25)
 
 
-# ── the late edge is clamped at ground impact (fix round 1, HIGH-3) ─────────
+# --- the late edge is clamped at ground impact -------------------------------
 
 def test_flat_throw_fall_time_is_the_documented_physics():
     # sqrt(2h/g) from a 2 m hover, the same arithmetic scenario_matrix.yaml's
@@ -269,11 +267,11 @@ def test_late_edge_is_unchanged_when_closest_approach_precedes_impact():
 
 
 def test_the_new_late_edge_is_a_strict_tightening_and_must_stay_one():
-    # THE guard for HIGH-3. The corrected window must be a SUBSET of the one
-    # Task 5c originally shipped, for every scenario in the library and for
-    # anything anyone adds — a rule that could ever admit a detection the
-    # previous rule rejected would be a loosening, and a loosening cannot be
-    # justified by physics that only ever removes flight time.
+    # The clamped window must be a SUBSET of the unclamped one, for every
+    # scenario in the library and for anything anyone adds -- a rule that
+    # could ever admit a detection the previous rule rejected would be a
+    # loosening, and a loosening cannot be justified by physics that only
+    # ever removes flight time.
     # Fails loudly if min() is ever turned into max(), dropped, or given a
     # larger fall time.
     for ttc in LIBRARY_TTCS + (0.05, 2.0, 3.9, 12.0):
@@ -283,9 +281,9 @@ def test_the_new_late_edge_is_a_strict_tightening_and_must_stay_one():
                 lower, upper = strict_window_bounds(
                     100.0, ttc, window_s=window_s)
             except ValueError:
-                # An inverted window is now refused outright (fix round 2,
-                # MEDIUM-2). Refusing admits nothing, so it cannot possibly
-                # be a loosening — but assert independently that it only
+                # An inverted window is refused outright. Refusing admits
+                # nothing, so it cannot possibly be a loosening -- but
+                # assert independently that it only
                 # happens where the un-guarded arithmetic really does
                 # invert, so a raise can never become a way to hide a bug.
                 assert (min(ttc, FLAT_THROW_FALL_TIME_S)
@@ -418,7 +416,7 @@ def test_strict_window_requires_time_to_closest_s():
         strict_window_bounds(100.0, None, window_s=4.0)
 
 
-# ── is_in_window_strict ─────────────────────────────────────────────────────
+# --- is_in_window_strict -----------------------------------------------------
 
 def test_strict_window_true_near_closest_approach():
     # bag_start=100, spawn_lead=3 (default), ttc=0.7 -> event at 103.7
@@ -506,7 +504,7 @@ def test_strict_window_false_when_no_detections():
     ) is False
 
 
-# ── superseded gates, kept for artifact comparison only ────────────────────
+# --- superseded gates, kept for artifact comparison only ---------------------
 
 def test_loose_window_true_when_detection_within_window_of_bag_start():
     assert is_in_window_loose([102.0], bag_start=100.0, window_s=4.0) is True
@@ -558,7 +556,7 @@ def test_count_in_window_counts_rather_than_just_deciding():
     assert count_in_window([], *strict) == 0
 
 
-# ── format_closure_rate (fix round 1, LOW-2) ───────────────────────────────
+# --- format_closure_rate (fix round 1, LOW-2) --------------------------------
 
 def test_format_closure_rate_says_when_there_was_no_in_band_run():
     # A bare "rate=0.00" reads as a measured zero closure. It is not: it is
@@ -575,7 +573,7 @@ def test_format_closure_rate_prints_a_real_rate_when_one_exists():
     assert format_closure_rate(fired) == "8.00m/s"
 
 
-# ── closing_runs / longest_closing_run ─────────────────────────────────────
+# --- closing_runs / longest_closing_run --------------------------------------
 
 def test_longest_closing_run_empty_is_zero():
     assert longest_closing_run([]) == 0
@@ -679,7 +677,7 @@ def test_run_closure_rate_of_short_run_is_zero():
     assert run_closure_rate([]) == 0.0
 
 
-# ── attribute_closing_ball (Task 5c CRITICAL-2) ────────────────────────────
+# --- attribute_closing_ball (Task 5c CRITICAL-2) -----------------------------
 #
 # The refuted rule tested only the SIGN of successive range differences.
 # Under patrol the drone translates toward newly-explored terrain, whose
@@ -837,7 +835,7 @@ def test_out_of_band_step_still_fails_when_neither_half_is_long_enough():
     assert result["best_run"] == 2
 
 
-# ── the null model (fix round 1, MEDIUM-5) ─────────────────────────────────
+# --- the null model (fix round 1, MEDIUM-5) ----------------------------------
 
 def test_monte_carlo_harness_reproduces_the_published_5b_noise_rate():
     # The harness is shipped so this number can be re-derived rather than

@@ -43,7 +43,7 @@ def _disc(frame, cx, cy, radius=2.0, value=200):
     return out
 
 
-# ── temporal differencing ────────────────────────────────────────────────────
+# --- temporal differencing ---------------------------------------------------
 
 def test_a_moved_object_survives_differencing():
     prev = _disc(_frame(), 100, 240)
@@ -88,7 +88,7 @@ def test_mismatched_frame_shapes_raise_rather_than_broadcast():
                             threshold=10)
 
 
-# ── blob extraction ──────────────────────────────────────────────────────────
+# --- blob extraction ---------------------------------------------------------
 
 def test_the_centroid_is_sub_pixel():
     """Half a pixel of centroid accuracy is worth about as much as doubling
@@ -148,7 +148,7 @@ def test_blob_order_is_deterministic():
     assert extract_blobs(mask, min_area=3) == extract_blobs(mask, min_area=3)
 
 
-# ── stereo matching ──────────────────────────────────────────────────────────
+# --- stereo matching ---------------------------------------------------------
 
 def _blob(x, y, area=5, weight=5.0):
     return Blob(x=x, y=y, area=area, weight=weight)
@@ -192,7 +192,7 @@ def test_the_closest_epipolar_agreement_wins():
     assert match.right.x == pytest.approx(281.0)
 
 
-# ── triangulation ────────────────────────────────────────────────────────────
+# --- triangulation -----------------------------------------------------------
 
 def test_triangulation_round_trips_an_exactly_projected_point():
     """The load-bearing check. Project a known 3D point into both cameras by
@@ -223,7 +223,7 @@ def test_zero_disparity_returns_none_rather_than_a_point_at_infinity():
                        cx=CX, cy=CY) is None
 
 
-# ── covariance ───────────────────────────────────────────────────────────────
+# --- covariance --------------------------------------------------------------
 
 def test_depth_uncertainty_grows_quadratically_and_lateral_linearly():
     """The asymmetry the tracker's per-measurement R exists to represent.
@@ -257,7 +257,7 @@ def test_a_wider_baseline_buys_depth_accuracy():
     assert wide[2, 2] == pytest.approx(narrow[2, 2] / 4.0)
 
 
-# ── the range budget ─────────────────────────────────────────────────────────
+# --- the range budget --------------------------------------------------------
 
 def test_the_nominal_geometry_lands_near_the_range_the_budget_demands():
     """~9.6 m is what 20 m/s needs (0.08 s pipeline + ~0.40 s to clear the hit

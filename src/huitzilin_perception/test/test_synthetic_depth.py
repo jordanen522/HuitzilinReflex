@@ -57,7 +57,7 @@ from huitzilin_perception.synthetic_depth import (
     synthesize_ball_cloud,
 )
 
-# ── the SHIPPED configuration, loaded, not copied ────────────────────────────
+# --- the SHIPPED configuration, loaded, not copied ---------------------------
 #
 # Every geometry assertion below runs against the values the Dell will actually
 # launch. An earlier revision mirrored them as literals, which made the ROI
@@ -128,7 +128,7 @@ OPTICS = dict(
 )
 
 
-# ── rate quantization ────────────────────────────────────────────────────────
+# --- rate quantization -------------------------------------------------------
 #
 # Gazebo's SceneBroadcaster runs at 60 Hz, so a requested rate is delivered as
 # 60/ceil(60/requested) (docs/RESULTS.md §3). Rate is not cosmetic: dead time is
@@ -187,7 +187,7 @@ def test_the_emit_period_accepts_exactly_the_quantised_cadence():
             quantize_rate_hz(requested), rel=0.02)
 
 
-# ── the modelled frustum ─────────────────────────────────────────────────────
+# --- the modelled frustum ----------------------------------------------------
 #
 # The 10 mm M12 lens that buys 26 m narrows the cone to ±13.5° H / ±11.0° V
 # (docs/RESULTS.md §5), and that loss is the whole cost of the reach. It is
@@ -257,7 +257,7 @@ def test_a_ball_on_top_of_the_camera_is_not_reported():
     assert not in_frustum([0.0, 0.0, 0.0], detection_range_m=26.0)
 
 
-# ── the derived point count (Ruling P4) ──────────────────────────────────────
+# --- the derived point count (Ruling P4) -------------------------------------
 #
 # The count must fall out of the ball's angular size against the camera's
 # angular resolution. A constant picked to clear cluster_min_points would make
@@ -328,7 +328,7 @@ def test_degenerate_optics_are_refused_rather_than_guessed():
             ball_point_count(DEFAULT_BALL_RADIUS_M, 26.0, **{**OPTICS, **bad})
 
 
-# ── the ball's surface ───────────────────────────────────────────────────────
+# --- the ball's surface ------------------------------------------------------
 
 def test_the_returns_sit_on_the_camera_facing_surface():
     """A depth camera sees the front of the ball, not its centre and not its
@@ -359,7 +359,7 @@ def test_no_points_asked_for_is_an_empty_cloud_not_an_error():
                                0).shape == (0, 3)
 
 
-# ── depth noise ──────────────────────────────────────────────────────────────
+# --- depth noise -------------------------------------------------------------
 #
 # This is the structural point of the whole node. A position oracle with an
 # arbitrary 3D offset bolted on is not a depth sensor; a depth sensor is wrong
@@ -442,7 +442,7 @@ def test_a_frac_outside_zero_to_one_is_refused():
                               per_point_frac=bad)
 
 
-# ── the whole cloud ──────────────────────────────────────────────────────────
+# --- the whole cloud ---------------------------------------------------------
 
 def _cloud(rel_cam, **kw):
     return synthesize_ball_cloud(rel_cam, rng_gen=np.random.default_rng(
@@ -481,7 +481,7 @@ def test_the_cloud_is_a_float_n_by_3():
     assert cloud.dtype == np.float64
 
 
-# ── survival through the shipped detector geometry ───────────────────────────
+# --- survival through the shipped detector geometry --------------------------
 #
 # The point of the exercise is that the REAL pipeline computes the centroid, so
 # "the cloud is plausible" is not enough — it has to survive detector_node's own
@@ -578,7 +578,7 @@ def test_the_ball_survives_across_the_whole_modelled_reach():
         assert clusters[0].shape[0] >= DETECTOR_CLUSTER_MIN_POINTS
 
 
-# ── the slow-ball floor that frame differencing imposes ──────────────────────
+# --- the slow-ball floor that frame differencing imposes ---------------------
 #
 # A ball advances v/rate between frames. detector_node's differencing keeps a
 # return only if it is further than diff_threshold_m from EVERY background

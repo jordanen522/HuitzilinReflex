@@ -73,7 +73,7 @@ def with_fault(fault, **kw):
     return Observation(**obs)
 
 
-# ── the documented transition table, one case per row ────────────────────────
+# --- the documented transition table, one case per row -----------------------
 
 def test_disarmed_to_arming_on_arm_request():
     assert next_state(State.DISARMED, Observation(arm_requested=True),
@@ -127,7 +127,7 @@ def test_rtl_to_disarmed_on_landing():
                       LIM).state is State.DISARMED
 
 
-# ── the safety property ──────────────────────────────────────────────────────
+# --- the safety property -----------------------------------------------------
 
 # Fault.UNKNOWN is a sentinel for the unreachable-state branch; no combination
 # of sensor readings produces it, so with_fault() cannot induce it.
@@ -141,7 +141,7 @@ def test_the_fixture_really_induces_each_fault():
         assert detect_faults(with_fault(fault), LIM) == [fault]
 
 
-# ── the watch gate ───────────────────────────────────────────────────────────
+# --- the watch gate ----------------------------------------------------------
 # A watch on a topic the running configuration never publishes is
 # indistinguishable from a dead publisher, because _age reads a never-seen
 # topic as infinitely stale. That is not hypothetical: the shipped stack runs
@@ -298,7 +298,7 @@ def test_totality_never_raises_and_always_returns_a_state():
             assert d.reason
 
 
-# ── faults are gated on being armed ──────────────────────────────────────────
+# --- faults are gated on being armed -----------------------------------------
 
 def test_disarmed_aircraft_reports_no_faults():
     """Half these topics are legitimately silent on the bench with props off."""
@@ -328,7 +328,7 @@ def test_altitude_ceiling_counts_as_a_fence_breach():
     assert Fault.FENCE_BREACH in detect_faults(flying(alt_m=99.0), LIM)
 
 
-# ── EVADE is bounded ─────────────────────────────────────────────────────────
+# --- EVADE is bounded --------------------------------------------------------
 
 def test_evade_exits_on_timeout_even_if_the_alarm_never_clears():
     """evasion_node publishes alarm False once, at the end of a dodge. A single
@@ -342,7 +342,7 @@ def test_evade_holds_inside_the_window():
     assert next_state(State.EVADE, held, LIM).state is State.EVADE
 
 
-# ── edge triggering ──────────────────────────────────────────────────────────
+# --- edge triggering ---------------------------------------------------------
 
 def test_commands_are_suppressed_when_the_state_does_not_change():
     d = next_state(State.TAKEOFF, flying(alt_m=2.0), LIM)

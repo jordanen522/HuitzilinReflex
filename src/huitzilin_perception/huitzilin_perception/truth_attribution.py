@@ -1,34 +1,20 @@
-"""truth_attribution.py — was that detection OF THE BALL?
+"""Attribute detections to the projectile using ground truth.
 
-Pure python, no ROS, so the ROS-free CI subset covers it. Scores detections
-against ground truth (/gz/dynamic_poses), not against how they moved, so a
-detection can be judged correct or spurious independent of the heuristic that
-produced it. Definitions here (match radius, K, window) should not be
-re-tuned after seeing a result on the split they're meant to score.
+Scores detections from a bag against /gz/dynamic_poses rather than against how
+they moved. The companion heuristic, score_bags_logic.attribute_closing_ball,
+only answers "something closed at a ball-like rate", which does not separate the
+ball from newly-explored terrain along a patrol leg; ground truth does. Bags
+captured before scripts/capture_scenario.sh started recording /gz/dynamic_poses
+cannot be scored here.
 
-WHY A SECOND ATTRIBUTOR. score_bags_logic.attribute_closing_ball asks whether a
-run of detections MOVES like a ball -- strictly closing, at a rate above the
-airframe's own maximum ground speed and below that plus the ball's. It is a
-good discriminator, it is what the existing library has, and it stays. But its
-answer is "something closed at a ball-like rate", and on a library whose
-dominant false-positive class is newly-explored terrain along a patrol leg, the
-gap between that and "that was the ball" is the entire question. Only ground
-truth closes it, which is why scripts/capture_scenario.sh now records
-/gz/dynamic_poses and why no bag captured before it can carry the held-out
-recall claim.
-
-WHAT IS AND IS NOT MEASURED HERE. `match_radius_m` is a MATCHING tolerance --
-how far a detection may sit from truth and still be called the same object. It
-is not an accuracy figure, and a system that scrapes in just under it on every
-frame passes here while being poor. That is why `score_scenario` returns the
-per-match error distribution as well as the counts: the artifact carries both,
-and the pass is never quoted without them.
-
-FRAMES. Detections and both truth tracks must already be in one common fixed
-frame (the detector publishes in `fixed_frame`, "odom"). This module does no
-frame conversion, deliberately: CLAUDE.md keeps ENU/NED conversion in exactly
-one place, MavBridge, and a second converter here would be a second place for
-the mirrored-marker bug to live.
+Design rules:
+  * Pure python, no ROS, so the ROS-free CI subset covers it.
+  * `match_radius_m` is a matching tolerance, not an accuracy figure —
+    `score_scenario` also returns the per-match error distribution, and a pass is
+    not meaningful without it.
+  * Detections and both truth tracks must already be in one common fixed frame
+    (the detector publishes in `fixed_frame`, "odom"). No frame conversion
+    happens here; see docs/frames.md.
 """
 
 from __future__ import annotations
@@ -48,29 +34,24 @@ __all__ = [
     "void_reason",
 ]
 
-# ── the constants of the match gate ──────────────────────────────────────
-
 #: Sigmas of modelled depth error admitted as "the same object". 3 sigma admits
-#: ~99.7 % of true detections; it is the reason a correct detection at 26 m,
-#: where sigma is 0.30 m, is not called a miss for being 0.6 m out.
+#: ~99.7 % of true detections, so a correct detection at 26 m (sigma 0.30 m) is
+#: not called a miss for being 0.6 m out.
 MATCH_SIGMAS = 3.0
 
 #: Floor on the match radius. Below ~9 m the modelled error falls under a voxel
-#: and 3 sigma would be a tighter gate than the discretisation the detector's
-#: own pipeline imposes: voxel_leaf_m 0.02, the ball's 0.08 m extent, and
-#: clustering quantisation. Without this floor the scorer would report correct
-#: short-range detections as unmatched.
+#: and 3 sigma would be tighter than the discretisation the detector's own
+#: pipeline imposes (voxel_leaf_m 0.02, the ball's 0.08 m extent, clustering
+#: quantisation), so correct short-range detections would read as unmatched.
 MATCH_FLOOR_M = 0.50
 
-#: One allowance for stamp skew between the cloud and the pose stream. At
-#: 20 m/s the ball covers 0.40 m in this time, which is not a rounding error at
-#: the speed the whole exercise is about.
+#: Allowance for stamp skew between the cloud and the pose stream. At 20 m/s the
+#: ball covers 0.40 m in this time.
 STAMP_SKEW_S = 0.020
 
-#: Matched detections needed inside the window for a scenario to count as
-#: recalled. NOT a free parameter: evasion.yaml sets min_track_updates to 3, so
-#: fewer than three confirmations is a detection the aircraft cannot act on,
-#: and a recall metric that counted it would measure something unusable.
+#: Matched detections needed inside the window to count as recalled. Tied to
+#: evasion.yaml's min_track_updates of 3 — fewer confirmations is a detection
+#: the aircraft cannot act on.
 DEFAULT_MIN_MATCHED = 3
 
 
@@ -80,10 +61,9 @@ def match_radius_m(range_m: float, ball_speed_mps: float) -> float:
     R(z) = max(MATCH_FLOOR_M, MATCH_SIGMAS * sigma(z)) + v * STAMP_SKEW_S,
     with sigma from the lane's own error model (0.30 m at 26 m, growing as z^2).
 
-    Grows with range because the sensor's error does. A single fixed tolerance
-    would be either too tight at 26 m -- turning correct detections into misses
-    and manufacturing a low recall -- or too loose at 5 m, where it would match
-    a detection to a ball a metre away and manufacture a high one.
+    Grows with range because the sensor's error does. A fixed tolerance would be
+    too tight at 26 m (correct detections read as misses) or too loose at 5 m
+    (a detection matches a ball a metre away).
     """
     sigma = float(depth_sigma_m(float(range_m)))
     return (max(MATCH_FLOOR_M, MATCH_SIGMAS * sigma)
@@ -93,13 +73,10 @@ def match_radius_m(range_m: float, ball_speed_mps: float) -> float:
 def interpolate_track(track, t: float):
     """Truth position at sim time `t`, linearly between the two nearest samples.
 
-    Returns None outside the track's span, and that is the point of the
-    function rather than a limitation of it. Holding the last sample would
-    invent truth for a ball that has already come to rest -- gz's
-    dynamic_pose/info carries MOVING entities, so a settled ball simply stops
-    appearing -- and would then match late detections to a position nothing is
-    at any more. A detection with no truth behind it is unmatched, which is the
-    correct answer.
+    Returns None outside the track's span, deliberately. gz's dynamic_pose/info
+    carries only MOVING entities, so a settled ball stops appearing; holding the
+    last sample would match late detections to a position nothing is at any more.
+    A detection with no truth behind it is unmatched.
 
     `track` is [(t, (x, y, z)), ...]; it need not be sorted.
     """
@@ -129,9 +106,9 @@ def interpolate_track(track, t: float):
 def void_reason(label: str, ball_track, drone_track):
     """Why this scenario cannot be scored at all, or None if it can.
 
-    VOID IS NOT A FAILURE AND NOT A PASS. It means the bag cannot answer the
-    question, so it is re-captured -- and it stays in the denominator while
-    that happens, so voiding can never shrink a set.
+    A void is neither a failure nor a pass: the bag cannot answer the question
+    and is re-captured. It stays in the denominator meanwhile, so voiding can
+    never shrink a set.
 
     Two conditions:
       - a POSITIVE with no projectile truth. There is nothing to match against,
@@ -159,16 +136,16 @@ def score_scenario(detections, ball_track, drone_track,
 
     `detections` and both tracks are [(t_sim, (x, y, z)), ...] in one common
     fixed frame. `window` is the (lower, upper) strict detection window from
-    score_bags_logic.strict_window_bounds -- unchanged, and applied first: a
-    detection outside it is neither a match nor a false positive here, because
-    it belongs to a different measurement. That window exists because every
-    replay opens with a cold background map and a false-positive burst.
+    score_bags_logic.strict_window_bounds, applied first: a detection outside it
+    belongs to a different measurement, so it is neither a match nor a false
+    positive here. The window exists because every replay opens with a cold
+    background map and a false-positive burst.
 
-    Returns, and every field goes into the artifact:
+    Returns:
       in_window   int    detections considered
       matched     int    attributed to the projectile
-      unmatched   int    everything else in the window -- terrain, clutter,
-                         and the airframe itself (amendment A1)
+      unmatched   int    everything else in the window — terrain, clutter, and
+                         the airframe itself
       recalled    bool   matched >= min_matched
       fired       bool   unmatched >= min_matched
       errors_m    list   || detected - truth || for the matched ones, in order
@@ -177,9 +154,8 @@ def score_scenario(detections, ball_track, drone_track,
                          re-scoring the bag
       min_matched int    the K actually applied
 
-    `recalled` and `fired` are computed independently and neither cancels the
-    other: a scenario can be correctly recalled AND emitting spurious
-    centroids, which is a real defect the artifact has to be able to show.
+    `recalled` and `fired` are independent and neither cancels the other: a
+    scenario can be correctly recalled while also emitting spurious centroids.
     """
     lower, upper = float(window[0]), float(window[1])
     in_window = [(float(t), p) for t, p in detections if lower <= t <= upper]

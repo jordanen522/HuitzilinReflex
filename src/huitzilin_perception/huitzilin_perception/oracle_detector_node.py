@@ -1,37 +1,25 @@
-"""
-oracle_detector_node.py — ground-truth stand-in for detector_node.
+"""Ground-truth stand-in for detector_node.
 
-Publishes /threat/centroid from Gazebo truth instead of from a point cloud,
-with detection range, rate, noise and dropout as parameters. Everything
-downstream (evasion_node's tracker, trigger, dodge command, the bridge,
-ArduPilot, the airframe) is untouched and unaware.
+Publishes /threat/centroid from Gazebo truth instead of from a point cloud, with
+detection range, rate, noise and dropout as parameters. Everything downstream
+(evasion_node's tracker, trigger, dodge command, the bridge, ArduPilot) is
+untouched and unaware. It exists to lift the sensing bound — the depth detector
+first reports the ball at ~3.2-3.6 m, 0.17 s of warning at 20 m/s — so tracker,
+trigger and airframe questions become measurable.
 
-WHAT IT IS FOR. The 14 m/s failure is a sensing bound: the depth detector
-first reports the ball at ~3.2-3.6 m, which at 20 m/s is 0.17 s of warning --
-consumed entirely by three-frame confirmation plus pipeline, leaving nothing
-for the vehicle to move in. So no sim run at 20 m/s can currently tell you
-whether the tracker, the trigger, or the airframe would have coped, because
-the dodge never fires at all. This node removes the sensing bound on purpose,
-so those questions become measurable while the real answer -- what range the
-OAK-D mono pair actually delivers -- is still a hardware measurement.
+In:  /gz/dynamic_poses (TFMessage, BEST_EFFORT), /huitzilin/odom (Odometry)
+Out: /threat/centroid (PointStamped, base_link, RELIABLE)
 
-MUTUALLY EXCLUSIVE WITH detector_node. Both publish /threat/centroid; running
-both gives the tracker two uncorrelated views of the same ball. The launch
-files enforce this by never starting both, not by any interlock here.
-
-HOW TO READ ITS RESULTS. detection_range_m is an INPUT. A 20 m/s dodge scored
-here is a statement about the tracker and the airframe, conditional on a
-sensor that can see 12 m. It is not evidence that such a sensor exists. Every
-report must carry the range it was run at.
-
-Frames: the drone->ball vector is taken from Gazebo (both models, so the
-world/odom origin offset cancels) and rotated into base_link with the odom
-attitude -- the same quaternion evasion_node uses to rotate it back, so any
-attitude error round-trips out instead of injecting a bias the real pipeline
-would not have.
-
-Stamps come from the Gazebo pose message, never from arrival time: the filter
-differentiates consecutive stamps, and arrival is not emission (CLAUDE.md).
+Design rules:
+  * Mutually exclusive with detector_node — both publish /threat/centroid, so
+    running both gives the tracker two uncorrelated views of one ball. Enforced
+    by the launch files never starting both, not by any interlock here.
+  * detection_range_m is an input, not a result: report it with every number.
+  * The drone->ball vector comes from Gazebo (both models, so the world/odom
+    origin offset cancels) and is rotated into base_link with the odom attitude,
+    the same quaternion evasion_node uses to rotate it back, so attitude error
+    round-trips out instead of biasing the result.
+  * Stamps come from the pose message, never arrival time.
 """
 
 from __future__ import annotations
@@ -86,41 +74,35 @@ class OracleDetectorNode(Node):
         self.declare_parameter("odom_topic", "/huitzilin/odom")
         self.declare_parameter("centroid_topic", "/threat/centroid")
         self.declare_parameter("drone_model", "iris_depth")
-        # A LIST, because this repo has two ball-naming conventions and the
-        # scoring harness uses the one the oracle originally did not match.
-        # See DEFAULT_BALL_PREFIXES in oracle.py for what that cost.
+        # A list: the repo has two ball-naming conventions and the scoring
+        # harness uses one of them. See DEFAULT_BALL_PREFIXES in oracle.py.
         self.declare_parameter("ball_name_prefixes",
                                list(DEFAULT_BALL_PREFIXES))
         self.declare_parameter("detection_range_m", 12.0)
         self.declare_parameter("min_range_m", 0.30)
         self.declare_parameter("fov_half_angle_deg", 45.0)
-        # Seconds of SIM time between the world moving and the centroid being
-        # publishable: exposure + readout + transfer + detection. 0.0 = OFF =
-        # the zero-latency oracle every recorded result was flown against, so
-        # nothing already measured changes. See DelayLine for what is and is
-        # not modelled -- in particular the stamp stays at exposure time.
+        # Sim seconds between the world moving and the centroid being
+        # publishable: exposure + readout + transfer + detection. 0.0 disables
+        # it, which is the zero-latency oracle every recorded result was flown
+        # against. See DelayLine — the stamp stays at exposure time.
         self.declare_parameter("detection_delay_s", 0.0)
         self.declare_parameter("rate_hz", 14.5)
         self.declare_parameter("noise_std_m", 0.15)
-        # (forward, left, up) sigma in base_link, which is how a stereo
-        # sensor's error actually decomposes. All-zero means "unspecified" and
-        # falls back to the isotropic noise_std_m; for a genuinely noiseless
-        # oracle set noise_std_m to 0.0 instead.
-        #
-        # NOT declared as an empty list: an empty list carries no element type,
-        # so ROS 2 declares the parameter UNINITIALIZED and get_parameter()
-        # raises ParameterUninitializedException at startup. The same is true
-        # of `[]` written in the yaml, so both must carry three numbers.
+        # (forward, left, up) sigma in base_link, how a stereo sensor's error
+        # decomposes. All-zero means "unspecified" and falls back to the
+        # isotropic noise_std_m; for a noiseless oracle set noise_std_m to 0.0.
+        # The default must carry three numbers, not `[]`: an empty list has no
+        # element type, so ROS 2 declares the parameter UNINITIALIZED and
+        # get_parameter() raises at startup. Same for `[]` in the yaml.
         self.declare_parameter("noise_std_xyz_m", [0.0, 0.0, 0.0])
         self.declare_parameter("dropout_prob", 0.0)
         self.declare_parameter("seed", 0)
         self.declare_parameter("stamp_offset_warn_s", 0.05)
 
         self._drone_model = str(self._p("drone_model"))
-        # Empty is rejected rather than tolerated: it matches no model, so the
-        # node would run, log happily, publish nothing, and every scenario
-        # would score NO-FIRE — indistinguishable from a trigger that never
-        # fires. Failing at startup is the only way that mistake stays visible.
+        # Empty is rejected: it matches no model, so the node would run, publish
+        # nothing, and score every scenario NO-FIRE — indistinguishable from a
+        # trigger that never fires.
         self._ball_prefixes = [str(p) for p in (self._p("ball_name_prefixes")
                                                 or []) if str(p)]
         if not self._ball_prefixes:
@@ -144,9 +126,7 @@ class OracleDetectorNode(Node):
                        if any(v > 0.0 for v in xyz)
                        else np.full(3, float(self._p("noise_std_m"))))
 
-        # Seeded so a battery is replayable. Seed 0 means "seed from entropy",
-        # which is what you want when asking whether a result is robust rather
-        # than whether it reproduces.
+        # Seeded so a battery is replayable; seed 0 means seed from entropy.
         seed = int(self._p("seed"))
         self._rng = np.random.default_rng(seed if seed else None)
 
@@ -156,11 +136,9 @@ class OracleDetectorNode(Node):
         self._warned_bad_quat = False
         self._checked_stamp = False
         self._n_published = 0
-        # Unmatched-name alarm. The prefix bug published zero centroids while
-        # logging nothing wrong, so a whole sweep scored 0/8 NO-FIRE before
-        # anyone knew the oracle was blind. Counted in messages that carried
-        # SOME non-drone model, so the quiet stretch between runs (no ball in
-        # the world at all) can never trip it.
+        # Unmatched-name alarm: a wrong prefix publishes zero centroids while
+        # logging nothing wrong. Counted only over messages carrying some
+        # non-drone model, so the quiet stretch between runs cannot trip it.
         self._n_unmatched_msgs = 0
         self._unmatched_names = set()
         self._warned_unmatched = False
@@ -177,9 +155,8 @@ class OracleDetectorNode(Node):
             f"range {self._range} m (an INPUT, not a result), "
             f"fov +/-{self._fov} deg, {rate_hz} Hz, "
             f"noise {np.round(self._noise, 3).tolist()} m, "
-            # After the noise triple on purpose: EXPECT_BANNER patterns in the
-            # lab queues anchor on that field, and inserting ahead of it would
-            # abort every queued cell.
+            # Keep after the noise triple: harness banner patterns anchor on
+            # that field, and inserting ahead of it aborts queued cells.
             f"delay {self._delay_line.delay_s * 1e3:.0f} ms, "
             f"dropout {self._dropout}, seed {seed or 'entropy'}, "
             f"ball prefixes {self._ball_prefixes} vs drone "
@@ -188,8 +165,6 @@ class OracleDetectorNode(Node):
 
     def _p(self, name):
         return self.get_parameter(name).value
-
-    # ── callbacks ────────────────────────────────────────────────────────
 
     def _odom_cb(self, msg: Odometry) -> None:
         self._last_odom = msg
@@ -213,10 +188,9 @@ class OracleDetectorNode(Node):
         if not msg.transforms:
             return
 
-        # Release anything the pipeline is still holding BEFORE any of the
-        # early returns below. Frames already in flight must still arrive after
-        # the ball leaves the frustum, or after a tick the rate limiter skips,
-        # exactly as a real pipeline delivers them. Inert when delay is 0.
+        # Release in-flight frames before the early returns below: a real
+        # pipeline still delivers them after the ball leaves the frustum, or
+        # after a tick the rate limiter skips. Inert when delay is 0.
         self._release_due(self._stamp_to_sec(msg.transforms[0].header.stamp))
 
         drone = None
@@ -285,27 +259,24 @@ class OracleDetectorNode(Node):
         out.header.stamp = stamp
         out.header.frame_id = "base_link"
         out.point.x, out.point.y, out.point.z = (float(v) for v in z_bl)
-        # True range captured at GENERATION, so the throttled log reports where
-        # the ball was when the frame was taken, not where it is when the frame
-        # lands. With a delay configured those differ by delay * closing speed
-        # — 0.6 m at 30 ms and 20 m/s.
+        # True range captured at generation, so the throttled log reports where
+        # the ball was when the frame was taken. With a delay configured that
+        # differs from arrival by delay * closing speed: 0.6 m at 30 ms, 20 m/s.
         rng_m = float(np.linalg.norm(ball - drone))
         for pending_out, pending_rng in self._delay_line.push(t_pose,
                                                               (out, rng_m)):
             self._publish(pending_out, pending_rng)
 
-    # Roughly 20 s of Gazebo pose messages. Long enough that arming, takeoff
-    # and the first patrol leg pass without comment; short enough that a
-    # misconfigured prefix is loud inside the first scenario rather than after
-    # a 15-minute battery has finished scoring an unarmed oracle.
+    # Roughly 20 s of Gazebo pose messages: long enough for arming, takeoff and
+    # the first patrol leg to pass quietly, short enough that a misconfigured
+    # prefix is loud inside the first scenario rather than after a whole battery.
     UNMATCHED_WARN_AFTER = 2000
 
     def _note_unmatched(self, candidates) -> None:
         """Say once that models are present but none of them look like a ball.
 
-        Deliberately a warning and not a fatal: a world can legitimately carry
-        dynamic models that are not the ball, and the node must not refuse to
-        run because of one. The names are echoed because the fix is always to
+        A warning, not a fatal: a world can legitimately carry dynamic models
+        that are not the ball. The names are echoed because the fix is to
         compare them against the configured prefixes.
         """
         if self._warned_unmatched or self._n_published or not candidates:
@@ -325,11 +296,9 @@ class OracleDetectorNode(Node):
     def _check_stamp_source(self, t_pose: float) -> None:
         """Say once whether the pose stamps agree with this node's clock.
 
-        They are formally different clocks -- Gazebo's sim time reaches ROS
-        through the /clock bridge -- and a systematic offset between them
-        would show up as a constant lead/lag in every velocity the tracker
-        estimates, which is exactly the kind of error that reads as a tuning
-        problem.
+        They are formally different clocks (Gazebo sim time reaches ROS through
+        the /clock bridge). A systematic offset shows up as a constant lead/lag
+        in every velocity the tracker estimates, which reads as a tuning problem.
         """
         if self._checked_stamp:
             return

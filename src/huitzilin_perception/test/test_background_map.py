@@ -26,7 +26,7 @@ from huitzilin_perception.cloud_geometry import (
 )
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# --- helpers -----------------------------------------------------------------
 
 def _grid(x0, x1, y0, y1, z, step):
     """Planar point grid in the z = const plane."""
@@ -45,7 +45,7 @@ def _ball(centre, step=0.02, n=4):
     return (pts + np.asarray(centre, dtype=np.float32)).astype(np.float32)
 
 
-# ── voxel map basics ──────────────────────────────────────────────────────────
+# --- voxel map basics --------------------------------------------------------
 
 def test_empty_map_reports_no_foreground():
     bg = VoxelBackgroundMap(leaf_m=0.10, ttl_s=10.0)
@@ -127,7 +127,7 @@ def test_insert_keeps_keys_sorted():
         assert not bg.foreground(pts).any()
 
 
-# ── the measured failure: a revisited region must stay background ─────────────
+# --- the measured failure: a revisited region must stay background -----------
 
 def test_revisited_region_stays_background():
     """
@@ -189,7 +189,7 @@ def test_map_still_flags_a_ball_over_seen_ground():
     assert bg.foreground(ball).all()
 
 
-# ── the measured failure: the ball must survive a merge with a big surface ────
+# --- the measured failure: the ball must survive a merge with a big surface ---
 
 def test_split_recovers_ball_merged_into_wall():
     """

@@ -4,26 +4,24 @@ Runs without ROS (numpy + scipy only), so it works on any dev box:
 
     python3 -m pytest src/huitzilin_perception/test/test_depth_noise.py
 
-WHY THIS FILE EXISTS. A Gazebo depth camera reports very nearly exact
-geometry: `iris_depth` declares a 1 cm per-pixel gaussian, and the optics probe
-world declared none at all. Either way the error is ~30x too small at 26 m --
-where the real figure is 0.30 m -- and independent per pixel where the real one
-is correlated. Scoring a rendered lane on that would make the simulated sensor
-strictly better than the part it stands for, and every save rate taken through
-it would be an overstatement. These tests pin the noise stage hard enough that
-it cannot quietly degrade into "no noise".
+A Gazebo depth camera reports very nearly exact geometry: `iris_depth` declares
+a 1 cm per-pixel gaussian and the optics probe world declares none at all.
+Either way the error is ~30x too small at 26 m -- where the real figure is
+0.30 m -- and independent per pixel where the real one is correlated. Scoring
+the rendered lane on that makes the simulated sensor strictly better than the
+part it stands for, so every save rate taken through it overstates. These tests
+pin the noise stage hard enough that it cannot quietly degrade into "no noise".
 
-The load-bearing property is the one in `test_small_patch_moves_coherently`:
-the ball must receive a near-COMMON-MODE error, so the error lands on its
-centroid. That has to emerge from the correlation length rather than from a
-hand-set `per_point_frac`, because a knob set to the answer proves nothing.
+The load-bearing property is in `test_small_patch_moves_coherently`: the ball
+must receive a near-common-mode error, so the error lands on its centroid. That
+has to emerge from the correlation length rather than a hand-set
+`per_point_frac` -- a knob set to the answer proves nothing.
 
-TWO THINGS HERE WERE WRITTEN WRONG FIRST AND ARE KEPT ON THE RECORD:
+Two properties that are easy to assume the wrong way round:
 
-  * An earlier draft asserted the ball's spread was INSENSITIVE to
-    `correlation_px`. It is not -- it falls roughly as 1/s -- so the parameter
-    is a declared modelling assumption, not a free knob.
-    (`test_spread_tightens_monotonically_with_correlation_length`)
+  * The ball's spread is SENSITIVE to `correlation_px` -- it falls roughly as
+    1/s -- so that parameter is a declared modelling assumption, not a free
+    knob. (`test_spread_tightens_monotonically_with_correlation_length`)
   * The ball does NOT stay inside the shipped `cluster_max_extent_m: 0.35` at
     26 m. That gate was sized for a ball at <= 5 m, and roughly a fifth of ball
     frames exceed it once sigma reaches 0.30 m.
@@ -56,7 +54,7 @@ def _flat_wall(height, width, depth_m, fov_deg=27.0):
     return np.stack([z * uu / f_px, z * vv / f_px, z], axis=-1)
 
 
-# ── the unit field ───────────────────────────────────────────────────────────
+# --- the unit field ----------------------------------------------------------
 
 # A NOTE ON ESTIMATORS, because getting this wrong cost three false failures
 # while this file was written. A correlated field holds far fewer independent
@@ -115,7 +113,7 @@ def test_zero_correlation_is_white():
     assert abs(near) < 0.1
 
 
-# ── the noise application ────────────────────────────────────────────────────
+# --- the noise application ---------------------------------------------------
 
 def test_zero_sigma_reproduces_the_input_exactly():
     """Same contract as `synthetic_depth.apply_depth_noise`: noiseless is
@@ -316,7 +314,7 @@ def test_large_surface_is_not_moved_as_one_rigid_sheet():
     assert abs(float(np.mean(err))) < 0.5 * float(np.std(err))
 
 
-# ── the cluster-extent gate ──────────────────────────────────────────────────
+# --- the cluster-extent gate -------------------------------------------------
 
 def _apparent_extents(z, draws=1500, corr_px=DEFAULT_CORRELATION_PX):
     """Bounding-box side along the ray: the ball's body plus its depth noise.
@@ -384,7 +382,7 @@ def test_required_gate_admits_the_ball_it_was_derived_for():
     assert required_cluster_max_extent_m(5.0) < _CLUSTER_MAX_EXTENT_M
 
 
-# ── which column is depth ────────────────────────────────────────────────────
+# --- which column is depth ---------------------------------------------------
 
 def _gz_flu_ball_cloud(height, width, depth_m, span=_BALL_SPAN_PX,
                        fov_deg=27.0):
@@ -454,7 +452,7 @@ def test_a_bad_depth_axis_is_refused():
             _flat_wall(8, 8, 5.0), np.random.default_rng(0), depth_axis=3)
 
 
-# ── no-return pixels ─────────────────────────────────────────────────────────
+# --- no-return pixels --------------------------------------------------------
 
 def test_non_finite_returns_pass_through_untouched():
     """A depth camera reports "no return" as NaN or +/-inf. Those must survive
@@ -483,7 +481,7 @@ def test_non_finite_returns_do_not_poison_their_neighbours():
     assert neighbours.sum() >= 80, "only the one bad pixel may be non-finite"
 
 
-# ── shape contract ───────────────────────────────────────────────────────────
+# --- shape contract ----------------------------------------------------------
 
 def test_unorganized_cloud_is_refused():
     """The correlation lives in IMAGE space. Handed a flat (N,3) list there is

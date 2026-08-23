@@ -28,7 +28,7 @@ def _ok(**kw):
     return throw_window_ok(**kw)
 
 
-# ── straight_leg_time_s ───────────────────────────────────────────────────────
+# --- straight_leg_time_s -----------------------------------------------------
 
 def test_leg_time_is_remaining_distance_over_cruise():
     # 4.4 m of straight run left at 2.2 m/s = 2.0 s.
@@ -56,7 +56,7 @@ def test_parked_drone_has_an_unbounded_window():
     assert straight_leg_time_s(3.0, 0.6, 0.01) == math.inf
 
 
-# ── the v10 inversion ─────────────────────────────────────────────────────────
+# --- the v10 inversion -------------------------------------------------------
 
 def test_v10_inversion_slow_near_corner_must_not_look_safe():
     """
@@ -107,7 +107,7 @@ def test_cruise_floor_bounds_the_residual_lead_error():
     assert ok
 
 
-# ── leg-length gate ──────────────────────────────────────────────────────────
+# --- leg-length gate ---------------------------------------------------------
 
 def test_approaching_a_corner_is_refused():
     # 1.0 m from the WP at cruise 3.4 = 0.12 s of leg; a 0.75 s flight spans
@@ -146,7 +146,7 @@ def test_missing_patrol_state_is_refused_not_assumed_ok():
     assert "no patrol state" in reason.lower()
 
 
-# ── what the measurement says about the loop itself ──────────────────────────
+# --- what the measurement says about the loop itself -------------------------
 
 def test_five_metre_loop_cannot_measure_the_slow_scenario():
     """

@@ -1,57 +1,20 @@
-"""synthetic_depth.py — a synthetic depth cloud from Gazebo truth. Pure numpy.
+"""Fabricate the depth cloud a stated optics would return for the ball.
 
-WHAT THIS IS, EXACTLY. It fabricates the point cloud a depth sensor of a stated
-optics would return for the ball, from ground truth, so that the REAL,
-unmodified `detector_node.py` runs its own pipeline (ROI gate -> voxel
-downsample -> background differencing -> Euclidean clustering -> centroid) over
-it. It is a synthetic cloud through a real pipeline. **It is not a rendered
-depth sensor**, and nothing it produces is evidence that a real sensor achieves
-the modelled reach.
+Pure numpy, driven from Gazebo truth, so the real unmodified detector_node runs
+its own pipeline (ROI gate -> voxel downsample -> background differencing ->
+Euclidean clustering -> centroid) over it. A synthetic cloud through a real
+pipeline — not a rendered depth sensor, and no evidence that real hardware
+achieves the modelled reach. Truth is unavoidable here: an 80 mm ball at 26 m
+subtends 0.176°, sub-pixel at the sim camera's 640x480 over 67.3°.
 
-WHY A TRUTH SOURCE IS UNAVOIDABLE. An 80 mm ball at 26 m subtends 0.176°, which
-is sub-pixel at the sim camera's 640x480 over 67.3°. No rendered depth camera in
-this world can ever produce that return; that is why `oracle.py` exists at all.
-What changes here is only *who computes the detection*: the oracle asserts a
-centroid on `/threat/centroid`, while this module hands the real clustering code
-points and lets it find the centroid itself.
-
-WHAT IS MODELLED, and what each choice costs:
-
-  * OPTICS, not a cone. The 10 mm M12 lens that buys 26 m gives a RECTANGULAR
-    ±13.5° x ±11.0° frustum (docs/RESULTS.md §5). `oracle.in_view` is a single
-    cone half-angle, which is a different sector, so the gate here is per-axis.
-    Everything else the oracle already models -- ball selection, the body
-    rotation, the pipeline delay -- is imported from it, never re-derived.
-
-  * POINT COUNT derived from angular size against angular resolution. The ball
-    is resolved into as many returns as the sensor's IFOV allows and no more.
-    A constant would make every long-range detection an artefact of the number
-    chosen rather than of the optics claimed.
-
-  * DEPTH error, along the ray, growing as z^2. That is the difference between
-    a depth-sensor model and a position oracle with noise bolted on: a stereo
-    pair is wrong about RANGE, not about bearing. Calibrated to the measured
-    0.30 m at 26 m in docs/RESULTS.md §4.1.
-
-  * The depth error is split into a COMMON-MODE part shared by every return on
-    the ball and an INDEPENDENT per-return part, with the marginal per-return
-    sigma equal to sigma_depth(z) either way. The default is fully common-mode,
-    i.e. the ball's patch gets ONE disparity solution -- which is what the
-    0.30 m figure in RESULTS.md is a spec for, and what the oracle applies to
-    its single centroid. Making it fully independent instead smears the 80 mm
-    ball into a ~1.5 m cigar at 26 m, which detector.yaml's
-    `cluster_max_extent_m: 0.35` (sized for a ball at <= 5 m) rejects outright.
-    See test_synthetic_depth.py, which pins both behaviours.
-
-WHAT IS NOT MODELLED: reflectance, stereo shadowing, matcher dropout on a
-textureless sphere, or any background return at all. The cloud contains the
-ball and nothing else, so the detector's background-differencing stage runs but
-has nothing to reject. That is stated again in the node docstring, because it
-bounds what a result taken through this lane may claim.
-
-Gates are evaluated on the TRUE geometry and noise is applied afterwards --
-visibility is a property of where the ball is, not of where the sensor
-mistakenly reports it. Same rule as oracle.py.
+Modelled: a rectangular per-axis frustum (not oracle.in_view's single cone);
+point count from angular size against angular resolution; depth error along the
+ray growing as z^2, calibrated to 0.30 m at 26 m (docs/RESULTS.md §4.1), split
+into a common-mode and an independent per-return part. Not modelled: reflectance,
+stereo shadowing, matcher dropout on a textureless sphere, and any background
+return at all — the cloud holds the ball and nothing else, so background
+differencing runs with nothing to reject. Gates use the TRUE geometry and noise
+is applied afterwards, as in oracle.py.
 """
 
 from __future__ import annotations
@@ -66,7 +29,7 @@ import numpy as np
 # oracle.BORESIGHT is the same vector for the same reason.
 from huitzilin_perception.oracle import BORESIGHT  # noqa: F401  (re-export)
 
-# ── The modelled sensor: AR0234 class + 10 mm M12 (docs/RESULTS.md §4.1/§5) ───
+# The modelled sensor: AR0234 class + 10 mm M12 (docs/RESULTS.md §4.1/§5).
 DEFAULT_FOV_HALF_H_DEG = 13.5
 DEFAULT_FOV_HALF_V_DEG = 11.0
 DEFAULT_IMAGE_WIDTH_PX = 1600
@@ -113,8 +76,6 @@ _ANGLE_EPS_RAD = 1e-12
 ROI_HEADROOM_SIGMAS = 4.0
 
 
-# ── the two configuration floors, as arithmetic ──────────────────────────────
-
 def required_roi_max_range_m(
     detection_range_m: float,
     *,
@@ -124,11 +85,10 @@ def required_roi_max_range_m(
 ) -> float:
     """Smallest `roi_max_range_m` that does not clip this modelled reach.
 
-    Grows FASTER than the reach, because sigma goes as z^2: 26 m needs 27.2 m
-    of ceiling, 30 m needs 31.6 m. A cell that raises detection_range_m without
-    raising the detector's ceiling delivers a shorter sensor than its label,
-    which CLAUDE.md names as the failure class that has invalidated whole
-    result sets. `week6_synthetic_depth.launch.py` refuses to start on it.
+    Grows faster than the reach because sigma goes as z^2: 26 m needs 27.2 m of
+    ceiling, 30 m needs 31.6 m. Raising detection_range_m without raising the
+    detector's ceiling delivers a shorter sensor than the cell's label;
+    `week6_synthetic_depth.launch.py` refuses to start on it.
     """
     return float(detection_range_m) + n_sigma * float(
         depth_sigma_m(detection_range_m, sigma_ref_m, ref_range_m))
@@ -159,8 +119,6 @@ def min_detectable_closing_speed_mps(diff_threshold_m: float,
     return float(diff_threshold_m) * float(delivered_rate_hz)
 
 
-# ── rate ──────────────────────────────────────────────────────────────────────
-
 def quantize_rate_hz(requested_hz: float,
                      base_hz: float = SCENE_BROADCASTER_HZ) -> float:
     """The rate actually delivered when pacing off a `base_hz` pose stream.
@@ -188,8 +146,6 @@ def emit_period_s(requested_hz: float,
     return (decimation - 0.5) / float(base_hz)
 
 
-# ── visibility ────────────────────────────────────────────────────────────────
-
 def in_frustum(
     rel_cam,
     *,
@@ -200,10 +156,9 @@ def in_frustum(
 ) -> bool:
     """Would this optics see a ball at `rel_cam` (camera FLU) at all?
 
-    RECTANGULAR, per-axis, because an image sensor is. `oracle.in_view` gates
-    on one cone half-angle, which admits corners this frustum rejects and
-    rejects corners this one admits -- approximating one with the other would
-    defend a sector nobody has. Range gating matches the oracle exactly:
+    Rectangular and per-axis, because an image sensor is. `oracle.in_view`
+    gates on one cone half-angle, a different sector: it admits corners this
+    frustum rejects and vice versa. Range gating matches the oracle exactly —
     inclusive at both ends, judged on the true geometry.
     """
     rel = np.asarray(rel_cam, dtype=np.float64).reshape(3)
@@ -219,8 +174,6 @@ def in_frustum(
             and elevation <= math.radians(fov_half_v_deg) + _ANGLE_EPS_RAD)
 
 
-# ── how many returns the optics can put on the ball (Ruling P4) ──────────────
-
 def ball_point_count(
     ball_radius_m: float,
     range_m: float,
@@ -233,14 +186,12 @@ def ball_point_count(
 ) -> int:
     """Returns the sensor can place on the ball's silhouette at this range.
 
-    Derived, never chosen: the sphere's silhouette subtends 2*asin(r/z); the
-    camera resolves hfov/width per pixel horizontally and vfov/height
-    vertically; the ellipse those two spans bound has area pi/4 * a * b pixels,
-    and one pixel is one return.
+    Derived, not chosen: the silhouette subtends 2*asin(r/z); the camera
+    resolves hfov/width per pixel horizontally and vfov/height vertically; the
+    ellipse those spans bound has area pi/4 * a * b pixels, one pixel per return.
 
-    Floors to an integer, so a ball too small to fill a pixel returns 0 -- the
-    honest answer for a sub-pixel target, and the reason the caller must treat
-    0 as "no return this frame" rather than as an error.
+    Floors to an integer, so a sub-pixel ball returns 0. Callers must treat 0 as
+    "no return this frame", not as an error.
 
     `hfov_rad`/`vfov_rad` are FULL angles, twice the frustum half-angles.
     """
@@ -257,8 +208,6 @@ def ball_point_count(
     return min(int(math.floor(0.25 * math.pi * px_h * px_v)), int(max_points))
 
 
-# ── the ball's camera-facing surface ─────────────────────────────────────────
-
 def _perpendicular_basis(unit: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Two unit vectors spanning the plane normal to `unit`."""
     seed = np.zeros(3)
@@ -272,11 +221,11 @@ def ball_surface_points(center_cam, ball_radius_m: float,
                         n_points: int) -> np.ndarray:
     """`n_points` returns on the camera-FACING surface of the ball.
 
-    A depth camera samples the front surface on a pixel grid, so the returns
-    are laid out on the projected disc and then lifted onto the near side of
-    the sphere -- not scattered over the whole sphere, and not collapsed onto
-    the centre. Deterministic (a Vogel spiral, no RNG), so the only stochastic
-    part of a cloud is its depth noise.
+    A depth camera samples the front surface on a pixel grid, so returns are
+    laid out on the projected disc and lifted onto the near side of the sphere —
+    not scattered over the whole sphere, not collapsed onto the centre.
+    Deterministic (a Vogel spiral, no RNG), so a cloud's only stochastic part is
+    its depth noise.
     """
     centre = np.asarray(center_cam, dtype=np.float64).reshape(3)
     n = int(n_points)
@@ -296,8 +245,6 @@ def ball_surface_points(center_cam, ball_radius_m: float,
         + (radius * np.sin(angle))[:, None] * v_axis
     return centre + lateral - toward_camera[:, None] * bearing
 
-
-# ── depth noise ──────────────────────────────────────────────────────────────
 
 def depth_sigma_m(range_m,
                   sigma_ref_m: float = DEFAULT_DEPTH_SIGMA_M,
@@ -331,16 +278,14 @@ def apply_depth_noise(
 
         dz_i = sigma(z_i) * ( sqrt(1-f^2) * g_common + f * g_i )
 
-    f = 0 (the default) means the ball's patch has ONE disparity solution --
-    the returns keep the ball's physical 80 mm extent and the error lands on
-    the centroid, which is where RESULTS.md's 0.30 m spec and the oracle's own
-    noise both live. f = 1 makes every return independent, which at 26 m smears
-    the ball across ~1.5 m and is rejected by the shipped
-    `cluster_max_extent_m`. Both are pinned in test_synthetic_depth.py.
+    f = 0 (the default) gives the ball's patch one disparity solution: returns
+    keep the physical 80 mm extent and the error lands on the centroid, which is
+    what RESULTS.md's 0.30 m spec and the oracle's own noise describe. f = 1
+    makes every return independent, smearing the ball across ~1.5 m at 26 m,
+    which the shipped `cluster_max_extent_m` rejects.
 
-    Zero sigma reproduces the input exactly and consumes no randomness, so a
-    noiseless run is genuinely noiseless -- same contract as
-    `oracle.apply_noise`.
+    Zero sigma reproduces the input exactly and consumes no randomness — same
+    contract as `oracle.apply_noise`.
     """
     pts = np.asarray(points_cam, dtype=np.float64).reshape(-1, 3)
     if not 0.0 <= per_point_frac <= 1.0:
@@ -359,8 +304,6 @@ def apply_depth_noise(
                   + per_point_frac * independent)
     return pts + (pts / ranges[:, None]) * (sigma * unit_gauss)[:, None]
 
-
-# ── one frame ────────────────────────────────────────────────────────────────
 
 def synthesize_ball_cloud(
     rel_cam,
@@ -409,11 +352,10 @@ def synthesize_ball_cloud(
 def camera_relative(rel_body, camera_offset_xyz_m: Sequence[float]) -> np.ndarray:
     """base_link -> camera vector to ball. Returns a new array.
 
-    The static TF chain the launch file publishes puts the camera at
-    `camera_offset_xyz_m` in base_link, and detector_node transforms its
-    centroid back through that same chain. Subtracting it here makes the round
-    trip exact instead of leaving a fixed 0.10 m forward bias the oracle lane
-    does not have.
+    The launch file's static TF chain puts the camera at `camera_offset_xyz_m`
+    in base_link, and detector_node transforms its centroid back through the
+    same chain. Subtracting it here makes the round trip exact instead of
+    leaving a fixed 0.10 m forward bias.
     """
     body = np.asarray(rel_body, dtype=np.float64).reshape(3)
     offset = np.asarray(camera_offset_xyz_m, dtype=np.float64).reshape(3)

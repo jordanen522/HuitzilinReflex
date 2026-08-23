@@ -93,7 +93,7 @@ def test_track_times_out_and_reseeds():
     np.testing.assert_allclose(pos, [1.0, 2.0, 3.0])
 
 
-# ── Reseed counters ─────────────────────────────────────────────────────────
+# --- Reseed counters ---------------------------------------------------------
 # A reseed puts the velocity state back to ZERO, and a zero-velocity estimate
 # makes predict_closest_approach report tca ~ 0 with a miss equal to the current
 # range, which the trigger reads as "not a threat". Measured 2026-07-27: the
@@ -161,7 +161,7 @@ def test_out_of_order_stamp_rejected():
     assert tr.n_updates == 1
 
 
-# ── Task 3: dodge planning ────────────────────────────────────────────────
+# --- Task 3: dodge planning --------------------------------------------------
 
 from huitzilin_perception.kalman import (  # noqa: E402
     dodge_direction,
@@ -237,7 +237,7 @@ def test_plan_dodge_end_to_end_hit_geometry():
     assert np.linalg.norm(plan.direction) == pytest.approx(1.0)
 
 
-# ── Ground clearance (W4 live bring-up, 2026-07-26) ───────────────────────
+# --- Ground clearance (W4 live bring-up, 2026-07-26) -------------------------
 # The drone dodged itself into the runway from 2 m: a gravity-compensated
 # throw arrives descending, so the perpendicular escape points DOWN.
 
@@ -283,7 +283,7 @@ def test_clearance_straight_down_escape_becomes_horizontal():
     assert d[2] == pytest.approx(0.0)
 
 
-# ── Escape BEARING, not just escape magnitude (2026-08-07) ────────────────
+# --- Escape BEARING, not just escape magnitude (2026-08-07) ------------------
 # clamp_dodge_to_clearance is threat-blind by construction: it is handed a
 # direction, never a geometry. Where a re-aim had no horizontal bearing of its
 # own to keep -- a straight-down or straight-up escape -- it used to invent a
@@ -399,7 +399,7 @@ def test_plan_dodge_applies_clearance_when_altitude_given():
     assert clamped.tca_s == pytest.approx(free.tca_s)   # geometry unchanged
 
 
-# ── Escape must not depend on which way the drone was already flying ─────────
+# --- Escape must not depend on which way the drone was already flying --------
 # Measured 2026-07-27 (scripts/hz_cmd_path_probe.py, 16 dodges): escape at 1.0 s
 # correlates r = -0.911 with the alignment between the commanded escape
 # direction and the drone's own cruise, and battery min_dist correlates
@@ -475,7 +475,7 @@ def test_dodge_velocity_command_normalises_direction():
     assert cmd == pytest.approx(np.array([0.0, 0.0, 1.5]))
 
 
-# ── The dodge-authority mechanism (2026-07-27) ───────────────────────────────
+# --- The dodge-authority mechanism (2026-07-27) ------------------------------
 # Measured live: the detector publishes the TRUE ball on 5-6 consecutive frames
 # from ~4.7 m inwards, yet the track that fires a dodge is invariably exactly 3
 # updates and 0.132 s old. These tests pin why, in the tracker rather than the
@@ -571,7 +571,7 @@ def test_the_incumbent_costs_four_frames_of_warning():
     assert (contaminated - clean) / RATE_HZ == pytest.approx(0.267, abs=0.01)
 
 
-# ── MultiHypothesisTracker: the fix for the above ────────────────────────────
+# --- MultiHypothesisTracker: the fix for the above ---------------------------
 # One filter forced to represent whatever arrived last is the whole defect. Keep
 # a small set of candidate tracks instead, associate each centroid to the one
 # that explains it best, and start a new track for anything unexplained; the
@@ -693,7 +693,7 @@ def test_reset_drops_every_hypothesis():
     assert mht.confirmed(min_updates=1) == []
 
 
-# ── per-measurement covariance ───────────────────────────────────────────────
+# --- per-measurement covariance ----------------------------------------------
 #
 # The fusion hook. A depth centroid is roughly round; a measurement
 # triangulated from a stereo pair is not -- its depth error grows as z^2 while
@@ -791,7 +791,7 @@ def test_covariance_reaches_the_gate_through_the_associator():
     assert not math.isinf(loose)      # ... but it is, if the sensor is that bad
 
 
-# ── source tagging ───────────────────────────────────────────────────────────
+# --- source tagging ----------------------------------------------------------
 
 def test_source_tag_is_recorded_per_track():
     tr = ProjectileTracker()
@@ -830,7 +830,7 @@ def test_the_multi_hypothesis_tracker_forwards_covariance_and_source():
     assert track._P[2, 2] > track._P[0, 0]   # the loose axis stayed loose
 
 
-# ── cue-gated confirmation ───────────────────────────────────────────────────
+# --- cue-gated confirmation --------------------------------------------------
 
 def test_no_cue_ever_published_means_the_patrol_threshold():
     """The inertness guarantee. Nothing publishes /threat/cue today, and until
@@ -863,7 +863,7 @@ def test_a_zero_timeout_disables_the_alert_entirely():
                                  patrol_updates=3, alert_updates=2) == 3
 
 
-# ── vertical escape ──────────────────────────────────────────────────────────
+# --- vertical escape ---------------------------------------------------------
 
 def _clamp(direction, alt, **kw):
     kw.setdefault("floor_m", 1.0)

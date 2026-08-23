@@ -1,87 +1,29 @@
-"""synthetic_depth_publisher_node.py — a synthetic cloud for the REAL detector.
+"""Publish a synthetic ball cloud for the real detector to cluster.
 
-WHAT THIS IS. It publishes a `sensor_msgs/PointCloud2` on `/oak/points` that the
-unmodified `detector_node.py` consumes, so the real pipeline — ROI gate, voxel
-downsample, background differencing, Euclidean clustering, centroid extraction —
-computes the centroid instead of it being asserted. **It is a synthetic cloud
-through a real pipeline. It is not a rendered depth sensor.** Nothing measured
-through this lane is evidence that a real camera achieves the modelled reach;
-that remains a hardware measurement.
+Feeds `/oak/points` from Gazebo truth so the unmodified detector_node computes
+the centroid (ROI gate, voxel downsample, background differencing, clustering)
+instead of having it asserted, as oracle_detector_node does. A synthetic cloud
+through a real pipeline; not a rendered depth sensor, and not evidence about
+real hardware reach.
 
-WHY IT EXISTS. Every result in docs/RESULTS.md was produced by
-`oracle_detector_node.py`, which reads Gazebo truth and publishes
-`/threat/centroid` directly. It subscribes to no cloud and shares no code with
-the detector, so "dodges a 20 m/s projectile using depth sensing" was not true
-*of that result* — the clustering pipeline never ran at 20 m/s. This node closes
-that gap: the truth source stays (an 80 mm ball at 26 m is sub-pixel for any
-depth camera this world can render, which is exactly why the oracle exists), but
-the detection is now COMPUTED by the real algorithm rather than declared.
+In:  /gz/dynamic_poses (TFMessage, BEST_EFFORT), /huitzilin/odom (Odometry)
+Out: /oak/points (PointCloud2, frame camera_optical_frame, gz FLU convention)
 
-MUTUALLY EXCLUSIVE with `oracle_detector`, and with a second `detector`. Two
-publishers on `/threat/centroid` give the tracker two uncorrelated views of one
-ball. `week6_synthetic_depth.launch.py` enforces this by never including
-`week3_perception` and never starting the oracle — there is no interlock here.
-
-THE CLOUD CONTAINS THE BALL AND NOTHING ELSE — read this before quoting a number
-------------------------------------------------------------------------------
-No ground, no runway, no background return of any kind is synthesized. The
-consequence for `detector_node`'s background-differencing stage is deliberate
-and has to be carried with every result taken through this lane:
-
-  * The stage still RUNS. Every return is novel, so the foreground mask is
-    all-True and the whole cloud reaches the clusterer. Nothing is bypassed and
-    `detector_node.py` is byte-identical.
-  * It therefore rejects NOTHING. This lane measures the ROI / voxel / cluster /
-    extent / centroid path. It says nothing whatever about false-positive
-    rejection against real scene clutter — the Week 4 patrol figures in
-    CLAUDE.md remain the only measurement of that, and a false-dodge count from
-    this lane would be meaningless.
-  * `synthetic_depth_detector.yaml` therefore ships `use_persistent_bg: false`.
-    With a ball-only cloud the persistent voxel map has nothing to model and one
-    way to do harm: it retains a throw's trail for `bg_map_ttl_s` 20 s, while
-    `dodge_battery` re-throws after `settle_s` 6 s down the same corridor in the
-    same odom frame, so throw 2 onward would be absorbed into throw 1's trail
-    and read as background. The Week-3 rolling deque holds 5 frames and
-    differences against the older 4 (0.067 s at 60 Hz), which cannot span two
-    throws.
-
-THE SLOW-BALL FLOOR THE DEQUE IMPOSES — this is not free, and it is silent
--------------------------------------------------------------------------
-Frame differencing keeps a return only if it is further than `diff_threshold_m`
-from every background return, so a ball must advance more than one threshold per
-frame or it sits inside its own previous blob and the ENTIRE cloud reads as
-background:
-
-    v_min = diff_threshold_m * delivered_rate_hz = 0.10 * 60 = 6.0 m/s
-
-Below `v_min` nothing is detected, at any range, with every stage upstream
-looking healthy — measured through the real `voxel_downsample` /
-`foreground_mask` / `cluster_and_split`: 20/14/8 m/s cluster on 100% of frames,
-6 m/s on 20%, and 4 m/s (B01's speed) on 0 of 45. It does not bite at long range,
-where the 0.30 m common-mode depth jitter dwarfs the 0.10 m threshold, only at
-short range where sigma collapses to 0.005 m. The rendered lane never met it
-because it runs at 15 Hz (floor 1.5 m/s); the 60 Hz default here is what makes it
-reachable, and 60 Hz is kept because it is the configuration the headline 26 m /
-20 m/s result was flown at.
-
-This node cannot prevent it — the differencing is the detector's — so it does the
-next best thing and makes it LOUD: the computed floor is printed as a WARN in the
-startup banner, for the same reason CLAUDE.md makes `FRAME_CLASS=0` and the ball
-prefixes loud. To fly a scenario slower than `v_min`, lower `rate_hz` (15 Hz
-gives a 1.5 m/s floor) and quote the lower rate beside the result.
-
-Frames. The ball is taken from Gazebo (both models, so the world/odom origin
-offset cancels), rotated into base_link with the odom attitude — the same
-quaternion `evasion_node` uses to rotate it back — and then shifted by the
-camera mount offset so the round trip through the static TF chain is exact
-rather than carrying a fixed 0.10 m forward bias. Points go out in the gz sensor
-body convention (FLU: x forward, y left, z up) under the header frame
-`camera_optical_frame`, which is what the real `ros_gz_bridge` produces and what
-`detector.yaml`'s `cloud_convention: "gz_flu"` remaps at ingest. Publishing
-optical-convention points instead would silently mirror the cloud.
-
-Stamps come from the Gazebo pose message, never from arrival time: the filter
-differentiates consecutive stamps, and arrival is not emission (CLAUDE.md).
+Design rules:
+  * Mutually exclusive with oracle_detector and with a second detector — two
+    publishers on /threat/centroid give the tracker two uncorrelated views of
+    one ball. week6_synthetic_depth.launch.py enforces it by never starting
+    both; there is no interlock here.
+  * The cloud holds the ball and nothing else — no ground, no clutter. Background
+    differencing runs (every return is novel) but rejects nothing, so this lane
+    measures the ROI/voxel/cluster/extent/centroid path only and can say nothing
+    about false-positive rejection. That is also why synthetic_depth_detector.yaml
+    ships `use_persistent_bg: false`: the persistent map has nothing to model
+    here and would absorb throw N into throw N-1's trail.
+  * Points go out FLU (x forward, y left, z up), matching what ros_gz_bridge
+    produces and what detector.yaml's `cloud_convention: "gz_flu"` remaps at
+    ingest. Optical-convention points would silently mirror the cloud.
+  * Stamps come from the pose message, never arrival time.
 """
 
 from __future__ import annotations

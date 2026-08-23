@@ -1,26 +1,14 @@
 #!/usr/bin/env bash
-# run_heldout_eval.sh — the OFFICIAL held-out perception scoring pass.
+# run_heldout_eval.sh — official held-out perception scoring pass.
 #
-# Supersedes the ad-hoc score_heldout_truth.sh that ran the 2026-08-22
-# 04:03 PDT pass (2/18 recalled). That script launched ONE detector process
-# for the whole 24-scenario split. params/rendered_detector.yaml (frozen,
-# unchanged by this script) sets use_persistent_bg:true, bg_map_ttl_s:20.0 --
-# by design, for the detector's own real operation. Run across a whole split
-# in one process, that same design makes later scenarios inherit background
-# state from earlier scenarios that share corridor geometry
-# (offset_forward_m), which is a harness isolation bug: each scenario must be
-# scored as an independent bag, and independence requires each replay to see
-# the cold-start background the detector actually evaluates against in real
-# operation.
-#
-# Diagnosed 2026-08-22 (background agent a63ca933ed20696a4): H12 scored
-# matched=0 after 11 prior scenarios shared its process, matched=4 after 2,
-# matched=5 (same near-perfect 0.02-0.08m errors as its other matches) run
-# alone. H02 and H05 reproduced matched=0 even from a cold process --
-# real misses, not contamination.
-#
-# THE FIX: one detector process PER SCENARIO. Same detector binary, same
-# frozen rendered_detector.yaml, same bags -- restarted, not reconfigured.
+# One detector process PER SCENARIO. rendered_detector.yaml (frozen, and never
+# edited by this script) sets use_persistent_bg:true / bg_map_ttl_s:20.0, which
+# is right for real operation but leaks background-map state between scenarios
+# that share corridor geometry (offset_forward_m) when one process replays a
+# whole split -- later scenarios inherit an earlier scenario's background and
+# score as misses. Each scenario must see the cold-start background the
+# detector really faces, so the same binary and the same params are restarted
+# per scenario rather than reconfigured.
 #
 # Usage:
 #   ./scripts/run_heldout_eval.sh
@@ -179,17 +167,13 @@ for SID in $SCENARIO_IDS; do
     exit 1
   fi
 
-  # kill only sends the signal -- it does not block until the process is
-  # actually gone. A python/rclpy node can take real wall-clock time to tear
-  # down its DDS publishers, and the next scenario's warmup+detector start
-  # immediately after this returns. If the old detector is still alive when
-  # the next one starts, both briefly publish to the same reliable
-  # /threat/centroid topic, and the new scorer's subscriber (queue depth 10)
-  # can pick up a few of the dying process's late messages as if they were
-  # the new scenario's own detections -- the exact cross-scenario
-  # contamination this per-scenario-restart harness exists to prevent, just
-  # at the restart boundary instead of within one long-lived process.
-  # Escalate to SIGKILL and confirm death before moving on.
+  # kill only signals; an rclpy node takes real wall-clock time to tear its DDS
+  # publishers down. If it is still alive when the next scenario starts, both
+  # detectors publish to the reliable /threat/centroid and the new scorer's
+  # subscriber (queue depth 10) can take the dying one's late messages as its
+  # own detections -- the same cross-scenario contamination this harness exists
+  # to prevent, just at the restart boundary. Escalate to SIGKILL and confirm
+  # death before moving on.
   kill "$DETECTOR_PID" 2>/dev/null || true
   for _ in $(seq 1 20); do
     kill -0 "$DETECTOR_PID" 2>/dev/null || break

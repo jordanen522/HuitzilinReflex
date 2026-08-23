@@ -33,7 +33,7 @@ def _yaw(rad):
     return quat_to_rot(0.0, 0.0, math.sin(rad / 2.0), math.cos(rad / 2.0))
 
 
-# ── which model is the ball ──────────────────────────────────────────────────
+# --- which model is the ball -------------------------------------------------
 #
 # These exist because getting this wrong is SILENT. The oracle matched only
 # "projectile_" while dodge_battery names its ball "ball_...", so the oracle
@@ -103,7 +103,7 @@ def test_an_empty_prefix_list_matches_nothing():
                        drone_world=(0.0, 0.0, 0.0), prefixes=[]) is None
 
 
-# ── geometry ─────────────────────────────────────────────────────────────────
+# --- geometry ----------------------------------------------------------------
 
 def test_level_drone_sees_a_ball_ahead_straight_ahead():
     rel = to_body([5.0, 0.0, 0.0], IDENTITY)
@@ -127,7 +127,7 @@ def test_the_round_trip_evasion_node_performs_is_exact():
     np.testing.assert_allclose(back, rel_world, atol=1e-12)
 
 
-# ── visibility gates ─────────────────────────────────────────────────────────
+# --- visibility gates --------------------------------------------------------
 
 def test_a_ball_beyond_the_configured_range_is_not_reported():
     assert not in_view([12.1, 0.0, 0.0], detection_range_m=12.0)
@@ -163,7 +163,7 @@ def test_a_ball_exactly_on_the_drone_is_not_reported():
     assert not in_view([0.0, 0.0, 0.0], detection_range_m=12.0)
 
 
-# ── noise ────────────────────────────────────────────────────────────────────
+# --- noise -------------------------------------------------------------------
 
 def test_zero_sigma_is_exactly_noiseless():
     rng = np.random.default_rng(1)
@@ -195,7 +195,7 @@ def test_a_noiseless_oracle_still_yields_an_invertible_covariance():
     assert np.linalg.det(R) > 0.0
 
 
-# ── dropout and determinism ──────────────────────────────────────────────────
+# --- dropout and determinism -------------------------------------------------
 
 def test_dropout_removes_roughly_the_requested_fraction():
     rng = np.random.default_rng(3)
@@ -241,7 +241,7 @@ def test_a_visible_ball_is_reported_in_the_body_frame():
     np.testing.assert_allclose(got, [6.0, 0.0, 0.0], atol=1e-9)
 
 
-# ── pipeline delay ───────────────────────────────────────────────────────────
+# --- pipeline delay ----------------------------------------------------------
 #
 # The oracle without this hands the tracker a measurement the instant the world
 # moves, which no camera does. The delay comes straight off tca, the term the

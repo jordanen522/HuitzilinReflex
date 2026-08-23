@@ -23,7 +23,7 @@ def raising(exc):
     return _importer
 
 
-# ── backend selection never raises ───────────────────────────────────────────
+# --- backend selection never raises ------------------------------------------
 
 def test_auto_degrades_to_a_null_backend_without_the_libraries():
     backend, reasons = select_backend("auto", importer=raising(ImportError))
@@ -64,7 +64,7 @@ def test_a_degraded_backend_still_accepts_calls():
     assert backend.calls == [True, False]
 
 
-# ── one failing channel must not silence the other ───────────────────────────
+# --- one failing channel must not silence the other --------------------------
 
 class _Boom:
     def set(self, on):
@@ -89,7 +89,7 @@ def test_composite_never_propagates():
     assert comp.error_count >= 2
 
 
-# ── the alarm latch ──────────────────────────────────────────────────────────
+# --- the alarm latch ---------------------------------------------------------
 
 POLICY = AlarmPolicy(min_on_s=0.5, max_on_s=5.0, stale_off_s=3.0)
 

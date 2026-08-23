@@ -87,7 +87,7 @@ ros2 run tf2_ros static_transform_publisher \
   --ros-args -p use_sim_time:=true >/dev/null 2>&1 &
 TF2_PID=$!
 
-# ── Clock warm-up ─────────────────────────────────────────────────────────────
+# --- Clock warm-up -----------------------------------------------------------
 # detector_node installs clock_guard, a ONE-SHOT startup check: it polls at 2 Hz
 # and destroys its own timer on the first verdict that is not WAIT. Started with
 # use_sim_time:=true it must see a /clock publisher AND a ROS time past zero
