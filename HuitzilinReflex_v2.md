@@ -1,32 +1,33 @@
 # Project HuitzilinReflex
 
-### Autonomous Agile Patrol & Projectile-Evasion Drone — Summer 2026
+### Autonomous Agile Patrol & Projectile-Evasion Drone
 
-9-week project: a 3.5″ ducted micro-drone that patrols a designated area, signals with
-light/sound, and autonomously dodges incoming projectiles using an onboard stereo depth
-stack. Vlogged weekly. **v2 — as-built:** hardware list reflects parts actually
-purchased; the one structural change from v1 is that the airframe's stock Betaflight
-F722 flight controller is **replaced** with an ArduPilot-capable H7 board (Week 5).
+A 3.5" ducted micro-drone that patrols a designated area, signals with light/sound, and
+autonomously dodges incoming projectiles using an onboard stereo depth stack. The
+airframe's stock Betaflight F722 flight controller is replaced with an ArduPilot-capable
+H7 board -- the one fabrication step in an otherwise integrate-don't-fabricate build.
 
-**Name:** *Huitzilin* (Classical Nahuatl) = "hummingbird" — the only bird that hovers in
-place and darts omnidirectionally in a fraction of a second; in Aztec belief, fallen
-warriors returned as hummingbirds. *Reflex* is literal: the sense → dodge loop fires as a
-reaction, not a decision. "Hummingbird Reflex" — loiter like a hover, dodge like a dart.
+**Name:** *Huitzilin* (Classical Nahuatl) = "hummingbird" -- the only bird that hovers in
+place and darts omnidirectionally in a fraction of a second. *Reflex* is literal: the
+sense -> dodge loop fires as a reaction, not a decision.
+
+Current state, measured numbers and open problems: `README.md`, `docs/RESULTS.md`,
+`docs/KNOWN_ISSUES.md`. This document owns the objectives, the BOM and the hardware
+notes.
 
 ---
 
 ## 1. Overview & Objectives
 
-3.5-inch ducted micro-platform keeping full CS/robotics complexity (perception, state
+A 3.5-inch ducted micro-platform keeping full CS/robotics complexity (perception, state
 estimation, control) while staying physically safe: integrated ducts fully isolate the
 props, so rapid evasion test cycles run without exposed blades.
 
-1. **Autonomous patrol & signaling** — persistent pathing with strobe + siren payload.
-2. **Kinematic evasion** — low-latency detection → intercept prediction → sharp dodge.
+1. **Autonomous patrol & signaling** -- persistent pathing with strobe + siren payload.
+2. **Kinematic evasion** -- low-latency detection -> intercept prediction -> sharp dodge.
 
-**Philosophy:** simulate first, fly last; *integrate, don't fabricate*. The fragile parts
-(airframe, depth stack) are plug-and-play hardware; effort concentrates on the
-perception + evasion loop, de-risked in sim. The one fabrication step is the FC swap.
+Simulate first, fly last. The fragile parts (airframe, depth stack) are plug-and-play
+hardware; effort concentrates on the perception + evasion loop, de-risked in sim.
 
 ---
 
@@ -91,8 +92,8 @@ Node graph, topics, rates, and the full contract table: `docs/architecture.md`.
 
 ## 5. Roadmap (Simulation-First)
 
-Weeks 1–4 are pure simulation, hardware bring-up runs in parallel on the bench with props
-off, and real flight is staged late.
+Simulation first; hardware bring-up happens on the bench with props off, and real
+flight is staged late.
 
 Completed milestones:
 
@@ -163,5 +164,5 @@ Lite's measured ~3.4 m caps the aircraft at ~3.2 m/s. The See3CAM_24CUG is the c
 variant and is the wrong part for this role. Reasoning and the sector cost:
 `docs/RESULTS.md` §4.1 and §5.
 
-*Prices June 2026, several on sale. Not yet purchased: 3.3→5 V level shifter for the LED
+*Prices as of June 2026. Not yet purchased: 3.3→5 V level shifter for the LED
 data line; DJI FPV goggles if manual FPV flight is desired in Week 8.*

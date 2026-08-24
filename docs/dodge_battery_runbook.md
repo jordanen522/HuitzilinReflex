@@ -75,23 +75,20 @@ did the dodge actually buy". For that:
   EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6
   ```
 
-  The cause is the throw-window gate; dodge direction is only ~5° off. The gate holds each
-  throw until the drone hits a **rolling-max** cruise (`min_cruise_frac` 0.95 of a 3.49 m/s
-  max, against a 2.09 m/s median), so the lead extrapolates a peak the drone never
-  sustains — over-lead +1.5 m at 1.2 s of ball flight, +2.6 m at 1.5 s, 96–98% along-track.
-  Hover also drops the straight-leg requirement, which is what made ranges ≥ 18 m
-  unmeasurable under patrol (9/10 throws skipped). Hover is the trustworthy instrument, not
-  the generous one: it exposes a dead time out to t ≈ 0.20 s that patrol hides.
-- **Score on the counterfactual, never on `dodged`.** On a hit course means
-  `counterfactual_min_m` ≤ 0.30 m; a save is that *and* `actual_min_m` > 0.30 m. A cell
-  with no on-course throws measured nothing and is not reported as 0/N.
-- **Escape displacement cannot referee a lever.** Patrol's counterfactual extrapolates a
-  straight line through a vehicle tracking waypoints, so the vehicle's own curvature lands
-  in the escape term: median fit residual 0.0112 m patrol vs 0.0011 m hover, and at matched
-  tca 0.385 s the two disagree 19x. Two identical control arms have drifted 1.58x apart,
-  larger than the effect they were controlling for. Measure in hover, A/B within one run,
-  fly the control twice, and prefer the dataflash velocity step (`PSCN`/`PSCE` `DVN`/`DVE`
-  vs `VN`/`VE`), which compares command against achievement inside a single dodge.
+  The cause is the throw-window gate, not the dodge direction (only ~5 deg off): the
+  gate holds each throw until the drone hits a rolling-max cruise, so the lead
+  extrapolates a peak the drone never sustains. Hover also drops the straight-leg
+  requirement, which is what made ranges >= 18 m unmeasurable under patrol. Hover is the
+  trustworthy instrument, not the generous one -- it exposes a dead time patrol hides.
+  Full figures: `docs/RESULTS.md` section 9.
+- **Score on the counterfactual, never on `dodged`.** The rule and its traps -- including
+  the blank `counterfactual_min_m` on `NO_DODGE` rows -- are in `docs/RESULTS.md`
+  section 10, which owns them.
+- **Escape displacement cannot referee a lever.** Patrol's counterfactual puts the
+  vehicle's own curvature into the escape term (two identical control arms drifted 1.58x
+  apart, larger than the effect they controlled for). Measure in hover, A/B within one
+  run, fly the control twice, and prefer the dataflash velocity step (`PSCN`/`PSCE`
+  `DVN`/`DVE` vs `VN`/`VE`). Figures: `docs/RESULTS.md` section 9.
 
 ### The oracle sensor
 

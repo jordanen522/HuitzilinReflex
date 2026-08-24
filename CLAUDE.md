@@ -57,18 +57,20 @@ ros2 run huitzilin_perception payload --ros-args \
 ```
 The supervisor logs which watches are armed at startup
 (`watching: odom(1.0s) patrol_state(2.0s) cloud(1.0s) | disabled: cmd_vel`).
-A timeout of `0.0` in `supervisor.yaml` disables that watch; `cmd_vel` ships disabled
-because position-mode patrol publishes no ROS setpoint stream to watch.
+A timeout of `0.0` disables that watch -- see the sharp edge below for why `cmd_vel`
+ships disabled.
 
 The oracle lane — a synthetic far-range sensor, used for every result in `docs/RESULTS.md`:
 ```bash
 # Replaces the detector; never run both (both publish /threat/centroid).
-# This command pins reach only. oracle_rate_hz (default 14.5) and
-# fov_half_angle_deg (params/oracle_detector.yaml, default 45.0) stay at
-# their defaults silently — pin and quote all three axes.
+# This command pins reach only. The other two axes stay at their yaml
+# defaults silently (params/oracle_detector.yaml: rate_hz 14.5,
+# fov_half_angle_deg 45.0, detection_range_m 12.0) -- pin and quote all three.
 ros2 launch huitzilin_perception week6_oracle.launch.py \
   with_patrol:=true detection_range_m:=26.0
 
+# Battery modes: week6 (oracle) | week6depth (real detector) |
+# week7 (rendered lane) | sweep (parameter sweep) | no arg (full battery).
 ./scripts/run_dodge_battery.sh week6
 
 # Any escape or save measurement: HOVER. Patrol cannot deliver a hit at range.
@@ -121,7 +123,7 @@ Full frame table and TF tree: `docs/frames.md`.
 - **Bags recorded before `b0eedd5` lack attitude in `/huitzilin/odom`** — the detector falls back to camera-frame differencing. Never score against pre-`b0eedd5` bags.
 - **Never derive velocity from `/gz/dynamic_poses` arrival times** — arrival is not emission; use the pose stamps.
 - **`oracle_detector` and `detector` must never run together.** Both publish `/threat/centroid`, so the tracker would get two uncorrelated views of one ball. `week6_oracle.launch.py` never includes `week3_perception`, and pins `with_supervisor:=false` because it publishes no `/oak/points` to watch.
-- **A sensor is reach, sector AND rate.** Quoting only `detection_range_m` leaves `oracle_rate_hz`/`rate_hz` and `fov_half_angle_deg` (or the depth lane's `fov_half_*_deg` + `image_*_px`) at defaults, which silently describes a different instrument: ±13.5°/60 Hz optics against a ±33.65°/15 Hz reference is 16.6% of the solid angle and ~1.6 clouds/throw against ~2.8, versus `min_track_updates: 3`. Match all three axes, not just rate.
+- **A sensor is reach, sector AND rate.** Quoting only `detection_range_m` leaves `rate_hz` and `fov_half_angle_deg` (or the depth lane's `fov_half_*_deg` + `image_*_px`) at defaults, which silently describes a different instrument: ±13.5°/60 Hz optics against a ±33.65°/15 Hz reference is 16.6% of the solid angle and ~1.6 clouds/throw against ~2.8, versus `min_track_updates: 3`. Match all three axes, not just rate.
 - **`detection_range_m` is an INPUT, not a result**, and it is read once at startup. `oracle_detector_node.py.__init__` reads it into an attribute and installs no parameter callback — `ros2 param set` is accepted and ignored. Every range change needs a full stack restart. Pass it as a float: `detection_range_m:=5` is inferred as an integer and rejected.
 - **An oracle cell must raise `offset_forward_m` with its range** — `offset_forward_m ≥ detection_range_m + 8.5` at 20 m/s, or the ball enters the gate from inside it and the cell delivers a shorter sensor than its label. Verify per run: `first_det_range_m` in the CSV must match the launched `detection_range_m` to ~0.2 m.
 - **`hover_mode` is the only configuration that has ever put the ball on a hit course.** Under patrol, 0 of 98 throws arrived inside 0.109 m; with `EXTRA_ARGS="-p hover_mode:=true"`, 40/40 did. The throw-window gate holds each throw until the drone reaches a rolling-max cruise (`min_cruise_frac` 0.95 of a 3.49 m/s max against a 2.09 m/s median), so the lead extrapolates a peak the drone never sustains. Hover also drops the straight-leg requirement, which is what made ranges ≥18 m unmeasurable.
@@ -139,19 +141,9 @@ Full frame table and TF tree: `docs/frames.md`.
 
 ## Key docs
 
-| Doc | Contents |
-|---|---|
-| `docs/RESULTS.md` | Measured results: the tca law, the sensor requirement, scoring rules |
-| `docs/KNOWN_ISSUES.md` | Open problems in the rendered sensor lane |
-| `HuitzilinReflex_v2.md` | Master doc: objectives, BOM, roadmap |
-| `docs/architecture.md` | Node graph + message/service contracts |
-| `docs/frames.md` | Coordinate frames + TF tree |
-| `docs/state_machine.md` | State/transition table |
-| `docs/requirements.md` | REQ-01…REQ-16 + non-goals |
-| `docs/SAFETY_CASE.md` | FMEA, geofence/RTL, kill-switch, safety/legal rules |
-| `docs/SETUP.md` | Install from scratch |
-| `docs/bag_capture_runbook.md` | Bag re-capture + regression/tuning procedure (Dell) |
-| `docs/dodge_battery_runbook.md` | Dodge battery + sweep procedure (Dell) |
+The full index is the Documentation table in `README.md`. The two consulted most
+here: `docs/RESULTS.md` (every measured number, and the scoring rules in section 10)
+and `docs/KNOWN_ISSUES.md` (open problems in the rendered lane).
 
 Development history is in git, not in the tree: `git log -p docs/`. `lab/probe_out/` is
 tracked and is the raw data behind `docs/optics_probe.md`; the 191 oracle/hover result

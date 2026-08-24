@@ -11,10 +11,10 @@ Ubuntu 24.04.
 
 ## Status
 
-Active, simulation phase. Weeks 1–4 are done: patrol loop, a detection pipeline
-scored against a labelled bag library, and a Kalman filter plus dodge trigger,
-measured end to end (see [Results](#results)). Hardware bring-up (Weeks 5–9 of the
-roadmap) has not started.
+Active, simulation phase. The patrol loop, a detection pipeline scored against a
+labelled bag library, and a Kalman filter plus dodge trigger are done and measured
+end to end (see [Results](#results)). The rendered long-range sensor lane is in
+progress. Hardware bring-up has not started.
 
 Open problems are tracked in
 [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
@@ -147,7 +147,8 @@ launched oracle rate.
 
 Bring-up is three terminals (Gazebo, SITL, ROS launch) followed by three service calls
 in a fixed order. The commands and the exact service types are in
-[`docs/SETUP.md`](docs/SETUP.md). Read the sharp-edges list before the first run:
+[`CLAUDE.md`](CLAUDE.md); [`docs/SETUP.md`](docs/SETUP.md) covers installing from
+scratch. Read the sharp-edges list before the first run:
 several failure modes are silent, notably `FRAME_CLASS=0`, where the aircraft arms,
 accepts takeoff and produces no lift.
 
@@ -164,6 +165,8 @@ accepts takeoff and produces no lift.
 | [`docs/state_machine.md`](docs/state_machine.md) | Supervisor states and transitions |
 | [`docs/requirements.md`](docs/requirements.md) | REQ-01 … REQ-16 and non-goals |
 | [`docs/SAFETY_CASE.md`](docs/SAFETY_CASE.md) | FMEA, geofence/RTL, kill-switch, operating rules |
+| [`docs/SETUP.md`](docs/SETUP.md) | Install from scratch |
+| [`docs/optics_probe.md`](docs/optics_probe.md) | Rendered-camera reach probe; the AR0234 and depth-noise measurements |
 | [`docs/bag_capture_runbook.md`](docs/bag_capture_runbook.md) | Bag capture and detection regression (Dell) |
 | [`docs/dodge_battery_runbook.md`](docs/dodge_battery_runbook.md) | Dodge battery and sweep procedure (Dell) |
 
