@@ -392,7 +392,7 @@ def test_the_window_inversion_crossover_is_where_the_physics_puts_it():
 
 
 def test_the_shipped_library_never_reaches_the_inversion():
-    # Why this is a latent hazard and not a live bug: capture_scenario.sh:82
+    # Why this is a latent hazard and not a live bug: capture_scenario.sh
     # writes detection_window_s: 4.0 into every sidecar, and the largest
     # time_to_closest_s in scenario_matrix.yaml is 1.5 s. Nothing in the
     # shipped library is near EITHER route into the inversion.
@@ -434,11 +434,11 @@ def test_strict_window_true_for_detection_slightly_before_closest_approach():
 
 
 def test_strict_window_rejects_cold_map_burst_at_bag_start():
-    # CRITICAL-1, stated as the failure it prevents. detector.yaml:229-231
-    # documents this library's dominant FP class as a cold-background-map
-    # burst in the first ~1-2 s of a replay. Here the detector NEVER sees
-    # the ball; all it emits is that burst. Under the earlier revision's symmetric gate
-    # this scored a true positive and read as 100% recall.
+    # Stated as the failure it prevents. detector.yaml documents this
+    # library's dominant FP class, under cluster_max_extent_m, as a
+    # cold-background-map burst in the first ~1-2 s of a replay. Here the
+    # detector NEVER sees the ball; all it emits is that burst. Under the old
+    # symmetric gate this scored a true positive and read as 100% recall.
     cold_burst = [100.05, 100.31, 100.62, 100.94, 101.27, 101.40]
     assert is_in_window_symmetric_legacy(
         cold_burst, bag_start=100.0, time_to_closest_s=0.75, window_s=4.0

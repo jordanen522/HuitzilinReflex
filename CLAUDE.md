@@ -153,6 +153,7 @@ Full frame table and TF tree: `docs/frames.md`.
 | `docs/bag_capture_runbook.md` | Bag re-capture + regression/tuning procedure (Dell) |
 | `docs/dodge_battery_runbook.md` | Dodge battery + sweep procedure (Dell) |
 
-Development history is in git, not in the tree: `git log -p docs/`. The experiment harness
-and 191 raw result files lived in `lab/` until the project closed —
-`git show 3cf0bbb:lab/…`.
+Development history is in git, not in the tree: `git log -p docs/`. `lab/probe_out/` is
+tracked and is the raw data behind `docs/optics_probe.md`; the 191 oracle/hover result
+files under `lab/results/` were pruned from the tree and live at
+`git show 3cf0bbb:lab/results/…`.

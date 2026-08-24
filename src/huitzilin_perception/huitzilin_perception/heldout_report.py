@@ -66,10 +66,10 @@ def build_report(results: list[dict], split: str, bag_dir: str,
     lines += [
         "",
         "-" * 70,
-        f"  Positives enumerated (denominator, per section 4.1): {n_pos_enum}",
+        f"  Positives enumerated (denominator): {n_pos_enum}",
         f"  Positives RECALLED (matched >= K): {recalled}/{n_pos_enum}"
         f"  = {recall*100:.1f}%",
-        f"  Negatives enumerated (denominator, per section 4.2): {n_neg_enum}",
+        f"  Negatives enumerated (denominator): {n_neg_enum}",
         f"  Negatives FIRED (unmatched >= K): {fired}/{n_neg_enum}"
         f"  = {fp_rate*100:.1f}%",
         f"  Voids: {len(voids)}  {[v['id'] for v in voids]}",
@@ -77,13 +77,13 @@ def build_report(results: list[dict], split: str, bag_dir: str,
         "",
     ]
     if recalled == n_pos_enum and n_pos_enum > 0:
-        lines.append(f'  CLAIM PER SECTION 5: "100 % recall on {n_pos_enum} '
+        lines.append(f'  RECALL CLAIM: "100 % recall on {n_pos_enum} '
                       f'held-out positive scenarios"')
     elif n_pos_enum - recalled == 1:
-        lines.append(f"  CLAIM PER SECTION 5: \"{recall*100:.0f}% recall "
+        lines.append(f"  RECALL CLAIM: \"{recall*100:.0f}% recall "
                       f"({recalled}/{n_pos_enum})\". THE 100% CLAIM IS DROPPED.")
     else:
-        lines.append(f"  CLAIM PER SECTION 5: measured figure only "
+        lines.append(f"  RECALL CLAIM: measured figure only "
                       f"({recalled}/{n_pos_enum}) — investigation required.")
     lines += ["=" * 70, ""]
     return "\n".join(lines)

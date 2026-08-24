@@ -49,7 +49,8 @@ For each scenario in the chosen split:
 
      TWO KINDS OF NEGATIVE, and only one of them is a null control:
        - GENUINELY BALL-FREE (speed_mps 0.0 — N01, N02, N05, T11, T14): no
-         spawn command is ever issued (capture_scenario.sh:47,89-102), so
+         spawn command is ever issued (capture_scenario.sh spawns only when
+         the sidecar's speed is > 0), so
          the bag contains no projectile. Attributing a ball in one of these
          refutes the method, full stop. This is the falsification control.
        - BALL PRESENT, MUST NOT BE DETECTED (N03/T12 behind the camera at
@@ -226,7 +227,7 @@ class ScorerNode(Node):
         # never has to change. Only used for attribution: a real
         # ball produces a closing sequence of centroids with DECREASING
         # range across frames, first-sight terrain/patrol-motion noise does
-        # not — see _attributable_to_ball and the task-5b-report.md.
+        # not — see _attributable_to_ball.
         self._detection_positions: list[tuple[float, float, float, float]] = []
         self._listening = False
 
@@ -471,7 +472,7 @@ class ScorerNode(Node):
         speed_mps = float(scen.get("speed_mps") or 0.0)
         ctl_speed = LIBRARY_MAX_BALL_SPEED_MPS
         # A negative is "ball-free" only when no projectile was spawned at
-        # all. capture_scenario.sh:47 spawns iff speed > 0, so speed_mps
+        # all. capture_scenario.sh spawns iff speed > 0, so speed_mps
         # 0.0 IS the ball-free test. N03/N04/T12/T13 carry 8.0/8.0/11.0/11.0
         # — a real ball, aimed where the detector must not see it.
         ball_free = speed_mps == 0.0

@@ -737,7 +737,8 @@ def dodge_velocity_command(
     from where the drone was when the dodge fired.
 
     Commanding an absolute dodge_speed_mps * direction gets this wrong,
-    measured over 16 dodges (scripts/hz_cmd_path_probe.py): it
+    measured over 16 dodges (probe deleted in 28f0f40; recover it with
+    `git show 28f0f40^:scripts/hz_cmd_path_probe.py`): it
     REPLACES the ~4.2 m/s patrol cruise with a 1.5 m/s command, so the drone
     sheds 2.5-3.9 m/s within a second and the deviation is dominated by
     -v_cruise. Its component along the escape direction is

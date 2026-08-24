@@ -48,12 +48,12 @@ class MavBridgeNode(Node):
         self._lock = threading.Lock()
         self._router = RouterState()
 
-        # --- ROS interfaces (contracts: see playbook §3) ---
+        # ROS interfaces. Contracts: docs/architecture.md.
         self.create_subscription(Twist, "/huitzilin/cmd_vel", self._on_cmd_vel, 10)
         self.create_subscription(Twist, "/cmd/evade", self._on_evade, 10)
         # A parallel topic rather than a change to /cmd/evade: Twist has no
         # acceleration field, and widening the evade contract would drag the
-        # patrol-handoff behaviour and hz_cmd_path_probe.py along with it. An
+        # patrol-handoff behaviour along with it. An
         # absent publisher simply means velocity-only setpoints, which is the
         # pre-existing behaviour.
         self.create_subscription(Accel, "/cmd/evade_accel", self._on_evade_accel, 10)

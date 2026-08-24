@@ -137,7 +137,7 @@ def clock_msg_to_sim_t(sec: int, nanosec: int) -> float:
 
 # Detection window
 #
-# capture_scenario.sh:21 fires the projectile SPAWN_LEAD seconds INTO the
+# capture_scenario.sh fires the projectile SPAWN_LEAD seconds INTO the
 # recording, not at bag start -- the script writes the label sidecar, starts
 # `ros2 bag record`, then only after this many seconds calls
 # spawn_projectile. `time_to_closest_s` in the matrix/sidecar is defined
@@ -160,13 +160,14 @@ SPAWN_LEAD_S = 3.0
 # ground sqrt(2*2.0/9.81) = 0.639 s after spawn regardless of its speed.
 #     For five of the twelve original positives (S01 1.5 s, S10 1.25 s) and
 # four of the ten tune positives (ttc 1.1 s) the nominal closest
-# approach is never reached at all -- scenario_matrix.yaml:73-77 says so
-# for T01 explicitly. That is what FLAT_THROW_FALL_TIME_S below is for.
+# approach is never reached at all -- scenario_matrix.yaml's coverage-design
+# notes say so for T01 explicitly. That is what FLAT_THROW_FALL_TIME_S below is for.
 #   - an oblique throw leaves the 45 deg ROI cone before closest approach
 # (the matrix's own T04/T06 notes).
 # So the ONLY mechanism that can put a genuine detection later is
-# spawn-command latency: capture_scenario.sh:90-97 runs `sleep 3` and then
-# `ros2 run huitzilin_perception spawn_projectile`, and that `ros2 run`
+# spawn-command latency: capture_scenario.sh's spawn subshell runs
+# `sleep "$SPAWN_LEAD"` and then `ros2 run huitzilin_perception
+# spawn_projectile`, and that `ros2 run`
 # costs real time before the projectile exists. The whole flight -- spawn,
 # closest approach, ground impact -- is therefore shifted LATER by that
 # latency relative to bag_start + SPAWN_LEAD_S, which is exactly what this
@@ -228,8 +229,8 @@ POST_EVENT_TOLERANCE_S = 2.0
 #   - 2.0 m: bridge.yaml / hw_bridge.yaml takeoff_alt_m, the altitude every
 #     Week 3 capture flew (capture_scenario.sh raises it only for the
 # vertical-offset negatives N04/T13, handled below).
-#   - flat throw: spawn_projectile.py:362 declares compensate_gravity False
-# and capture_scenario.sh:92-96 never passes it, so vz(0) = 0.
+#   - flat throw: spawn_projectile.py declares compensate_gravity False and
+#     capture_scenario.sh's spawn subshell never passes it, so vz(0) = 0.
 #   - 9.81 m/s^2 and h = 1/2 g t^2.
 HOVER_ALTITUDE_M = 2.0
 G_MPS2 = 9.81
@@ -280,11 +281,12 @@ def strict_window_bounds(
 
         The floor is a PHYSICS floor, not a tuned one: the projectile does
         not exist before bag_start + spawn_lead_s, so a centroid earlier
-        than that is definitionally not the ball, whatever else it is. Task
-        The legacy symmetric gate had no floor at all, which is why its lower edge
-        landed within half a second of bag start for every positive in the
-        library and swallowed the cold-background-map FP burst that
-        detector.yaml:229-231 documents in the first ~1-2 s of every replay.
+        than that is definitionally not the ball, whatever else it is.
+        The legacy symmetric gate had no floor at all, which is why its lower
+        edge landed within half a second of bag start for every positive in
+        the library and swallowed the cold-background-map FP burst that
+        detector.yaml documents under cluster_max_extent_m, in the first
+        ~1-2 s of every replay.
 
     upper = spawn_t + min(time_to_closest_s, fall_time_s)
                     + min(window_s, post_event_s)
@@ -303,7 +305,7 @@ def strict_window_bounds(
 
         `min(window_s, ...)` keeps the sidecar's detection_window_s as a
         hard ceiling. For THIS library that term is entirely non-binding and
-        the property is true but vacuous -- capture_scenario.sh:82 writes
+        the property is true but vacuous -- capture_scenario.sh writes
         detection_window_s: 4.0 into every sidecar and post_event_s is 2.0,
         so `min` always returns post_event_s and the gate has exactly one
         free parameter. It is kept because a sidecar is data and a future
@@ -338,7 +340,7 @@ def strict_window_bounds(
             min(window_s, post_event_s) has saturated at post_event_s. At
             the shipped window_s = 4.0 that is ttc > 6.639 s.
 
-        The shipped library reaches neither: capture_scenario.sh:82 writes
+        The shipped library reaches neither: capture_scenario.sh writes
         detection_window_s: 4.0 into every sidecar and scenario_matrix.yaml's
         largest time_to_closest_s is 1.5 s. Both routes become reachable for
         a future capture -- the first via a tighter sidecar, which is exactly
@@ -495,8 +497,8 @@ def is_in_window_loose(
 # The original test used only the SIGN of successive range differences. Under patrol
 # that is inverted: the drone translates toward newly-explored terrain, whose
 # base_link range then decreases monotonically frame after frame, and
-# detector.yaml:226-231 names exactly that terrain as this library's dominant
-# FP mechanism. Independently quantified over 200 000
+# detector.yaml's cluster_max_extent_m note names exactly that terrain as this
+# library's dominant FP mechanism. Independently quantified over 200 000
 # iid-noise trials per point through the shipped function: P(spurious run >=
 # 3) = 0.77 at n=10, 0.91 at n=15, 0.97 at n=20 detections in the window. The
 # reported 11-of-12 attribution rate sat exactly on the n~15 noise

@@ -258,8 +258,8 @@ mono at 30 m.
 
 ## Data availability
 
-Raw CSVs for the oracle/hover dataset (§§2–7) are in git history under `lab/results/`
-(removed from the working tree at project close): `git show 3cf0bbb:lab/results/<file>`.
+Raw CSVs for the oracle/hover dataset (§§2–7) were pruned from the working tree and are
+in git history under `lab/results/`: `git show 3cf0bbb:lab/results/<file>`.
 The §8 patrol table has no surviving per-throw CSV — a 20-row reference subset exists at
 `git show 3cf0bbb:lab/results/ref_week4_battery.csv`, and the per-battery breakdown is
 recorded in `git show 8e7bde3:docs/JOURNAL.md`. A fresh battery of the same kind:

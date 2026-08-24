@@ -400,7 +400,8 @@ def test_plan_dodge_applies_clearance_when_altitude_given():
 
 
 # --- Escape must not depend on which way the drone was already flying --------
-# Measured (scripts/hz_cmd_path_probe.py, 16 dodges): escape at 1.0 s
+# Measured over 16 dodges by a probe deleted in 28f0f40
+# (`git show 28f0f40^:scripts/hz_cmd_path_probe.py`): escape at 1.0 s
 # correlates r = -0.911 with the alignment between the commanded escape
 # direction and the drone's own cruise, and battery min_dist correlates
 # r = -0.67 with the same quantity. The cause is arithmetic, not control.

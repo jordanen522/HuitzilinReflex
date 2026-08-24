@@ -11,7 +11,12 @@
 # per scenario rather than reconfigured.
 #
 # Usage:
-#   ./scripts/run_heldout_eval.sh
+#   ./scripts/run_heldout_eval.sh                                  # heldout_ bags
+#   SPLIT=tune_rendered BAG_PREFIX=rt_ ./scripts/run_heldout_eval.sh
+#
+# SPLIT selects the split in scenario_matrix.yaml; BAG_PREFIX selects the bag
+# filename prefix under BAG_DIR. They must agree -- a split whose scenarios have
+# no matching bags scores every row as an error.
 #
 # Requires: built workspace (source install/setup.bash), Dell box (needs the
 # captured heldout_* bags under /data/huitzilin_bags), python3 with pyyaml
@@ -26,8 +31,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 WS="$(cd "$HERE/.." && pwd)"
 
 BAG_DIR="/data/huitzilin_bags"
-SPLIT="heldout"
-BAG_PREFIX="heldout_"
+SPLIT="${SPLIT:-heldout}"
+BAG_PREFIX="${BAG_PREFIX:-heldout_}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 RESULTS_JSONL="/tmp/heldout_eval_${STAMP}.jsonl"
 FINAL_OUTPUT="/tmp/heldout_eval_${STAMP}_final.txt"
