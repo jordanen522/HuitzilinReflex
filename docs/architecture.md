@@ -6,15 +6,47 @@ is provisional. The evasion path (`/cmd/evade`) commands through the same
 
 ## Nodes
 
-| Node | Responsibility | Inputs | Outputs | Rate | Status | Runs on |
-|---|---|---|---|---|---|---|
-| mav_bridge | ROS 2 ↔ ArduPilot bridge (pymavlink); single NED↔ENU conversion point | `/huitzilin/cmd_vel`; `/cmd/evade` (priority); services `/huitzilin/arm`, `/huitzilin/takeoff`, `/huitzilin/set_mode` | `/huitzilin/odom`, `/huitzilin/state`; ArduPilot FC | 30 Hz odom | **active** | Pi / dev PC |
-| patrol_node | Autonomous patrol path-following | `/huitzilin/odom`; service `/huitzilin/start_patrol` | position targets to FC; `/huitzilin/mission_marker` | 10 Hz | **active** | Pi / dev PC |
-| camera_driver | Depth + point cloud (sim: Gazebo bridge; real: OAK-D Lite) | sensor | `/oak/points`, `/oak/depth` | 15 Hz sim (30 Hz real target) | **active, sim** | Pi (real) / Dell (sim) |
-| detector_node | ROI gate, egomotion-compensated differencing, clustering, centroid | `/oak/points`, `/huitzilin/odom` (TF) | `/threat/centroid` + RViz marker | per cloud | **active, sim** | Pi / dev PC |
-| evasion_node | Kalman filter + dodge trigger + patrol pause/resume | `/threat/centroid`, `/huitzilin/odom` | `/threat/intercept`, `/cmd/evade`, `/payload/alarm` (mock), `/threat/evade_event` | per centroid; 20 Hz while evading | **active, sim** | Pi / dev PC |
-| payload_node | LED strip + siren via GPIO; every backend degrades to a logging no-op if the library is missing | `/payload/alarm` | GPIO (WS2812B via level shifter; siren via transistor) | on-event, 10 Hz dead-man tick | **active** | Pi (real output) / anywhere (no-op) |
-| supervisor_node | 7-state machine + FMEA fault monitor; faults resolve before the threat branch, so no fault can produce EVADE | message ages on `/huitzilin/odom`, `/huitzilin/state`, `/oak/points`, `/huitzilin/patrol_state`, `/huitzilin/cmd_vel`, `/payload/alarm` | `/huitzilin/set_mode`, `/huitzilin/start_patrol` (edge-triggered) | 1 Hz | **active**, opt-in via `with_supervisor:=true` | Pi / dev PC |
+| Node | Responsibility | Inputs | Outputs | Rate | Runs on |
+|---|---|---|---|---|---|
+| mav_bridge | ROS 2 ↔ ArduPilot bridge (pymavlink); single NED↔ENU conversion point | `/huitzilin/cmd_vel`; `/cmd/evade` (priority); services `/huitzilin/arm`, `/huitzilin/takeoff`, `/huitzilin/set_mode` | `/huitzilin/odom`, `/huitzilin/state`; ArduPilot FC | 30 Hz odom | Pi / dev PC |
+| patrol_node | Autonomous patrol path-following | `/huitzilin/odom`; service `/huitzilin/start_patrol` | position targets to FC; `/huitzilin/mission_marker` | 10 Hz | Pi / dev PC |
+| camera_driver | Depth + point cloud (sim: Gazebo bridge; real: OAK-D Lite) | sensor | `/oak/points`, `/oak/depth` | 15 Hz sim (30 Hz real target) | Pi (real) / Dell (sim) |
+| detector_node | ROI gate, egomotion-compensated differencing, clustering, centroid | `/oak/points`, `/huitzilin/odom` (TF) | `/threat/centroid` + RViz marker | per cloud | Pi / dev PC |
+| evasion_node | Kalman filter + dodge trigger + patrol pause/resume | `/threat/centroid`, `/huitzilin/odom` | `/threat/intercept`, `/cmd/evade`, `/payload/alarm` (mock), `/threat/evade_event` | per centroid; 20 Hz while evading | Pi / dev PC |
+| payload_node | LED strip + siren via GPIO; every backend degrades to a logging no-op if the library is missing | `/payload/alarm` | GPIO (WS2812B via level shifter; siren via transistor) | on-event, 10 Hz dead-man tick | Pi (real output) / anywhere (no-op) |
+| supervisor_node | 7-state machine + FMEA fault monitor; faults resolve before the threat branch, so no fault can produce EVADE | message ages on `/huitzilin/odom`, `/huitzilin/state`, `/oak/points`, `/huitzilin/patrol_state`, `/huitzilin/cmd_vel`, `/payload/alarm` | `/huitzilin/set_mode`, `/huitzilin/start_patrol` (edge-triggered) | 1 Hz | Pi / dev PC, opt-in via `with_supervisor:=true` |
+
+## Measurement-lane nodes
+
+None of these run in the flight graph. They exist to put a *stated* sensor in front of
+the real tracker and trigger, so a result can name the instrument it was measured with.
+Each is a `console_scripts` entry point in `huitzilin_perception/setup.py`.
+
+| Node | Responsibility | Inputs | Outputs | Runs on |
+|---|---|---|---|---|
+| oracle_detector | Synthetic sensor: centroids straight from Gazebo truth at a pinned reach, sector and rate. Shares no clustering code with `detector_node` | `/gz/dynamic_poses`, `/huitzilin/odom` | `/threat/centroid` | dev PC |
+| synthetic_depth_publisher | Renders a modelled ball cloud into `/oak/points` with no depth camera, so the depth lane can run off the Dell | `/gz/dynamic_poses`, `/huitzilin/odom` | `/oak/points` | dev PC |
+| depth_noise | Applies the measured stereo-noise model (σ grows as z²) to a rendered cloud | `/oak/points_rendered` | `/oak/points` | Dell |
+| mono_flash_detector | Long-range alternative to the depth lane: temporal differencing on the mono pair, then triangulation | `/oak/left/image_raw`, `/oak/right/image_raw` | `/threat/centroid`, `/threat/centroid_cov`, `/threat/cue` | Dell |
+| gz_pose_bridge | Republishes Gazebo poses into ROS as TF, so a bag can be scored against ground truth | `gz topic` child process | `/gz/dynamic_poses` | dev PC / Dell |
+
+**`oracle_detector` and `detector` must never run together** — both publish
+`/threat/centroid`, so the tracker would fuse two uncorrelated views of one ball.
+`week6_oracle.launch.py` never includes `week3_perception` for exactly this reason.
+
+An oracle number describes the tracker, trigger and airframe given a sensor of that
+reach — never the real detector. `docs/RESULTS.md` §10 has the scoring rules.
+
+## Launch files
+
+| Launch file | Graph it brings up |
+|---|---|
+| `huitzilin_sim/week2_sitl.launch.py` | Flight only: `mav_bridge` + `patrol_node`. Publishes no `/oak/points`, so a supervisor started here sits in permanent SENSOR_DROPOUT |
+| `week3_perception.launch.py` | Adds the camera bridge + `detector_node` |
+| `week4_evasion.launch.py` | Adds `evasion_node`; forwards `with_patrol:=` and `with_supervisor:=` |
+| `week6_oracle.launch.py` | Oracle lane: `oracle_detector` instead of `detector`. Pins `with_supervisor:=false` — it publishes no `/oak/points` to watch |
+| `week6_synthetic_depth.launch.py` | Depth lane fed by `synthetic_depth_publisher` rather than a rendered camera |
+| `week7_rendered.launch.py` | Rendered long-range lane: `iris_ar0234` + `depth_noise` into the real detector |
 
 ## Diagram
 
