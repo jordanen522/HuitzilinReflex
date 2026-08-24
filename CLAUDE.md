@@ -11,10 +11,11 @@ who checks this out and runs it.
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink ·
 Python 3.12 · Ubuntu 24.04.
 
-Simulation phase, active development. The patrol loop, detection pipeline, tracker and
-dodge trigger are done and measured (`docs/RESULTS.md`). The rendered long-range sensor
-lane is in progress with open recall problems (`docs/KNOWN_ISSUES.md`) — read that before
-quoting a rendered-lane number. Hardware bring-up has not started.
+Simulation and software work is complete; hardware bring-up is the next phase and has not
+started. The patrol loop, detection pipeline, tracker and dodge trigger are done and
+measured (`docs/RESULTS.md`). The rendered long-range sensor lane is left with
+characterised recall and fire-rate limitations rather than a solution
+(`docs/KNOWN_ISSUES.md`) — read that before quoting a rendered-lane number.
 
 Two measurement lanes exist and are never mixed: the **oracle** lane (synthetic sensor,
 Gazebo ground truth) and the **real detector** lane. `docs/RESULTS.md` §10 has the scoring

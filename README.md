@@ -11,12 +11,14 @@ Ubuntu 24.04.
 
 ## Status
 
-Active, simulation phase. The patrol loop, a detection pipeline scored against a
-labelled bag library, and a Kalman filter plus dodge trigger are done and measured
-end to end (see [Results](#results)). The rendered long-range sensor lane is in
-progress. Hardware bring-up has not started.
+Simulation and software work is complete; hardware bring-up is the next phase and has
+not started. The patrol loop, a detection pipeline scored against a labelled bag
+library, and a Kalman filter plus dodge trigger are done and measured end to end (see
+[Results](#results)). The rendered long-range sensor lane is left with known
+limitations rather than a solution: its recall and fire-rate problems are characterised
+and their evidence recorded, not fixed.
 
-Open problems are tracked in
+Those limitations, and everything else left open, are in
 [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
 
 ## Goals
@@ -24,8 +26,9 @@ Open problems are tracked in
 The requirements are REQ-01 through REQ-16 in
 [`docs/requirements.md`](docs/requirements.md): autonomous patrol, threat detection via
 the OAK-D Lite, intercept prediction, an evasive maneuver within 150 ms, and the alarm
-payload. None of them names a specific dodge speed or recall percentage. All are met in
-simulation at the envelope measured below.
+payload. None of them names a specific dodge speed or recall percentage. Each row there
+carries its own evidence pointer; the airframe, flight-controller, compute and
+payload-weight rows are hardware items that simulation cannot settle.
 
 Two things are open engineering work rather than requirements:
 
