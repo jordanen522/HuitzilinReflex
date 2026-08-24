@@ -213,8 +213,8 @@ def flat_throw_fall_time_s(
 
     Returns None for any scenario with a non-zero offset_vertical_m (N04 at
     -10.0 m, T13 at -7.5 m). Those two are NOT captured from the standard
-    2 m hover -- capture_scenario.sh:54-71 refuses to spawn unless the drone
-    has climbed to >= 10.5 m / 8.0 m first -- so neither the drop height nor
+    2 m hover -- capture_scenario.sh's SPAWN_Z check refuses to spawn unless
+    the drone has climbed to >= 10.5 m / 8.0 m first -- so neither the drop height nor
     the hover altitude in this model is the one they flew, and guessing a
     substitute would be inventing physics for a scenario nobody measured.
     Both are negatives carrying time_to_closest_s: 0, so the fallback is
