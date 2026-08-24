@@ -44,6 +44,13 @@ BEST_EFFORT = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT,
 
 
 class SupervisorNode(Node):
+    """Watches topic staleness and vehicle limits; owns the state machine.
+
+    Faults are gated on `armed` -- half the watched topics are legitimately
+    quiet on the bench. A watch whose timeout is 0.0 is disabled, the only
+    way to say 'this configuration does not publish that topic'. Logs which
+    watches are armed at startup. No fault path can reach EVADE.
+    """
 
     def __init__(self):
         super().__init__("supervisor")

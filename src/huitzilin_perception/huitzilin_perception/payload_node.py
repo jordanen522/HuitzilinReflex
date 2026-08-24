@@ -28,6 +28,12 @@ RELIABLE = QoSProfile(reliability=QoSReliabilityPolicy.RELIABLE,
 
 
 class PayloadNode(Node):
+    """Drives the alarm payload (buzzer/LED) from /payload/alarm.
+
+    Every backend degrades to a null implementation rather than raising: a
+    missing GPIO library or a failing channel must not take the flight stack
+    down with it.
+    """
 
     def __init__(self):
         super().__init__("payload")

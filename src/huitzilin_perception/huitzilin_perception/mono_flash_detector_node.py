@@ -75,6 +75,13 @@ RELIABLE_QOS = QoSProfile(
 
 
 class MonoFlashDetectorNode(Node):
+    """Stereo mono-camera detector: temporal differencing, then triangulation.
+
+    The long-range alternative to the depth lane -- it works from the OAK-D's
+    raw mono pair rather than a depth cloud, so its reach is set by centroid
+    precision and baseline rather than by the depth camera's own range.
+    """
+
     def __init__(self) -> None:
         super().__init__("mono_flash_detector")
 

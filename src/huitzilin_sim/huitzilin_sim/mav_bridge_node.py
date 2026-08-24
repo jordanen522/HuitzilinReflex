@@ -19,6 +19,14 @@ from huitzilin_sim.cmd_router import Action, RouterState, route
 
 
 class MavBridgeNode(Node):
+    """ROS 2 face of the MAVLink link: the only place frames are converted.
+
+    ENU/FLU on the ROS side, NED on the MAVLink side, via
+    MavBridge.ned_to_enu / enu_to_ned. No other node converts -- mirrored
+    RViz markers mean a bug here, not in the marker code. See
+    docs/frames.md.
+    """
+
     def __init__(self):
         super().__init__("mav_bridge")
 
@@ -36,7 +44,6 @@ class MavBridgeNode(Node):
         self.cmd_timeout = float(self.get_parameter("cmd_timeout_s").value)
         self.takeoff_alt = float(self.get_parameter("takeoff_alt_m").value)
 
-        # MAVLink bridge
         self.bridge = MavBridge(conn)
         self.bridge.connect()
         self.bridge.request_streams(int(self.get_parameter("stream_rate_hz").value))
@@ -66,7 +73,6 @@ class MavBridgeNode(Node):
         self.declare_parameter("mode", "GUIDED")
         self.create_service(Trigger, "/huitzilin/set_mode", self._srv_set_mode)
 
-        # timers
         self.create_timer(1.0 / self.cmd_rate, self._tick_setpoint)   # watchdog/stream
         # Dodges are retransmitted far faster than patrol. The watchdog rate is
         # sized to keep ArduPilot's ~3 s setpoint timeout happy, which is the
@@ -204,7 +210,6 @@ class MavBridgeNode(Node):
             })
             self.state_pub.publish(st)
 
-    # services
     def _srv_arm(self, req, resp):
         try:
             self.bridge.arm(req.data)

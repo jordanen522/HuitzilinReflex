@@ -15,6 +15,8 @@ from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 
 
 class TelemetryLogger(Node):
+    """Appends odom/state telemetry to a CSV for post-flight analysis."""
+
     def __init__(self):
         super().__init__("telemetry_logger")
         self.declare_parameter("csv_path", f"week2_telemetry_{int(time.time())}.csv")

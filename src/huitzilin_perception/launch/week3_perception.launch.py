@@ -57,7 +57,6 @@ def generate_launch_description() -> LaunchDescription:
     pkg_perception = get_package_share_directory("huitzilin_perception")
     pkg_sim = get_package_share_directory("huitzilin_sim")
 
-    # Arguments
     args = [
         DeclareLaunchArgument("mode", default_value="live",
                               description="live | score"),
@@ -124,9 +123,7 @@ def generate_launch_description() -> LaunchDescription:
         name="perception_gz_bridge",
         output="screen",
         arguments=[
-            # PointCloud2
             "/gz/oak/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
-            # CameraInfo
             "/gz/oak/depth/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
         ],
         remappings=[

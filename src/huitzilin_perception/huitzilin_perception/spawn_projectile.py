@@ -350,7 +350,6 @@ class SpawnProjectileNode(Node):
     def __init__(self) -> None:
         super().__init__("spawn_projectile")
 
-        # Params
         self.declare_parameter("scenario_id", "S00")
         self.declare_parameter("speed_mps", 8.0)
         self.declare_parameter("approach_angle_deg", 0.0)   # 0° = head-on from front

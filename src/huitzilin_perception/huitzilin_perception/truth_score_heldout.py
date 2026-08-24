@@ -137,6 +137,14 @@ def nearest_pose(pose_track: list[tuple[float, tuple, tuple]], t: float):
 
 
 class TruthScorerNode(Node):
+    """Scores a bag split against Gazebo truth, one detector per scenario.
+
+    Replays each bag, attributes every /threat/centroid against the recorded
+    /gz/dynamic_poses track, and emits a row per scenario for
+    heldout_report. Requires bags that carry the pose stream -- older
+    captures do not, and cannot be scored this way.
+    """
+
     def __init__(self) -> None:
         super().__init__("truth_score_heldout")
 
@@ -220,6 +228,12 @@ class TruthScorerNode(Node):
         self._listening = False
 
     def run(self) -> int:
+        """Score every scenario in the split. Returns a process exit code.
+
+        One bag replay per scenario. A scenario whose bag is missing, or
+        whose pose track cannot be read, is recorded as an error row rather
+        than counted against recall.
+        """
         if not self._matrix_f.exists():
             self.get_logger().error(f"Scenario matrix not found: {self._matrix_f}")
             return 1

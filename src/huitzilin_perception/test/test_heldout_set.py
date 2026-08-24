@@ -37,15 +37,15 @@ MATRIX = PKG / "config" / "scenario_matrix.yaml"
 
 G_MPS2 = 9.81
 
-#: The camera in models/iris_ar0234/model.sdf: 27.0 deg horizontal, 22.0 deg
-#: vertical. test_camera_models.py holds the SDF to those numbers; this file
-#: holds the scenario geometry to the same ones.
+# The camera in models/iris_ar0234/model.sdf: 27.0 deg horizontal, 22.0 deg
+# vertical. test_camera_models.py holds the SDF to those numbers; this file
+# holds the scenario geometry to the same ones.
 SECTOR_HALF_H_DEG = 13.5
 SECTOR_HALF_V_DEG = 11.0
 
-#: 18 positives (one spare, so a single void bag doesn't shrink the usable
-#: set below 17) and 6 negatives -- kept >=25% of the total per the
-#: library's negative-budget rule below.
+# 18 positives (one spare, so a single void bag doesn't shrink the usable
+# set below 17) and 6 negatives -- kept >=25% of the total per the
+# library's negative-budget rule below.
 N_POSITIVES = 18
 N_NEGATIVES = 6
 

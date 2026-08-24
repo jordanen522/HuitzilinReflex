@@ -34,24 +34,24 @@ __all__ = [
     "void_reason",
 ]
 
-#: Sigmas of modelled depth error admitted as "the same object". 3 sigma admits
-#: ~99.7 % of true detections, so a correct detection at 26 m (sigma 0.30 m) is
-#: not called a miss for being 0.6 m out.
+# Sigmas of modelled depth error admitted as "the same object". 3 sigma admits
+# ~99.7 % of true detections, so a correct detection at 26 m (sigma 0.30 m) is
+# not called a miss for being 0.6 m out.
 MATCH_SIGMAS = 3.0
 
-#: Floor on the match radius. Below ~9 m the modelled error falls under a voxel
-#: and 3 sigma would be tighter than the discretisation the detector's own
-#: pipeline imposes (voxel_leaf_m 0.02, the ball's 0.08 m extent, clustering
-#: quantisation), so correct short-range detections would read as unmatched.
+# Floor on the match radius. Below ~9 m the modelled error falls under a voxel
+# and 3 sigma would be tighter than the discretisation the detector's own
+# pipeline imposes (voxel_leaf_m 0.02, the ball's 0.08 m extent, clustering
+# quantisation), so correct short-range detections would read as unmatched.
 MATCH_FLOOR_M = 0.50
 
-#: Allowance for stamp skew between the cloud and the pose stream. At 20 m/s the
-#: ball covers 0.40 m in this time.
+# Allowance for stamp skew between the cloud and the pose stream. At 20 m/s the
+# ball covers 0.40 m in this time.
 STAMP_SKEW_S = 0.020
 
-#: Matched detections needed inside the window to count as recalled. Tied to
-#: evasion.yaml's min_track_updates of 3 — fewer confirmations is a detection
-#: the aircraft cannot act on.
+# Matched detections needed inside the window to count as recalled. Tied to
+# evasion.yaml's min_track_updates of 3 — fewer confirmations is a detection
+# the aircraft cannot act on.
 DEFAULT_MIN_MATCHED = 3
 
 

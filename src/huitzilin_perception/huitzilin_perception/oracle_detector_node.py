@@ -67,6 +67,17 @@ RELIABLE_QOS = QoSProfile(
 
 
 class OracleDetectorNode(Node):
+    """Synthetic sensor: publishes /threat/centroid from Gazebo ground truth.
+
+    Replaces the real detector to measure the tracker, trigger and airframe
+    given a sensor of a stated reach, sector and rate. It shares no
+    clustering code with the depth detector, so an oracle number is never a
+    claim about the real pipeline -- see docs/RESULTS.md section 10.
+
+    NEVER run alongside `detector`: both publish /threat/centroid, and the
+    tracker would get two uncorrelated views of one ball.
+    """
+
     def __init__(self) -> None:
         super().__init__("oracle_detector")
 

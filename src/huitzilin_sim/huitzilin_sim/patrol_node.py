@@ -41,6 +41,15 @@ def parse_waypoints(flat):
 
 
 class PatrolNode(Node):
+    """Flies the patrol circuit over its own MAVLink connection.
+
+    In the shipped `position` mode it sends MAV_FRAME_LOCAL_NED setpoints
+    directly and never creates /huitzilin/cmd_vel -- which is why the
+    supervisor ships that watch disabled. autostart is overridden false in
+    patrol.yaml: starting before takeoff floods GUIDED with setpoints and
+    the aircraft never leaves the ground.
+    """
+
     def __init__(self):
         super().__init__("patrol")
         # waypoints as flat [n0,e0,d0, n1,e1,d1, ...] (NED metres, d negative = up)

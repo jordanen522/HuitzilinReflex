@@ -496,6 +496,13 @@ class DodgeBatteryNode(Node):
     # Main flow
 
     def run(self) -> int:
+        """Fly the whole battery and write the CSV. Returns an exit code.
+
+        Per row: wait for the throw window, spawn the ball, record the
+        encounter, then score it. A row that never got a throw is SKIPPED,
+        not a failure -- skipped rows are absence of data and are excluded
+        from every rate the report prints.
+        """
         if not self._thrower.wait_for_bridge():
             self.get_logger().error(
                 "wrench bridge never connected — every throw would leave the "

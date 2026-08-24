@@ -37,17 +37,17 @@ from huitzilin_perception.synthetic_depth import (
     required_roi_max_range_m,
 )
 
-#: The camera's far clip, from models/iris_ar0234/model.sdf. The longest range
-#: the lane can produce a return at, so an ROI ceiling past it can never bind
-#: and only overstates the sensor. test_rendered_lane.py holds this in step with
-#: the SDF rather than trusting it to stay in step.
+# The camera's far clip, from models/iris_ar0234/model.sdf. The longest range
+# the lane can produce a return at, so an ROI ceiling past it can never bind
+# and only overstates the sensor. test_rendered_lane.py holds this in step with
+# the SDF rather than trusting it to stay in step.
 AR0234_FAR_CLIP_M = 35.0
 
-#: The reach the long-range arm is BUILT to serve, from docs/RESULTS.md: 21.1 m
-#: buys P(save)=0.90 at 20 m/s, and 26 m is the sensor that scored 28/29 head-on
-#: in the oracle lane. It is NOT an input to the rendered lane -- nothing there
-#: clamps the cloud to a range -- it is only the range the detector's gates must
-#: not reject a ball at.
+# The reach the long-range arm is BUILT to serve, from docs/RESULTS.md: 21.1 m
+# buys P(save)=0.90 at 20 m/s, and 26 m is the sensor that scored 28/29 head-on
+# in the oracle lane. It is NOT an input to the rendered lane -- nothing there
+# clamps the cloud to a range -- it is only the range the detector's gates must
+# not reject a ball at.
 DESIGN_REACH_M = 26.0
 
 

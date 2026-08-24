@@ -60,7 +60,6 @@ from huitzilin_perception.depth_noise import required_cluster_max_extent_m
 from huitzilin_perception.stage_profiler import StageProfiler
 
 
-# QoS profiles
 SENSOR_QOS = QoSProfile(
     reliability=QoSReliabilityPolicy.BEST_EFFORT,
     history=QoSHistoryPolicy.KEEP_LAST,
@@ -74,7 +73,6 @@ RELIABLE_QOS = QoSProfile(
 )
 
 
-# Main node
 class DetectorNode(Node):
     """
     Projectile detection node.
@@ -212,13 +210,11 @@ class DetectorNode(Node):
         # setting to leave on.
         self.declare_parameter("debug_dump_dir", "")
 
-        # Cache params
         self._p = self._load_params()
         self.add_on_set_parameters_callback(self._on_param_set)
         self._funnel_throttle_s = float(
             self.get_parameter("debug_funnel_throttle_s").value)
 
-        # TF buffer
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
@@ -269,7 +265,6 @@ class DetectorNode(Node):
             int(self.get_parameter("profile_window_frames").value))
         self._profile_on = bool(self.get_parameter("profile_stages").value)
 
-        # Per-frame dump
         self._dump_dir = str(self.get_parameter("debug_dump_dir").value).strip()
         self._dump: Optional[dict] = None
         if self._dump_dir:
@@ -301,7 +296,6 @@ class DetectorNode(Node):
                 RELIABLE_QOS,
             )
 
-        # Publishers
         self._centroid_pub = self.create_publisher(
             PointStamped,
             self._p["threat_centroid_topic"],
@@ -321,7 +315,6 @@ class DetectorNode(Node):
             f"diff_thresh {self._p['diff_threshold_m']} m)"
         )
 
-    # Param helper
     def _on_param_set(self, params) -> SetParametersResult:
         """Refuse live writes to anything snapshotted at construction.
 
@@ -379,7 +372,6 @@ class DetectorNode(Node):
             "range_adaptive_extent": self.get_parameter("range_adaptive_extent").value,
         }
 
-    # Odom callback
     def _odom_cb(self, msg: Odometry) -> None:
         q = msg.pose.pose.orientation
         if not is_valid_quat(q.x, q.y, q.z, q.w):
@@ -403,7 +395,6 @@ class DetectorNode(Node):
         t.transform.rotation = q
         self._tf_buffer.set_transform(t, "mav_bridge_odom")
 
-    # Main cloud callback
     def _cloud_cb(self, msg: PointCloud2) -> None:
         """Count and time every arriving cloud, then run the pipeline.
 
@@ -834,7 +825,6 @@ class DetectorNode(Node):
                 f"funnel: *** PUBLISHED *** best={best_cluster.shape[0]} score={score:.3f}",
                 throttle_duration_sec=0.5)
 
-    # Helpers
     def _write_dump(self, msg: PointCloud2) -> None:
         """Write one frame's per-stage record to debug_dump_dir.
 
@@ -941,7 +931,6 @@ class DetectorNode(Node):
         self._marker_pub.publish(m)
 
 
-# Entry point
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = DetectorNode()

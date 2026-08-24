@@ -295,6 +295,14 @@ class GzPoseBridgeNode(Node):
         self._pub.publish(tf_msg)
 
     def destroy_node(self) -> bool:
+        """Stop the reader thread and reap the `gz topic` child process.
+
+        Ordering matters: the stop flag is set before the child is
+        terminated, so the reader sees the pipe close as a shutdown rather
+        than as a read error. The child is killed if it ignores SIGTERM,
+        because a surviving `gz topic` holds the transport subscription and
+        the next run sees no poses at all.
+        """
         self._stop.set()
         if self._proc.poll() is None:
             self._proc.terminate()

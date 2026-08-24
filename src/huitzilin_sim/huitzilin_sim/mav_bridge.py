@@ -40,6 +40,14 @@ _MAV_STATE_CRITICAL = 5
 
 
 class MavBridge:
+    """Deliberately ROS-free pymavlink wrapper, so it can be unit-tested.
+
+    Owns the ONLY NED<->ENU conversion in the codebase (ned_to_enu /
+    enu_to_ned). Velocity setpoints go out as MAV_FRAME_BODY_OFFSET_NED,
+    positions as MAV_FRAME_LOCAL_NED. Run `python3 mav_bridge.py` for the
+    built-in self-test.
+    """
+
     def __init__(self, connect="udp:127.0.0.1:14550", source_system=255):
         self.conn_str = connect
         self.master = mavutil.mavlink_connection(connect, source_system=source_system)

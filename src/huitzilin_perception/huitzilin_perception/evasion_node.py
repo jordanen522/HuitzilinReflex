@@ -193,7 +193,6 @@ class EvasionNode(Node):
         self._warned_no_odom = False
         self._warned_bad_quat = False
 
-        # ROS interfaces
         self.create_subscription(PointStamped, self._p["centroid_topic"],
                                  self._centroid_cb, RELIABLE_QOS)
         self.create_subscription(Odometry, self._p["odom_topic"],

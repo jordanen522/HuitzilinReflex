@@ -16,6 +16,14 @@ __all__ = ["build_report"]
 
 def build_report(results: list[dict], split: str, bag_dir: str,
                   min_matched: int) -> str:
+    """Render the held-out scoring artifact as text.
+
+    `results` is one dict per scenario, as emitted by TruthScorerNode. Rows
+    carrying `void` or `error` are reported but excluded from both
+    denominators: a bag that could not be scored is absence of data, not a
+    miss. Recall counts positives with at least `min_matched` truth-matched
+    detections; the false-fire rate counts negatives that fired anyway.
+    """
     voids = [r for r in results if r.get("void")]
     errors = [r for r in results if r.get("error")]
     scored = [r for r in results
