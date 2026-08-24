@@ -87,7 +87,7 @@ def test_aim_at_drone_false_is_week3_identical():
     np.testing.assert_allclose(a.velocity, b.velocity)
 
 
-# --- Target lead (W4 live bring-up,) ------------------------------
+# Target lead (W4 live bring-up)
 # Aiming at where the drone IS misses a patrolling drone by |v| * t_flight.
 # Measured on the Dell with a single clean stack: patrol flies 2.5-3.2 m/s and
 # 8 m/s "direct hit" runs missed by 1.3-2.6 m.
@@ -168,7 +168,7 @@ def test_lead_scales_with_latency():
     assert far.position[0] - near.position[0] == pytest.approx(0.5 * 3.0)
 
 
-# --- SpawnPlan.aim_point -----------------------------------------------------
+# SpawnPlan.aim_point
 # The point the throw was actually aimed at. Without it exposed, a battery can
 # only compare the measured miss against the SPEC, which conflates "the lead
 # predicted the wrong place" with "the geometry about the predicted place was
@@ -204,7 +204,7 @@ def test_spawn_is_offset_forward_from_the_aim_point_not_the_drone():
     assert horiz == pytest.approx(math.hypot(fwd, miss), abs=1e-9)
 
 
-# --- miss_components ---------------------------------------------------------
+# miss_components
 # One scalar min_dist cannot say WHY a throw missed. These pin the sign
 # convention hard, because a sign error here would send the next round of
 # debugging in exactly the wrong direction.

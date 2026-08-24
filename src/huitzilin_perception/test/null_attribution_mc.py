@@ -51,7 +51,7 @@ ROI_MAX_RANGE_M = 5.00   # detector.yaml
 DEFAULT_TRIALS = 200_000
 DEFAULT_SEED = 20260817
 
-# --- the published figures, and the measurement they were computed FROM ------
+# the published figures, and the measurement they were computed FROM
 #
 # The three null-model figures detector.yaml quotes are only valid at ONE n_win
 # vector, and any change to the scoring window moves that vector. So the vector

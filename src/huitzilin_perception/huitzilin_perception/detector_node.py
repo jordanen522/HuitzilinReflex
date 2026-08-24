@@ -868,14 +868,12 @@ class DetectorNode(Node):
         sample that would bracket it.
         Returns None if the chain isn't available at all.
 
-        That staleness is NOT "cm-level at patrol speed" as this docstring used
-        to claim: odom runs at 30 Hz and patrol translates at 2.5-3.2 m/s (the
-        old 0.18-0.48 m/s figure was a two-competing-stacks artifact), so one
-        period is ~0.10 m — exactly diff_threshold_m. It is still not what
-        blinds the detector during patrol: the foreground floods to ~48k points
-        even at 0.63 m/s, where one period is 0.02 m.
-        "the detector goes blind while patrolling" — the cause is the 5-frame
-        rolling background buffer, not this lookup.
+        Bound on that staleness: odom runs at 30 Hz and patrol translates at
+        2.5-3.2 m/s, so one period is ~0.10 m — exactly diff_threshold_m.
+
+        That is NOT what blinds the detector during patrol. The foreground
+        floods to ~48k points even at 0.63 m/s, where one period is 0.02 m;
+        the cause is the 5-frame rolling background buffer, not this lookup.
         """
         try:
             ts = self._tf_buffer.lookup_transform(target, source,

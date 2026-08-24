@@ -1,5 +1,5 @@
 """
-Run-loop tests for score_bags.ScorerNode — the earlier revision a later revision, MEDIUM-1.
+Run-loop tests for score_bags.ScorerNode.
 
 WHAT THIS FILE EXISTS FOR
 -------------------------
@@ -52,7 +52,7 @@ import yaml
 from huitzilin_perception.score_bags_logic import SPAWN_LEAD_S
 
 
-# --- ROS import surface, only if the real one is missing ---------------------
+# ROS import surface, only if the real one is missing
 
 _STUBBED: list = []
 
@@ -117,7 +117,7 @@ def teardown_module(module):
         sys.modules.pop("huitzilin_perception.score_bags", None)
 
 
-# --- A ScorerNode with every I/O path replaced, and nothing else -------------
+# A ScorerNode with every I/O path replaced, and nothing else
 
 BAG_START = 1000.0
 GOOD_TTC = 1.5
@@ -199,11 +199,11 @@ def _sidecar(window_s, ttc=GOOD_TTC):
     return {"detection_window_s": window_s, "time_to_closest_s": ttc}
 
 
-# --- The tests ---------------------------------------------------------------
+# The tests
 
 def test_one_inverted_window_does_not_abort_the_whole_scoring_run(tmp_path):
     """
-    MEDIUM-1, the whole point. Before the caller-side guard this raised out
+    The whole point of the file. Before the caller-side guard this raised out
     of run(), so _report() never ran and NO artifact was written — not even
     for S01, which had already been scored.
     """
@@ -299,7 +299,7 @@ def test_a_well_formed_library_run_is_untouched_by_the_guard(tmp_path):
     assert "PASS" in report
 
 
-# --- The console is the secondary sink (a later revision, MEDIUM-A) ---------------
+# The console is the secondary sink
 
 class _NonUtf8Stdout:
     """
@@ -330,10 +330,10 @@ def test_a_console_that_cannot_encode_the_report_does_not_cost_the_artifact(
     tmp_path, monkeypatch
 ):
     """
-    MEDIUM-A. print(report) used to run BEFORE the guarded write and outside
+    print(report) used to run BEFORE the guarded write and outside
     any try, so on a non-UTF-8 stdout a completely well-formed run raised
     UnicodeEncodeError out of _report() and the artifact was never created
-    at all — strictly worse than the zero-byte file round 3 fixed.
+    at all — strictly worse than the zero-byte file that ordering fixed.
 
     This pins both halves of the fix: the write must come first, and the
     print must not propagate. Reordering alone leaves run() raising; guarding
@@ -386,11 +386,12 @@ def test_the_degraded_console_still_carries_every_number(
     )
 
 
-# --- §11 enforcement: no unguarded window-refusing call site ----------------
+# §11 enforcement: no unguarded window-refusing call site
 #
 # Round 3 guarded the two calls in _score_one that can refuse a window, and
 # nothing stopped a THIRD from being added outside a try — which restores
-# MEDIUM-1 in full and which the five behavioural tests above cannot see,
+# the guarded-write invariant in full, which the five behavioural tests
+# above cannot see,
 # since they exercise the two sites that exist. That is a SOURCE-LEVEL
 # invariant, so it is checked at the source rather than by behaviour.
 #
@@ -459,7 +460,7 @@ def unguarded_window_calls(source: str) -> list:
 
 def test_no_window_refusing_call_in_score_bags_sits_outside_a_guard():
     """
-    The invariant round 3 established but could not enforce. If this fails,
+    The invariant the guarded write established but could not enforce. If this fails,
     the named line is one broken sidecar away from killing a whole scoring
     run before any artifact is written.
     """

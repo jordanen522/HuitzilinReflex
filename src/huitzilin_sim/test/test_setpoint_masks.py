@@ -48,7 +48,7 @@ def _bridge():
     return b
 
 
-# --- the masks themselves ----------------------------------------------------
+# the masks themselves
 
 def test_the_shipped_masks_have_the_documented_values():
     """These are quoted as decimals throughout the docs and the journal."""
@@ -83,7 +83,7 @@ def test_the_two_masks_differ_only_in_the_acceleration_bits():
     assert diff == sum(1 << b for b in ACC_BITS)
 
 
-# --- what actually goes on the wire ------------------------------------------
+# what actually goes on the wire
 
 def test_acceleration_lands_in_the_acceleration_fields():
     """Field order is positional in pymavlink: putting accel where velocity

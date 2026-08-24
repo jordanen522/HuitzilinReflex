@@ -54,7 +54,7 @@ def _at(track, t):
     return interpolate_track(track, t)
 
 
-# -- the match radius --------------------------------------------------------
+# the match radius
 
 def test_match_radius_at_the_reference_range_is_three_sigma():
     """sigma(26) = 0.30 by definition of the lane's error model, so 3 sigma is
@@ -82,7 +82,7 @@ def test_match_radius_grows_with_range():
     assert radii[0] < radii[-1]
 
 
-# -- truth interpolation -----------------------------------------------------
+# truth interpolation
 
 def test_interpolation_hits_a_sample_exactly():
     track = [(0.0, (0.0, 0.0, 0.0)), (1.0, (10.0, 0.0, 0.0))]
@@ -107,7 +107,7 @@ def test_interpolation_of_an_empty_track_is_none():
     assert _at([], 1.0) is None
 
 
-# -- scoring a positive ------------------------------------------------------
+# scoring a positive
 
 def _score(detections, ball, speed=20.0, **kw):
     return score_scenario(detections=detections, ball_track=ball,
@@ -213,7 +213,7 @@ def test_detections_outside_the_window_are_not_counted_at_all():
     assert out["recalled"] is False
 
 
-# -- K, and the two verdicts -------------------------------------------------
+# K, and the two verdicts
 
 def test_k_comes_from_the_dodge_trigger():
     """min_track_updates is 3 in evasion.yaml: three confirmations before a
@@ -253,7 +253,7 @@ def test_recall_and_false_positives_are_reported_separately():
     assert out["unmatched"] == 3
 
 
-# -- void --------------------------------------------------------------------
+# void
 
 def test_a_positive_without_a_projectile_track_is_void():
     """Void is neither a pass nor a fail: it means the bag cannot answer the
@@ -282,7 +282,7 @@ def test_a_complete_positive_is_not_void():
                        drone_track=DRONE) is None
 
 
-# -- the accuracy distribution, which is not the match gate ------------------
+# the accuracy distribution, which is not the match gate
 
 def test_errors_are_reported_for_matched_detections_only():
     """R is a MATCHING tolerance, not an accuracy claim. The artifact carries

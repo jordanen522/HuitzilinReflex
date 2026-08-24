@@ -15,7 +15,7 @@ import math
 import time
 from pymavlink import mavutil
 
-# --- type_mask bitfields for SET_POSITION_TARGET_LOCAL_NED ---------------------
+# type_mask bitfields for SET_POSITION_TARGET_LOCAL_NED
 # Bit (0-indexed): 0..2 Pos x/y/z, 3..5 Vel x/y/z, 6..8 Acc x/y/z,
 #                  9 force, 10 yaw, 11 yaw_rate.  A SET bit = "ignore this field".
 MASK_VEL_ONLY  = 0b0000111111000111  # use velocity x/y/z only            (4039)
@@ -47,7 +47,7 @@ class MavBridge:
         self.target_component = 0
         self._state = {}   # last-known telemetry (recv_match is lossy per tick)
 
-    # -- lifecycle -------------------------------------------------------------
+    # lifecycle
     def connect(self, timeout=30):
         """Wait for the first heartbeat and latch the target ids."""
         print(f"[bridge] connecting on {self.conn_str} ...")
@@ -82,7 +82,7 @@ class MavBridge:
                 return True
         raise TimeoutError("EKF/GPS never became ready")
 
-    # -- mode / arm / takeoff --------------------------------------------------
+    # mode / arm / takeoff
     def set_mode(self, mode_name="GUIDED", timeout=10):
         mode_name = mode_name.upper()
         mapping = self.master.mode_mapping()
@@ -157,7 +157,7 @@ class MavBridge:
                 return True
         raise TimeoutError("takeoff altitude not reached")
 
-    # -- setpoints -------------------------------------------------------------
+    # setpoints
     def send_velocity_body(self, vx, vy, vz, yaw_rate=0.0):
         """Body-frame velocity (m/s) + yaw rate (rad/s). x fwd, y right, z down."""
         mask = MASK_VEL_ONLY
@@ -216,7 +216,7 @@ class MavBridge:
             0, 0, 0,
             0.0 if yaw is None else yaw, 0)
 
-    # -- telemetry -------------------------------------------------------------
+    # telemetry
     def get_state(self):
         """Non-blocking snapshot of pose + attitude + velocity in NED.
 
@@ -289,7 +289,7 @@ class MavBridge:
         except Exception:
             return None
 
-    # -- frame helpers (NED <-> ENU) used by the ROS node ---------------------
+    # frame helpers (NED <-> ENU) used by the ROS node
     @staticmethod
     def ned_to_enu(n, e, d):
         return (e, n, -d)             # ENU x=East, y=North, z=Up
@@ -322,7 +322,7 @@ class MavBridge:
         )
 
 
-# --- standalone self-test: arm, takeoff, nudge, land --------------------------
+# standalone self-test: arm, takeoff, nudge, land
 def _selftest(connect):
     b = MavBridge(connect)
     b.connect()

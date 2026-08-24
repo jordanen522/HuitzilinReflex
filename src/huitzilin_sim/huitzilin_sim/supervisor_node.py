@@ -104,7 +104,7 @@ class SupervisorNode(Node):
                " ".join("%s(%.1fs)" % (k, v) for k, v in armed.items()) or "none",
                " ".join(off) or "none"))
 
-    # -- plumbing ------------------------------------------------------------
+    # plumbing
 
     def _now_s(self):
         return self.get_clock().now().nanoseconds / 1e9
@@ -144,7 +144,7 @@ class SupervisorNode(Node):
             ages={k: now - t for k, t in self._last.items()},
         )
 
-    # -- the tick ------------------------------------------------------------
+    # the tick
 
     def _tick(self):
         previous = self._state

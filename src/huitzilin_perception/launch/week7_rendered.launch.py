@@ -164,7 +164,7 @@ def generate_launch_description() -> LaunchDescription:
                         "subscribe to the noiseless cloud by accident."),
         DeclareLaunchArgument("cloud_topic", default_value="/oak/points",
                               description="noise stage output = detector input"),
-        # -- The noise model --------------------------------------------------
+        # The noise model
         DeclareLaunchArgument(
             "sigma_ref_m", default_value="0.30",
             description="stereo depth error at ref_range_m, metres. 0.0 is the "

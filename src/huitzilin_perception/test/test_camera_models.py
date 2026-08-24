@@ -113,7 +113,7 @@ def test_camera_mount_pose_is_unchanged(baseline, longrange):
     assert camera_link_pose(longrange) == camera_link_pose(baseline)
 
 
-# --- the optics, which are the whole point of the second model ---------------
+# the optics, which are the whole point of the second model
 
 def _sensor(model):
     sensors = model.findall(".//sensor[@type='depth_camera']")

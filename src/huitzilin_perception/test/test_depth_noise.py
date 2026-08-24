@@ -54,7 +54,7 @@ def _flat_wall(height, width, depth_m, fov_deg=27.0):
     return np.stack([z * uu / f_px, z * vv / f_px, z], axis=-1)
 
 
-# --- the unit field ----------------------------------------------------------
+# the unit field
 
 # A NOTE ON ESTIMATORS, because getting this wrong cost three false failures
 # while this file was written. A correlated field holds far fewer independent
@@ -113,7 +113,7 @@ def test_zero_correlation_is_white():
     assert abs(near) < 0.1
 
 
-# --- the noise application ---------------------------------------------------
+# the noise application
 
 def test_zero_sigma_reproduces_the_input_exactly():
     """Same contract as `synthetic_depth.apply_depth_noise`: noiseless is
@@ -314,7 +314,7 @@ def test_large_surface_is_not_moved_as_one_rigid_sheet():
     assert abs(float(np.mean(err))) < 0.5 * float(np.std(err))
 
 
-# --- the cluster-extent gate -------------------------------------------------
+# the cluster-extent gate
 
 def _apparent_extents(z, draws=1500, corr_px=DEFAULT_CORRELATION_PX):
     """Bounding-box side along the ray: the ball's body plus its depth noise.
@@ -382,7 +382,7 @@ def test_required_gate_admits_the_ball_it_was_derived_for():
     assert required_cluster_max_extent_m(5.0) < _CLUSTER_MAX_EXTENT_M
 
 
-# --- which column is depth ---------------------------------------------------
+# which column is depth
 
 def _gz_flu_ball_cloud(height, width, depth_m, span=_BALL_SPAN_PX,
                        fov_deg=27.0):
@@ -452,7 +452,7 @@ def test_a_bad_depth_axis_is_refused():
             _flat_wall(8, 8, 5.0), np.random.default_rng(0), depth_axis=3)
 
 
-# --- no-return pixels --------------------------------------------------------
+# no-return pixels
 
 def test_non_finite_returns_pass_through_untouched():
     """A depth camera reports "no return" as NaN or +/-inf. Those must survive
@@ -481,7 +481,7 @@ def test_non_finite_returns_do_not_poison_their_neighbours():
     assert neighbours.sum() >= 80, "only the one bad pixel may be non-finite"
 
 
-# --- shape contract ----------------------------------------------------------
+# shape contract
 
 def test_unorganized_cloud_is_refused():
     """The correlation lives in IMAGE space. Handed a flat (N,3) list there is

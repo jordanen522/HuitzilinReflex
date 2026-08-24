@@ -71,7 +71,7 @@ import null_attribution_mc  # noqa: E402
 LIBRARY_TTCS = (0.0, 0.4, 0.43, 0.5, 0.7, 0.75, 0.875, 1.1, 1.25, 1.5)
 
 
-# --- compute_exclude_topics --------------------------------------------------
+# compute_exclude_topics
 
 def test_compute_exclude_topics_returns_sorted_deduped_list():
     result = compute_exclude_topics(["/threat/marker", "/threat/centroid",
@@ -97,7 +97,7 @@ def test_compute_exclude_topics_rejects_empty_enumeration():
 
 
 def test_compute_exclude_topics_rejects_partial_discovery():
-    # HIGH-1: the exact list rclpy's Node.__init__ produces before
+    # The exact list rclpy's Node.__init__ produces before
     # detector_node.py has created /threat/centroid. Non-empty, nothing
     # forbidden — and useless as an exclusion.
     with pytest.raises(ValueError, match=r"/threat/centroid"):
@@ -121,7 +121,7 @@ def test_required_topics_are_exactly_the_scored_topic():
     assert REQUIRED_EXCLUDE_TOPICS == frozenset({"/threat/centroid"})
 
 
-# --- build_bag_play_cmd: the replay must never feed the bag's own track back -
+# build_bag_play_cmd: the replay must never feed the bag's own track back
 
 def test_build_bag_play_cmd_never_omits_exclude_topics():
     cmd = build_bag_play_cmd(
@@ -150,7 +150,7 @@ def test_build_bag_play_cmd_includes_bag_path_and_clock_flag():
     assert "--clock" in cmd
 
 
-# --- clock_msg_to_sim_t -------------------------------------------------------
+# clock_msg_to_sim_t
 #
 # This one line fixes the absolute position of every window in the library.
 # A nanosecond-scaling slip would move all seventeen in lockstep.
@@ -169,7 +169,7 @@ def test_clock_msg_to_sim_t_nanosec_scale_is_1e9_not_1e6():
     assert clock_msg_to_sim_t(0, 1_000_000) == pytest.approx(0.001)
 
 
-# --- strict_window_bounds -----------------------------------------------------
+# strict_window_bounds
 
 def test_strict_window_lower_bound_never_precedes_spawn():
     # THE required guard. window_s (4.0) exceeds every time_to_closest_s in
@@ -199,7 +199,7 @@ def test_strict_window_is_asymmetric_about_the_event():
     event = spawn + 1.5
     assert event - lower == pytest.approx(1.5)        # floored at spawn
     # ttc 1.5 s > the 0.639 s flat-throw fall time, so the tolerance hangs
-    # off ground impact, not off an event that never happens (HIGH-3).
+    # off ground impact, not off an event that never happens.
     assert upper - spawn == pytest.approx(
         FLAT_THROW_FALL_TIME_S + POST_EVENT_TOLERANCE_S)
     assert upper < event + POST_EVENT_TOLERANCE_S
@@ -225,7 +225,7 @@ def test_strict_window_upper_never_exceeds_sidecar_window():
     assert upper == pytest.approx(100.0 + SPAWN_LEAD_S + 0.5 + 0.25)
 
 
-# --- the late edge is clamped at ground impact -------------------------------
+# the late edge is clamped at ground impact
 
 def test_flat_throw_fall_time_is_the_documented_physics():
     # sqrt(2h/g) from a 2 m hover, the same arithmetic scenario_matrix.yaml's
@@ -344,7 +344,7 @@ def test_late_clamp_never_pushes_the_upper_edge_below_the_lower():
 
 
 def test_an_inverted_strict_window_raises_instead_of_admitting_nothing():
-    # The concrete case from the a later revision review, verified on this box:
+    # The concrete case that motivated the guard, verified on this box:
     #   strict_window_bounds(100.0, 1.5, window_s=0.25)
     #     -> lower = +4.250, upper = +3.889   (width -0.361 s)
     # The old (pre-clamp) rule could not produce it: both of its edges hung
@@ -361,13 +361,13 @@ def test_an_inverted_strict_window_raises_instead_of_admitting_nothing():
 
 def test_a_large_time_to_closest_also_inverts_the_window():
     # The SECOND route, found by running the guard rather than reading the
-    # algebra (a later revision). Once min(window_s, post_event_s) saturates at
+    # algebra. Once min(window_s, post_event_s) saturates at
     # post_event_s, the late edge stops growing with window_s while the
     # floor keeps reaching forward, so a large enough ttc inverts the window
     # at the SHIPPED window_s = 4.0:
     #   ttc > fall_time_s + POST_EVENT_TOLERANCE_S + window_s  ->  6.639 s
-    # The a later revision review characterised the hazard as "small window_s"
-    # only; it is a surface, not a single crossover.
+    # The hazard was first characterised as "small window_s" only; it is a
+    # surface, not a single crossover.
     threshold = FLAT_THROW_FALL_TIME_S + POST_EVENT_TOLERANCE_S + 4.0
     assert threshold == pytest.approx(6.639, abs=1e-3)
     lower, upper = strict_window_bounds(100.0, threshold - 0.01,
@@ -416,7 +416,7 @@ def test_strict_window_requires_time_to_closest_s():
         strict_window_bounds(100.0, None, window_s=4.0)
 
 
-# --- is_in_window_strict -----------------------------------------------------
+# is_in_window_strict
 
 def test_strict_window_true_near_closest_approach():
     # bag_start=100, spawn_lead=3 (default), ttc=0.7 -> event at 103.7
@@ -504,7 +504,7 @@ def test_strict_window_false_when_no_detections():
     ) is False
 
 
-# --- superseded gates, kept for artifact comparison only ---------------------
+# superseded gates, kept for artifact comparison only
 
 def test_loose_window_true_when_detection_within_window_of_bag_start():
     assert is_in_window_loose([102.0], bag_start=100.0, window_s=4.0) is True
@@ -524,7 +524,7 @@ def test_loose_window_false_when_no_detections():
 
 
 def test_loose_window_has_no_lower_bound_as_documented():
-    # LOW-4: the expression accepts t < bag_start. Locked so the docstring
+    # The expression accepts t < bag_start. Locked so the docstring
     # and the computation cannot drift apart again.
     assert is_in_window_loose([99.0], bag_start=100.0, window_s=4.0) is True
 
@@ -544,7 +544,7 @@ def test_symmetric_window_bounds_are_the_old_gate_written_as_an_interval():
 
 
 def test_count_in_window_counts_rather_than_just_deciding():
-    # MEDIUM-3: how many detections each gate ADMITS is the number that says
+    # How many detections each gate ADMITS is the number that says
     # whether the new gate is doing anything, and a boolean cannot carry it.
     # 99.80 and 100.50 are PRE-SPAWN (spawn is at 103.0) — cold-map burst
     # territory, which the old gate admitted and the new one floors out.
@@ -556,7 +556,7 @@ def test_count_in_window_counts_rather_than_just_deciding():
     assert count_in_window([], *strict) == 0
 
 
-# --- format_closure_rate (a later revision, LOW-2) --------------------------------
+# format_closure_rate
 
 def test_format_closure_rate_says_when_there_was_no_in_band_run():
     # A bare "rate=0.00" reads as a measured zero closure. It is not: it is
@@ -573,7 +573,7 @@ def test_format_closure_rate_prints_a_real_rate_when_one_exists():
     assert format_closure_rate(fired) == "8.00m/s"
 
 
-# --- closing_runs / longest_closing_run --------------------------------------
+# closing_runs / longest_closing_run
 
 def test_longest_closing_run_empty_is_zero():
     assert longest_closing_run([]) == 0
@@ -612,15 +612,15 @@ def test_longest_closing_run_finds_longest_among_several():
 
 
 def test_closing_run_is_broken_by_a_time_gap():
-    # the earlier revision: without a gap bound, two detections seconds apart counted as
-    # one "closing step" — the earlier revision's 8 s window made that routine.
+    # Without a gap bound, two detections seconds apart counted as one
+    # "closing step" — the old 8 s window made that routine.
     ranges = [(100.0, 5.0), (100.067, 4.0), (106.0, 3.0)]
     assert longest_closing_run(ranges) == 2
 
 
 def test_max_detection_gap_is_still_derived_from_the_roi_and_airframe_max():
-    # Narrowed (a later revision, LOW-4): this locks the CONSTANT against silent
-    # retuning and nothing more. The second assertion it used to carry
+    # Narrowed: this locks the CONSTANT against silent retuning and nothing
+    # more. The second assertion it used to carry
     # (MAX_DETECTION_GAP_S >= 5.00 / V_AIRFRAME_MAX_MPS) was implied by the
     # first and exercised no code at all. The property it was gesturing at
     # — that the gap can never decide an attribution — is exercised for
@@ -677,7 +677,7 @@ def test_run_closure_rate_of_short_run_is_zero():
     assert run_closure_rate([]) == 0.0
 
 
-# --- attribute_closing_ball -----------------------------
+# attribute_closing_ball
 #
 # The refuted rule tested only the SIGN of successive range differences.
 # Under patrol the drone translates toward newly-explored terrain, whose
@@ -770,7 +770,7 @@ def test_attribution_needs_contiguous_points():
 
 
 def test_attribution_reports_the_numbers_the_artifact_needs():
-    # HIGH-2: everything the run artifact prints must come out of here.
+    # Everything the run artifact prints must come out of here.
     result = attribute_closing_ball(_sequence(4.8, 8.0, 5), 8.0)
     for key in ("attributable", "longest_run", "best_run", "closure_rate",
                 "rate_band", "n_points", "reason"):
@@ -804,7 +804,7 @@ def test_out_of_band_step_splits_a_run_instead_of_destroying_it():
     # single bad frame in the middle of a long track cannot veto a real
     # detection.
     #
-    # Fixed in a later revision (MEDIUM-7): the previous version's "impossible
+    # The previous version's "impossible
     # jump" (t 100.1333 -> 100.30, r 3.7333 -> 2.0) was 10.40 m/s, INSIDE
     # the (3.49, 11.49] band, so the two halves were simply joined into one
     # 6-point run and the assertion passed without ever exercising the
@@ -835,7 +835,7 @@ def test_out_of_band_step_still_fails_when_neither_half_is_long_enough():
     assert result["best_run"] == 2
 
 
-# --- the null model (a later revision, MEDIUM-5) ----------------------------------
+# The null model
 
 def test_monte_carlo_harness_reproduces_the_published_noise_rate():
     # The harness is shipped so this number can be re-derived rather than
@@ -859,10 +859,10 @@ def test_monte_carlo_harness_reproduces_the_magnitude_noise_rate():
 
 
 def test_the_published_null_figures_still_match_the_measured_n_win():
-    # THE STALENESS GUARD (a later revision, F2-1). The defect this catches is not
-    # arithmetic — it is that detector.yaml's three null figures were computed
-    # at one n_win vector, the a later revision window change moved that vector,
-    # and nothing anywhere noticed. The figures were prose; prose cannot fail.
+    # THE STALENESS GUARD. The defect this catches is not arithmetic — it is
+    # that detector.yaml's three null figures were computed at one n_win
+    # vector, a later window change moved that vector, and nothing anywhere
+    # noticed. The figures were prose; prose cannot fail.
     #
     # Recomputed here from null_attribution_mc.MEASURED_N_WIN, so any future
     # change to those counts that does not also move the published figures

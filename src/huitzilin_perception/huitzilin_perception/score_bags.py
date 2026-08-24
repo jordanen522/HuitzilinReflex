@@ -446,8 +446,8 @@ class ScorerNode(Node):
         # _read_bag_start_sim_t for why that is the wrong source).
         bag_start = self._read_bag_start_sim_t(bag_path)
         if bag_start is None:
-            #  "no window could be established" must fail
-            # loudly, never quietly pass as "detected somewhere". A bag with
+            # "No window could be established" must fail loudly, never
+            # quietly pass as "detected somewhere". A bag with
             # no recorded /clock is a harness/capture error, not a detector
             # result — exclude it from the confusion matrix the same way a
             # missing bag is excluded, rather than crashing the whole run.
@@ -501,11 +501,12 @@ class ScorerNode(Node):
                     "note": "sidecar missing time_to_closest_s — strict "
                             "window cannot be enforced",
                 }
-            # The window is asymmetric, floored at spawn and clamped at ground impact on the late side
-            #: lower = max(event - window_s, bag_start
-            # + SPAWN_LEAD_S), upper = spawn + min(ttc, fall_time) +
-            # min(window_s, POST_EVENT_TOLERANCE_S). See
-            # strict_window_bounds().
+            # The window is asymmetric: floored at spawn, and clamped at
+            # ground impact on the late side.
+            #   lower = max(event - window_s, bag_start + SPAWN_LEAD_S)
+            #   upper = spawn + min(ttc, fall_time)
+            #                 + min(window_s, POST_EVENT_TOLERANCE_S)
+            # See strict_window_bounds().
             window_kwargs = dict(
                 spawn_lead_s=SPAWN_LEAD_S,
                 post_event_s=POST_EVENT_TOLERANCE_S,
@@ -515,9 +516,9 @@ class ScorerNode(Node):
                 lower, upper = strict_window_bounds(
                     bag_start, time_to_closest_s, window_s, **window_kwargs
                 )
-                # Call the tested predicate rather than re-inlining it (fix
-                # round 1, LOW-3): the comparison that decides pass/fail is
-                # the one that must carry the regression tests.
+                # Call the tested predicate rather than re-inlining it: the
+                # comparison that decides pass/fail is the one that must
+                # carry the regression tests.
                 in_window_strict = is_in_window_strict(
                     detections, bag_start, time_to_closest_s, window_s,
                     **window_kwargs
@@ -529,8 +530,8 @@ class ScorerNode(Node):
                     sid, label, detected, window_s, time_to_closest_s, e
                 )
             # Both superseded gates, computed for the artifact only so the
-            # CRITICAL-1 change is visible per scenario rather than only in
-            # aggregate: `sym` is the legacy symmetric unfloored gate, `loose`
+            # strict-window change is visible per scenario rather than only
+            # in aggregate: `sym` is the legacy symmetric unfloored gate, `loose`
             # is the pre-5b "anywhere in the first window_s" gate.
             in_window_sym = is_in_window_symmetric_legacy(
                 detections, bag_start, time_to_closest_s, window_s,
@@ -569,9 +570,9 @@ class ScorerNode(Node):
             attr = attribute_closing_ball(in_window_ranges, speed_mps)
             attributable = attr["attributable"]
             closing_run = attr["longest_run"]
-            # Raw evidence behind the verdict. is about the
-            # artifact, but the (time, range) pairs themselves are what let
-            # an attribution verdict be re-derived offline without another
+            # Raw evidence behind the verdict. The (time, range) pairs are
+            # what let an attribution verdict be re-derived offline without
+            # another
             # ~13-minute Dell run — which is exactly what was needed to
             # catch a mis-derived constant in this very function.
             self.get_logger().info(
@@ -893,14 +894,14 @@ class ScorerNode(Node):
         # try. On a non-UTF-8 stdout (Windows cp1252, or LANG=C) the
         # report's box-drawing characters raise UnicodeEncodeError out of
         # _report(), so run() aborted and the artifact was never created
-        # at all -- the same shape as MEDIUM-1 (an exception escaping
-        # run() before the artifact is written) and strictly worse than
-        # the zero-byte file round 3 fixed. The write below is already
+        # at all -- an exception escaping run() before the artifact is
+        # written, and strictly worse than the zero-byte file this
+        # ordering originally fixed. The write below is already
         # guarded and already pins its encoding, so ordering it first
         # costs nothing and cannot itself lose the artifact.
         try:
             self._out_file.parent.mkdir(parents=True, exist_ok=True)
-            # encoding pinned: the report ALWAYS
+            # encoding is pinned because the report ALWAYS
             # contains box-drawing characters and em-dashes, so write_text's
             # locale default silently truncates the artifact to zero bytes
             # under any non-UTF-8 locale (Windows cp1252, or a container

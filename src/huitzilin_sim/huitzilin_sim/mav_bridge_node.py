@@ -22,7 +22,7 @@ class MavBridgeNode(Node):
     def __init__(self):
         super().__init__("mav_bridge")
 
-        # --- parameters (override via bridge.yaml) ---
+        # parameters (override via bridge.yaml)
         self.declare_parameter("connection", "udp:127.0.0.1:14550")
         self.declare_parameter("cmd_rate_hz", 10.0)
         self.declare_parameter("evade_rate_hz", 50.0)
@@ -36,7 +36,7 @@ class MavBridgeNode(Node):
         self.cmd_timeout = float(self.get_parameter("cmd_timeout_s").value)
         self.takeoff_alt = float(self.get_parameter("takeoff_alt_m").value)
 
-        # --- MAVLink bridge ---
+        # MAVLink bridge
         self.bridge = MavBridge(conn)
         self.bridge.connect()
         self.bridge.request_streams(int(self.get_parameter("stream_rate_hz").value))
@@ -66,7 +66,7 @@ class MavBridgeNode(Node):
         self.declare_parameter("mode", "GUIDED")
         self.create_service(Trigger, "/huitzilin/set_mode", self._srv_set_mode)
 
-        # --- timers ---
+        # timers
         self.create_timer(1.0 / self.cmd_rate, self._tick_setpoint)   # watchdog/stream
         # Dodges are retransmitted far faster than patrol. The watchdog rate is
         # sized to keep ArduPilot's ~3 s setpoint timeout happy, which is the
@@ -204,7 +204,7 @@ class MavBridgeNode(Node):
             })
             self.state_pub.publish(st)
 
-    # -- services --
+    # services
     def _srv_arm(self, req, resp):
         try:
             self.bridge.arm(req.data)

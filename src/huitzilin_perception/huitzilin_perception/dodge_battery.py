@@ -1051,8 +1051,8 @@ class DodgeBatteryNode(Node):
     def _report(self, rows: list) -> int:
         errors = [r for r in rows if r.get("error")]
         # A skipped run is neither an error nor a measurement: no ball was
-        # thrown, so counting it as a dodge failure would repeat exactly the
-        # v9 mistake of reading aiming problems as trigger problems.
+        # thrown, so counting it as a dodge failure would read an aiming
+        # problem as a trigger problem.
         skipped = [r for r in rows if r.get("skipped") and not r.get("error")]
         scored = [r for r in rows
                   if not r.get("error") and not r.get("skipped")]
@@ -1109,8 +1109,8 @@ class DodgeBatteryNode(Node):
             n_false = sum(1 for r in wides if not r["success"])
             lats = [r["latency_ms"] for r in sub if r.get("latency_ms") is not None]
             # On-target subsets: a throw that missed its specified geometry
-            # tests the throw harness, not the dodge. Battery v7
-            # is why this is printed: 3 of 3 B01 runs missed by 1.0-4.2 m and
+            # tests the throw harness, not the dodge. An earlier battery is
+            # why this is printed: 3 of 3 B01 runs missed by 1.0-4.2 m and
             # B07's nominal 1.5 m wide miss arrived at 0.30 m, so its
             # "0/2 false dodges" was crediting the trigger for ignoring a
             # near-hit.

@@ -97,7 +97,7 @@ def test_default_grace_is_used_when_omitted():
     assert evaluate_clock(True, 0, 0, 60.0).verdict is Verdict.FAIL
 
 
-# --- install_clock_guard -----------------------------------------------------
+# install_clock_guard
 #
 # evaluate_clock is pure and was already covered. install_clock_guard is the
 # half that has effects -- it is what stops the timer and what actually kills

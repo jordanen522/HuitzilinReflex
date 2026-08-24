@@ -27,7 +27,7 @@ from huitzilin_perception.cloud_geometry import (
 )
 
 
-# --- quaternion / transform primitives ---------------------------------------
+# quaternion / transform primitives
 
 def test_quat_identity():
     R = quat_to_rot(0.0, 0.0, 0.0, 1.0)
@@ -64,7 +64,7 @@ def test_transform_round_trip():
     np.testing.assert_allclose(back, pts_world, atol=1e-4)
 
 
-# --- covariance rotation (evasion_node's anisotropic-R fusion hook) ----------
+# covariance rotation (evasion_node's anisotropic-R fusion hook)
 
 def test_rotate_covariance_identity_is_a_no_op():
     R = np.diag([1.0, 4.0, 9.0])
@@ -101,7 +101,7 @@ def test_rotate_covariance_stays_symmetric_positive_definite():
     assert np.all(np.linalg.eigvalsh(rotated) > 0.0)
 
 
-# --- egomotion compensation: the actual W3 failure mode ----------------------
+# egomotion compensation: the actual W3 failure mode
 
 def _static_scene(n=2000, seed=1):
     """Ground-plane-ish static scene in world frame, 4-12 m ahead."""
@@ -167,7 +167,7 @@ def test_voxel_downsample_keeps_small_object():
     assert out.shape[0] >= 2  # 80 mm ball must survive 0.02 m voxels
 
 
-# --- voxel_downsample: pinned before the speed rewrite ------------
+# voxel_downsample: pinned before the speed rewrite
 # Measured hot stage: 66-74 ms per call on patrol clouds against a 77 ms/frame
 # wall budget, so one stage was the whole latency overrun. These tests pin the
 # CONTRACT (one point per occupied voxel, member centroid, lexicographic row
@@ -274,7 +274,7 @@ def test_voxel_downsample_empty_input():
     assert voxel_downsample(empty, leaf=0.02).shape[0] == 0
 
 
-# --- cluster_all: graph path vs per-point traversal --------------------------
+# cluster_all: graph path vs per-point traversal
 # The second hot stage, 12-71 ms per call (up to 38% of stage time) once
 # voxel_downsample was fixed, because it ran one Python-level query_ball_point
 # per point. Replaced by one query_pairs + one connected_components. Both are

@@ -83,7 +83,7 @@ def _rows(battery_doc):
     return {row["id"]: row for row in battery_doc["runs"]}
 
 
-# -- the guard itself --------------------------------------------------------
+# the guard itself
 
 def test_the_shipped_long_range_config_clears_its_own_gates(rendered):
     assert_gates_clear_the_rendered_range(rendered)
@@ -155,7 +155,7 @@ def test_the_guard_is_specific_to_this_lanes_noise_structure():
         assert_gates_clear_the_rendered_range(synthetic)
 
 
-# -- params against the node at the other end of /oak/points -----------------
+# params against the node at the other end of /oak/points
 
 def _node_constant(name):
     """A module-level constant out of depth_noise_node.py, read as SOURCE.
@@ -214,7 +214,7 @@ def test_the_params_file_names_the_node_the_launch_file_starts():
     assert "ros__parameters" in doc["detector"]
 
 
-# -- params against the physics they were sized against ----------------------
+# params against the physics they were sized against
 
 def test_the_extent_gate_is_sized_at_the_roi_ceiling(rendered):
     """AT THE CEILING, NOT AT THE 26 m DESIGN REACH -- the distinction this
@@ -273,7 +273,7 @@ def test_the_far_clip_constant_tracks_the_camera_it_describes():
     assert float(sensors[0].find("./camera/clip/far").text) == AR0234_FAR_CLIP_M
 
 
-# -- the world file ----------------------------------------------------------
+# the world file
 
 def _world(path):
     return ET.fromstring(_COMMENT.sub("", path.read_text(encoding="utf-8")))
@@ -332,7 +332,7 @@ def test_the_long_range_model_is_installed():
     assert "models/iris_ar0234/*" in SETUP_PY.read_text(encoding="utf-8")
 
 
-# -- the battery -------------------------------------------------------------
+# the battery
 
 MATCHED_ENVELOPE = ("R01", "R02", "R03")
 
@@ -436,7 +436,7 @@ def test_every_row_id_is_unique(battery):
     assert len(ids) == len(set(ids))
 
 
-# -- the harness that flies it -----------------------------------------------
+# the harness that flies it
 
 def test_the_battery_script_can_run_this_lane():
     """A battery config nothing selects is a document, not an experiment."""

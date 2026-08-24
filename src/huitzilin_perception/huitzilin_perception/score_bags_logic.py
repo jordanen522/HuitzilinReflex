@@ -47,7 +47,8 @@ FORBIDDEN_EXCLUDE_TOPICS = frozenset({"/clock", "/oak/points"})
 
 # Topics that MUST appear, or the exclusion is not doing its job. score_bags
 # subscribes to exactly one topic — /threat/centroid — and that is the topic
-# whose recorded capture-time track contaminated every earlier measurement. A live publisher enumeration that comes back with
+# whose recorded capture-time track contaminated every earlier measurement.
+# A live publisher enumeration that comes back with
 # ['/parameter_events', '/rosout'] (both created inside rclpy's Node.__init__,
 # i.e. BEFORE detector_node.py creates its own publishers, and propagated
 # per-endpoint and asynchronously by DDS) satisfies "non-empty" and "nothing
@@ -138,97 +139,61 @@ def clock_msg_to_sim_t(sec: int, nanosec: int) -> float:
 # Detection window
 #
 # capture_scenario.sh fires the projectile SPAWN_LEAD seconds INTO the
-# recording, not at bag start -- the script writes the label sidecar, starts
-# `ros2 bag record`, then only after this many seconds calls
-# spawn_projectile. `time_to_closest_s` in the matrix/sidecar is defined
-# relative to SPAWN ("estimated time from spawn to closest approach",
-# scenario_matrix.yaml:18), not relative to bag start. This constant is the
-# same literal `SPAWN_LEAD=3` capture_scenario.sh applies to EVERY scenario
-# it records -- there is exactly one capture script, used for both the T
-# family and the 17 originals, with no per-family branch on the value, and
-# no revision of the script in git history has ever carried another value
-# (verified across all five: 70d6680, ceff20d, 5992359, 8d86873, fd330b8).
+# recording, not at bag start. `time_to_closest_s` in the matrix/sidecar is
+# relative to SPAWN, not to bag start. One capture script serves both the T
+# family and the 17 originals, with no per-family branch, and no revision in
+# git history has carried another value (checked across 70d6680, ceff20d,
+# 5992359, 8d86873, fd330b8).
 SPAWN_LEAD_S = 3.0
 
-# How far AFTER the ball's last airborne instant a genuine detection can
-# still land.
+# How far AFTER the ball's last airborne instant a genuine detection can land.
 #
-# The asymmetry is not a preference, it is the physics. Everything in the
-# ball's own flight puts real detections EARLIER than the nominal event:
-#   - Week 3 throws are flat (compensate_gravity defaults False,
-# ballistics.py), so a ball thrown level from a 2 m hover reaches the
-# ground sqrt(2*2.0/9.81) = 0.639 s after spawn regardless of its speed.
-#     For five of the twelve original positives (S01 1.5 s, S10 1.25 s) and
-# four of the ten tune positives (ttc 1.1 s) the nominal closest
-# approach is never reached at all -- scenario_matrix.yaml's coverage-design
-# notes say so for T01 explicitly. That is what FLAT_THROW_FALL_TIME_S below is for.
-#   - an oblique throw leaves the 45 deg ROI cone before closest approach
-# (the matrix's own T04/T06 notes).
-# So the ONLY mechanism that can put a genuine detection later is
-# spawn-command latency: capture_scenario.sh's spawn subshell runs
-# `sleep "$SPAWN_LEAD"` and then `ros2 run huitzilin_perception
-# spawn_projectile`, and that `ros2 run`
-# costs real time before the projectile exists. The whole flight -- spawn,
-# closest approach, ground impact -- is therefore shifted LATER by that
-# latency relative to bag_start + SPAWN_LEAD_S, which is exactly what this
-# constant absorbs, and it is added to the ball's last airborne instant
-# rather than to a nominal event that may never happen.
+# The asymmetry is physics, not preference. Everything in the ball's flight
+# puts real detections EARLIER than the nominal event: a flat throw from a 2 m
+# hover is on the ground 0.639 s after spawn whatever its speed, and an oblique
+# throw leaves the 45 deg ROI cone before closest approach. For nine of the
+# library's positives the nominal closest approach never happens at all.
 #
-# Budget, measured on the Dell rather than assumed:
-# ros2 CLI startup                0.25 - 0.49 s (3 runs, idle machine)
-# python + rclpy init + Node()    0.41 - 0.74 s (3 runs, idle machine)
-#   -> `ros2 run` floor             0.7  - 1.2 s, before spawn_projectile
-# does any work of its own (ballistics + a gz create service round
-# trip, on a machine simultaneously running gz, SITL and rosbag2).
-# PROVENANCE, so a later reader can weigh it: the one end-to-end figure the
-# repo contains is S05's recorded capture-time centroid, which puts the
-# effective lead at 4.108 s against the nominal 3.0, i.e. 1.108 s of
-# latency. S05 is a TRAIN-SPLIT ORIGINAL, not a tune bag. It was used as
-# CONFIRMATION ONLY of a constant derived from the Dell timing measurement
-# and capture_scenario.sh, but this is a scoring constant partly corroborated by an original
-# and should be read as such.
+# The ONLY mechanism that puts a genuine detection LATER is spawn-command
+# latency: `ros2 run` costs real time before the projectile exists. Measured on
+# the Dell over 3 idle runs -- ros2 CLI startup 0.25-0.49 s, python + rclpy
+# init + Node() 0.41-0.74 s, so a 0.7-1.2 s floor before spawn_projectile does
+# any work of its own.
 #
-# 2.0 s is ~1.8x that end-to-end offset and ~1.7-2.9x the measured `ros2
-# run` floor, so the late edge cannot manufacture a false negative out of
-# spawn latency -- while cutting the gate from the 8.0 s that the legacy gate
-# shipped down to 2.43-2.64 s, and (with the floor below) removing the
-# documented cold-map FP burst entirely.
+# PROVENANCE, so a later reader can weigh it: the one end-to-end figure in the
+# repo is S05's recorded capture-time centroid, putting the effective lead at
+# 4.108 s against the nominal 3.0 -- 1.108 s of latency. S05 is a TRAIN-SPLIT
+# ORIGINAL, used as confirmation only of a constant derived from the Dell
+# timing and capture_scenario.sh. Read it as partly corroborated, not measured.
+#
+# 2.0 s is ~1.8x that end-to-end offset and ~1.7-2.9x the `ros2 run` floor, so
+# the late edge cannot manufacture a false negative out of spawn latency --
+# while cutting the gate from the legacy 8.0 s down to 2.43-2.64 s and removing
+# the cold-map FP burst entirely.
 POST_EVENT_TOLERANCE_S = 2.0
 
-# The ball's last airborne instant
+# The ball's last airborne instant.
 #
-# The window used to be `event_t + min(window_s, POST_EVENT_TOLERANCE_S)`
-# with event_t the NOMINAL closest approach, bag_start + spawn_lead +
-# time_to_closest_s. That contradicted the physics three paragraphs above:
-# for S01 (ttc 1.50 s) the same docstring says the ball has been on the
-# ground since 0.639 s after spawn, so the nominal event never happens and
-# the window ran to spawn + 3.50 s -- 2.86 s after impact. The gate was
-# WIDEST exactly where the ball is present for the smallest fraction of it,
-# and the two widest windows (S01 3.50 s, S10 3.25 s) returned the two
-# largest in-window detection counts in the library (13 and 16, against 4-8
-# for the 2.43 s windows).
+#   t_last_airborne = min(time_to_closest_s, FLAT_THROW_FALL_TIME_S)
+#   upper           = spawn_t + t_last_airborne + min(window_s, post_event_s)
 #
-# The corrected rule derives the late edge from the same flat-throw model:
+# min(), because a flat throw that has not reached closest approach by ground
+# impact is still closing when it lands: its ACTUAL closest approach is at
+# impact, not at the nominal ttc. When ttc <= the fall time the nominal event
+# does happen and the term is unchanged.
 #
-# t_last_airborne = min(time_to_closest_s, FLAT_THROW_FALL_TIME_S)
-# upper           = spawn_t + t_last_airborne + min(window_s, post_event_s)
-#
-# min(), because a flat throw that has not reached closest approach by
-# ground impact is still closing when it lands: its ACTUAL closest approach
-# in flight is at impact, not at the nominal ttc. When ttc <= the fall time
-# the nominal event does happen and the term is unchanged.
-#
-# This is a STRICT TIGHTENING by construction -- min(ttc, T) <= ttc for
-# every ttc and every T >= 0, so the new upper edge is <= the old one for
-# every scenario in the library and for every scenario anyone could add.
-# The floor and the ANCHOR are untouched: lower is still
-# max(event_t - window_s, spawn_t) and event_t is still bag_start +
-# spawn_lead_s + time_to_closest_s.
+# This replaced a rule anchored on the NOMINAL closest approach, which was
+# widest exactly where the ball is present for the smallest fraction of the
+# window: S01 (ttc 1.50 s) ran to spawn + 3.50 s, 2.86 s after impact. The two
+# widest windows (S01 3.50 s, S10 3.25 s) returned the two largest in-window
+# detection counts in the library, 13 and 16 against 4-8 for the 2.43 s
+# windows. The new edge is a STRICT TIGHTENING: min(ttc, T) <= ttc for every
+# ttc and T >= 0. Floor and anchor are untouched.
 #
 # Sources, none of them a measured outcome of this harness:
 #   - 2.0 m: bridge.yaml / hw_bridge.yaml takeoff_alt_m, the altitude every
 #     Week 3 capture flew (capture_scenario.sh raises it only for the
-# vertical-offset negatives N04/T13, handled below).
+#     vertical-offset negatives N04/T13, handled below).
 #   - flat throw: spawn_projectile.py declares compensate_gravity False and
 #     capture_scenario.sh's spawn subshell never passes it, so vz(0) = 0.
 #   - 9.81 m/s^2 and h = 1/2 g t^2.
@@ -455,8 +420,8 @@ def is_in_window_symmetric_legacy(
     """
     The legacy gate exactly as it shipped: `abs(t - event_t) <= window_s`,
     symmetric and unfloored. Kept ONLY so every run artifact can print the
-    old verdict beside the new one and make the CRITICAL-1 change visible
-    per scenario. It is never what decides pass/fail.
+    old verdict beside the new one and make the strict-window change
+    visible per scenario. It is never what decides pass/fail.
     """
     lower, upper = symmetric_window_bounds(
         bag_start, time_to_closest_s, window_s, spawn_lead_s
@@ -488,8 +453,9 @@ def is_in_window_loose(
 
 # Attribution
 #
-# The bags do NOT carry ground-truth ball position (no /gz/dynamic_poses), so attribution cannot compare a detection against a
-# known trajectory. What IS available is the range from base_link that
+# The bags do NOT carry ground-truth ball position (no /gz/dynamic_poses), so
+# attribution cannot compare a detection against a known trajectory. What IS
+# available is the range from base_link that
 # /threat/centroid already carries (detector_node.py stamps it
 # frame_id="base_link", so sqrt(x^2+y^2+z^2) is range from the airframe, not
 # from a world origin — no frame conversion is involved anywhere below).
@@ -540,8 +506,7 @@ V_AIRFRAME_MEDIAN_MPS = 2.09
 # large random range jumps at frame rate.
 LIBRARY_MAX_BALL_SPEED_MPS = 17.0  # scenario_matrix.yaml: T03, T07, T08
 
-# Two detections of the SAME object cannot be arbitrarily far apart in time
-#.
+# Two detections of the SAME object cannot be arbitrarily far apart in time.
 #
 # The bound is set by the ROI, not by the frame rate. A first attempt at this
 # constant used (cloud_queue_depth + 1) / 15 Hz = 0.4 s, reasoning from how
@@ -610,11 +575,12 @@ def longest_closing_run(
     """
     Length in points of the longest closing run: the sign-only statistic,
     reported as a descriptive figure beside the rate verdict — but on its
-    own it is the refuted statistic (see CRITICAL-2 above) and must never
-    again be used as an attribution verdict by itself.
+    own it is the refuted statistic (see the rate verdict above) and must
+    never again be used as an attribution verdict by itself.
 
-    It is not the legacy number and must not be compared with one: the legacy run had no gap bound at all, so two detections
-    six seconds apart inside its 8 s window counted as one closing step,
+    It is not the legacy number and must not be compared with one: the legacy
+    run had no gap bound at all, so two detections six seconds apart inside
+    its 8 s window counted as one closing step,
     whereas this one is bounded by max_gap_s. Same sign test, different
     statistic; it can only read lower than the legacy statistic's, never higher.
     """

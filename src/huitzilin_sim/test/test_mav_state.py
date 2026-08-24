@@ -105,7 +105,7 @@ def _sys_status(voltage_battery, battery_remaining):
                 battery_remaining=battery_remaining)
 
 
-# --- battery sentinels -------------------------------------------------------
+# battery sentinels
 
 def test_battery_millivolts_become_volts():
     s = _bridge([_sys_status(22800, 76)]).get_state()
@@ -129,7 +129,7 @@ def test_unknown_battery_percent_is_none_not_minus_one():
     assert _bridge([_sys_status(22800, -1)]).get_state()["batt_pct"] is None
 
 
-# --- heartbeat ---------------------------------------------------------------
+# heartbeat
 
 def test_armed_flag_is_read_from_base_mode():
     assert _bridge([_hb(base_mode=CUSTOM_MODE | ARMED_FLAG)]).get_state()["armed"] is True
@@ -162,7 +162,7 @@ def test_mode_name_resolves_a_real_copter_heartbeat():
     assert MavBridge.mode_name(_hb(custom_mode=4)) == "GUIDED"
 
 
-# --- the existing contract must not move -------------------------------------
+# the existing contract must not move
 
 def test_position_and_attitude_still_dispatch():
     msgs = [_Msg("LOCAL_POSITION_NED", x=1.0, y=2.0, z=-3.0, vx=0.1, vy=0.2, vz=0.3),
@@ -203,7 +203,7 @@ def test_absent_telemetry_stays_absent():
         assert key not in s
 
 
-# --- arm(): the bound, and the command it actually sends ---------------------
+# arm: the bound, and the command it actually sends
 
 def test_a_refused_arm_times_out_instead_of_blocking_forever():
     """The whole point of T3.

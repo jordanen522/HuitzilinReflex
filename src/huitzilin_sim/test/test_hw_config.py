@@ -30,7 +30,7 @@ def params(doc, node):
     return doc[node]["ros__parameters"]
 
 
-# --- .parm files -------------------------------------------------------------
+# .parm files
 
 # Every .parm in the package, discovered rather than listed. The hardcoded
 # ["hw_frame.parm", "sitl_frame.parm"] looked exhaustive but only covered
@@ -109,7 +109,7 @@ def test_a_broken_fence_set_is_actually_caught():
     assert any("FENCE_ALT_MAX" in p for p in check_fence_consistency(parms))
 
 
-# --- yaml overlays -----------------------------------------------------------
+# yaml overlays
 
 OVERLAYS = [
     (SIM / "params" / "bridge.yaml", SIM / "params" / "hw_bridge.yaml"),
@@ -137,7 +137,7 @@ def test_overlay_check_catches_a_typoed_node_name():
     assert check_overlay(base, typo) != []
 
 
-# --- yaml node keys vs the names nodes actually declare ----------------------
+# yaml node keys vs the names nodes actually declare
 
 ALL_PARAMS_YAML = (sorted((SIM / "params").glob("*.yaml"))
                    + sorted((PERCEPTION / "params").glob("*.yaml")))
@@ -188,7 +188,7 @@ def test_no_params_yaml_bakes_in_use_sim_time():
     assert offenders == []
 
 
-# --- cross-file couplings ----------------------------------------------------
+# cross-file couplings
 
 @pytest.mark.parametrize("bridge_name,evasion_name", [
     ("bridge.yaml", "evasion.yaml"),

@@ -48,7 +48,7 @@ from typing import NamedTuple, Optional, Sequence
 import numpy as np
 from scipy import ndimage
 
-# --- NOMINAL OAK-D Lite mono geometry. REPLACE WITH THE DEVICE'S OWN --------
+# NOMINAL OAK-D Lite mono geometry. REPLACE WITH THE DEVICE'S OWN
 # calibration before trusting a range: fx here is derived from a datasheet FOV
 # (~71.9 deg horizontal at 640x480), and a few percent of focal-length error is
 # a few percent of every range this module reports. depthai exposes the factory

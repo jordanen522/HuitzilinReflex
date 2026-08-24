@@ -65,7 +65,7 @@ def _held(matrix, label=None):
     return [s for s in out if label is None or s["label"] == label]
 
 
-# -- size and shape ----------------------------------------------------------
+# size and shape
 
 def test_the_set_is_the_size_enumerated(matrix):
     """17 is the usable minimum; 18 is what was enumerated. A set that shrinks
@@ -111,7 +111,7 @@ def test_no_h_scenario_appears_in_a_tuning_split(matrix):
         assert not [m for m in matrix["split"][name] if m.startswith("H")]
 
 
-# -- disjointness from the data the detector was ever fitted on --------------
+# disjointness from the data the detector was ever fitted on
 
 def test_no_held_out_positive_repeats_a_tuning_parameter_triple(matrix):
     """Disjoint on speed alone -- H uses 7/9/13/16/18/20, S/N use 4/8/12/14 and
@@ -139,7 +139,7 @@ def test_the_speed_axis_reaches_20_mps(matrix):
     assert 20.0 in {s["speed_mps"] for s in _held(matrix, "positive")}
 
 
-# -- the geometry amendments (A3) --------------------------------------------
+# the geometry amendments (A3)
 
 def test_every_positive_stays_inside_the_vertical_sector(matrix):
     """Amendment A3(a). compensate_gravity keeps the HORIZONTAL speed at
@@ -200,7 +200,7 @@ def test_every_positive_compensates_gravity(matrix):
         assert s.get("compensate_gravity") is True, s["id"]
 
 
-# -- the axes are actually crossed, not just declared ------------------------
+# the axes are actually crossed, not just declared
 
 def test_the_axes_are_covered_rather_than_nominal(matrix):
     """A set that declares three axes and varies one is a set with 18 copies of
@@ -223,7 +223,7 @@ def test_the_angle_axis_is_symmetric(matrix):
     assert {-a for a in angles} == angles
 
 
-# -- derived fields agree with the parameters they are derived from ----------
+# derived fields agree with the parameters they are derived from
 
 def test_the_derived_fields_match_their_own_arithmetic(matrix):
     """time_to_closest_s anchors score_bags' strict detection window, so an
