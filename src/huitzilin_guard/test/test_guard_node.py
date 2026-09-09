@@ -300,9 +300,20 @@ def test_an_empty_box_reports_no_detection_age_rather_than_a_fault():
     assert status_of(make_node())["secs_since_detection"] is None
 
 
-def test_the_node_never_gained_a_way_to_command_the_aircraft():
-    """Belt and braces next to test_isolation, asserted on the live class."""
-    for banned in ("create_client", "mav", "send_position_ned"):
+def test_the_node_holds_no_mavlink_connection():
+    """Belt and braces next to test_isolation, asserted on the live class.
+
+    patrol_node carries `mav` and reaches send_position_ned through it. This
+    node must have neither, so there is no object here through which a
+    setpoint could be sent.
+
+    create_client is deliberately NOT checked this way: rclpy.Node defines
+    it, so every node in the workspace has the attribute and no subclass can
+    remove it. The guarantee that matters is that this package never CALLS
+    it, which test_isolation asserts against the source with an AST walk --
+    the same reason the ban lives on the call rather than on std_srvs.
+    """
+    for banned in ("mav", "send_position_ned", "cmd_pub"):
         assert not hasattr(GuardNode, banned)
 
 
