@@ -90,7 +90,7 @@ scoring rules are in [`docs/RESULTS.md`](docs/RESULTS.md).
 ```
 src/huitzilin_sim/          flight bridge, patrol, supervisor, clock guard
 src/huitzilin_perception/   detector, Kalman/evasion, payload, scoring harnesses
-src/huitzilin_action_escalation/  aggressive-action alerting (independent of evasion)
+src/huitzilin_guard/        guard alarm: person-in-the-box siren (independent of evasion)
 scripts/                    test runner, preflight, regression, capture
 docs/                       results, architecture, frames, safety case, runbooks
 ```
@@ -173,15 +173,16 @@ accepts takeoff and produces no lift.
 | [`docs/optics_probe.md`](docs/optics_probe.md) | Rendered-camera reach probe; the AR0234 and depth-noise measurements |
 | [`docs/bag_capture_runbook.md`](docs/bag_capture_runbook.md) | Bag capture and detection regression (Dell) |
 | [`docs/dodge_battery_runbook.md`](docs/dodge_battery_runbook.md) | Dodge battery and sweep procedure (Dell) |
-| [`docs/action_escalation.md`](docs/action_escalation.md) | Aggressive-action alerting: categories, privacy contract, risks |
+| [`docs/guard.md`](docs/guard.md) | Guard alarm: the box, arming, privacy contract, limits |
 
 ## Safety
 
-The action-escalation subsystem recognises aggressive motion only. It never identifies
-anyone: no face detection, no facial recognition, no person identification or
-re-identification, no persistent tracking, no biometric data. It can request the lights
-and siren and nothing else, and it cannot command flight. See
-[`docs/action_escalation.md`](docs/action_escalation.md).
+The guard subsystem reports presence only: that a person is inside the patrolled box,
+never who they are or what they are doing. It never identifies anyone: no face detection,
+no facial recognition, no person identification or re-identification, no persistent
+tracking, no biometric data, and no recording of any kind. It can request the lights and
+siren and nothing else, and it cannot command flight. It is armed and disarmed
+deliberately, like a house alarm panel. See [`docs/guard.md`](docs/guard.md).
 
 The payload is a signal only. It is never used to follow or harass a person. Flight is
 netted or tethered, inside a 10 m geofence with a 5 m ceiling, with a dedicated

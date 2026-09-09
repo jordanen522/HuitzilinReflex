@@ -91,14 +91,16 @@ Cuts all motors immediately regardless of flight mode.
 - Camera never pointed at anyone who has not explicitly consented
 - The warning payload (buzzer + LED) is a safety signal only — never used to harass or follow a person
 - **No facial recognition, face detection, person identification, re-identification,
-  persistent person tracking, or biometric data of any kind.** The action-escalation
-  subsystem accepts twelve body joints (COCO-17 minus the five face keypoints) and
-  refuses any frame carrying a face point, an image, an embedding or a stable
-  identifier. It records what was decided, never what was seen.
-- The action-escalation subsystem runs on the bench and in simulation only, with the
-  aircraft disarmed and props off. It has never run with an armed aircraft, and the
-  abort criterion below is unchanged by it: a person entering the test area is still
-  a land-immediately condition, not an occasion to observe them.
+  persistent person tracking, or biometric data of any kind.** The guard subsystem
+  accepts twelve body joints (COCO-17 minus the five face keypoints) and refuses any
+  frame carrying a face point, an image, an embedding or a stable identifier. It
+  reports only that a person is inside the configured area, never who they are or
+  what they are doing, and it publishes no position for them.
+- The guard subsystem runs on the bench and in simulation only, with the aircraft
+  disarmed and props off. No camera has ever been connected to it. It has never run
+  with an armed aircraft, and the abort criterion below is unchanged by it: a person
+  entering the test area is still a land-immediately condition, not an occasion to
+  observe them. An armed guard alarm and a live flight test are mutually exclusive.
 
 ### Abort Criteria
 | Situation | Action |

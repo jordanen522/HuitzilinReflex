@@ -119,36 +119,50 @@ conversion lives in `mav_bridge` (see `docs/frames.md`). Velocity setpoints use
 | `/threat/intercept_marker` | `visualization_msgs/Marker` | Reliable | `base_link` |
 | `/payload/alarm` | `std_msgs/Bool` | Reliable | N/A (consumer: `payload_node`) |
 
-## Action escalation (independent subsystem)
+## Guard alarm (independent subsystem)
 
-`huitzilin_action_escalation` shares **no topic, no service and no node** with the
-graph above. It is an alarm, not a control path.
+`huitzilin_guard` shares **no service and no node** with the graph above, and one read-only
+topic. It is an alarm, not a control path.
 
 ```
-/action/keypoints -> action_recognizer -> /action/alert_request -> alert_signal
-                                       -> /action/escalation_event
-                                       -> /action/status
+/guard/detections -> guard -> /guard/alarm_request -> alert_signal -> /guard/alarm_state
+/huitzilin/odom  ->            /guard/status
+/guard/arm (SetBool, served)
 ```
 
 | Topic | Type | QoS | Publisher |
 |---|---|---|---|
-| `/action/keypoints` | `std_msgs/String` (JSON) | Reliable | `scenario_player` |
-| `/action/escalation_event` | `std_msgs/String` (JSON) | Reliable | `action_recognizer` |
-| `/action/status` | `std_msgs/String` (JSON) | Reliable | `action_recognizer` |
-| `/action/alert_request` | `std_msgs/Bool` | Reliable | `action_recognizer` |
-| `/action/alert_state` | `std_msgs/Bool` | Reliable | `alert_signal` |
+| `/guard/detections` | `std_msgs/String` (JSON) | Reliable | `pose_detector` |
+| `/guard/status` | `std_msgs/String` (JSON) | Reliable | `guard` |
+| `/guard/alarm_request` | `std_msgs/Bool` | Reliable | `guard` |
+| `/guard/alarm_state` | `std_msgs/Bool` | Reliable | `alert_signal` |
 
-The alert is `/action/alert_request` and deliberately **not** `/payload/alarm`.
-`supervisor.py` transitions PATROL to EVADE on `/payload/alarm`, and that is the only
-edge into EVADE in the whole state machine, so publishing there would let a
-body-motion heuristic command evasive flight. `test_isolation.py` enforces the
-separation, and `package.xml` declares neither `geometry_msgs` nor `std_srvs`, so no
-flight publisher or service client can be written without a visible manifest change.
+`/huitzilin/odom` is the one topic shared with the flight graph, and it is read-only: the
+guard needs the drone's pose to place a detection in the same frame as the box. Telemetry
+in, nothing out.
 
-`scenario_player` is a measurement-lane node in the sense `oracle_detector` is: it
-fabricates an input so the chain is exercisable. There is no pose estimator in this
-project, so nothing downstream of it has consumed a real body. See
-`docs/action_escalation.md`.
+`/guard/alarm_request` carries a level, republished on every evaluation rather than only on
+edges, because `alert_signal` holds a dead-man and clears the siren when the stream stops.
+That dead-man is what silences a siren if `guard` dies mid-alarm, and an edge-only publisher
+would be indistinguishable from a dead one.
+
+The alert is `/guard/alarm_request` and deliberately **not** `/payload/alarm`.
+`supervisor.py` transitions PATROL to EVADE on `/payload/alarm`, and that is the only edge
+into EVADE in the whole state machine, so publishing there would let a presence alarm command
+evasive flight. `package.xml` declares no `geometry_msgs`, so no Twist can be constructed at
+all. `std_srvs` IS declared, because the arm switch is a `SetBool` server; the guarantee it
+used to carry moved to narrower rules that `test_isolation.py` enforces against the source:
+no file calls `create_client`, only `guard_node.py` imports `std_srvs`, and no file imports
+`mav_bridge`.
+
+The box itself lives in `huitzilin_sim/box.py`, not in the guard package. `patrol_node`
+derives its circuit from it, and the isolation rule runs both ways: `huitzilin_sim` must not
+import `huitzilin_guard`. The box also has to convert through `MavBridge.enu_to_ned`, the
+single frame-conversion site in the tree, which the guard package may not import. One
+rectangle, two consumers, no second copy of the geometry.
+
+No pose estimator in this project has ever run against a real camera: nothing downstream of
+`pose_detector` has consumed a real body. See `docs/guard.md`.
 
 Both marker topics are RViz-only: nothing subscribes to them in flight, and the
 detector publishes its own best-effort rather than reliable, so a slow RViz cannot

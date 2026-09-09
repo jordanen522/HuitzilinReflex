@@ -57,15 +57,25 @@ ros2 run huitzilin_perception payload --ros-args \
   --params-file src/huitzilin_perception/params/payload.yaml
 ```
 
-The action-escalation subsystem is standalone: it shares no topic, service or node
-with the projectile stack, and needs neither Gazebo nor SITL.
+The guard alarm is standalone: it shares no service or node with the projectile
+stack, reads `/huitzilin/odom` and nothing else from it, and needs neither Gazebo
+nor SITL.
 ```bash
-ros2 launch huitzilin_action_escalation action_escalation.launch.py \
-  scenario:=lunge.yaml
+ros2 launch huitzilin_guard guard.launch.py
+ros2 service call /guard/arm std_srvs/srv/SetBool '{data: true}'
+ros2 topic echo /guard/status --full-length
 ```
-Scenarios: `lunge`, `strike`, `shove` alert; `benign_wave` and
-`ambiguous_approach` must not. Read `docs/action_escalation.md` before quoting any
-score as performance -- none of them is a measured rate.
+It reports presence only -- that a person is inside the box, never who they are.
+No camera has ever been connected, so there is no detection, false-positive or
+latency figure to quote; `docs/guard.md` states the limits.
+
+To fly the box as well as guard it, point patrol at the same config. The five
+`box_*` values are repeated under both node names in `guard.yaml` and
+`test_guard_params.py` fails the build if they disagree:
+```bash
+ros2 launch huitzilin_sim week2_sitl.launch.py \
+  patrol_params:=src/huitzilin_guard/params/guard.yaml
+```
 
 The supervisor logs which watches are armed at startup
 (`watching: odom(1.0s) patrol_state(2.0s) cloud(1.0s) | disabled: cmd_vel`).
@@ -143,8 +153,44 @@ Full frame table and TF tree: `docs/frames.md`.
 - **`counterfactual_min_m` is blank on `NO_DODGE` rows, and that blank is a trap.** Join on it naively and every no-fire leaves the denominator, turning a save rate into a rate over only the throws that fired — on the 26 m / 20 m/s cell, a true 21/30 (70%) reads as 21/21 (100%). When no dodge fired the drone never deviated, so the actual path *is* the counterfactual: substitute `counterfactual_min_m := actual_min_m` and count a `NO_DODGE` inside the hit radius as a loss. `scripts/hz_counterfactual.py` emits the blank on purpose so recorded CSVs stay reproducible; the substitution belongs in whatever scores them.
 - **Kill lab stacks by installed path, never a guessed `_node` name.** `evasion_nod[e]`/`patrol_nod[e]` match nothing, and surviving stacks return plausible numbers with no error. The decisive contamination check is the implied rate `(track_updates - 1) / track_age_s` reading above the launched oracle rate.
 
-### Action escalation
+### Guard alarm
 
+- **One box, written twice, and they must agree.** `guard.yaml` repeats the five
+  `box_*` values under `patrol:` and `guard:` because two nodes need them.
+  `test_guard_params.py` asserts they are identical: a drone that patrols one
+  rectangle and guards another looks healthy from every angle -- it flies, the
+  detector detects, the siren stays quiet -- while guarding nothing.
+- **The geofence is a CIRCLE and the box is a rectangle, so corners breach, not
+  edges.** `patrol_node` checks `box.max_corner_radius_m()` against
+  `fence_radius_m` before the MAVLink connect and refuses to start. A 9x9 m box
+  has every edge inside `FENCE_RADIUS 10` and a corner at 12.7 m; without the
+  check it flies, reaches a corner, breaches and RTLs mid-patrol, which reads as
+  a flight-controller fault. SITL loads no fence params at all, so this check is
+  the only thing standing between a too-large box and the first real flight.
+- **`box.py` lives in `huitzilin_sim`, not `huitzilin_guard`.** `patrol_node`
+  needs it and `test_isolation.py` asserts `huitzilin_sim` never imports the
+  guard package; it also has to convert through `MavBridge.enu_to_ned`, which the
+  guard package may not import at all. Putting it in the guard package breaks
+  both rules at once.
+- **`std_srvs` IS declared now, and the isolation guarantee moved rather than
+  went.** The arm switch is a `SetBool` server, and the same message package a
+  server needs is what a client to the flight services would need. So the ban
+  moved from the import to the call: no file may call `create_client`, only
+  `guard_node.py` may import `std_srvs`, and no file may import `mav_bridge`.
+  `geometry_msgs` stays banned outright, so no `Twist` can be built anywhere.
+- **The alarm publishes a LEVEL, not an edge.** `alert_signal` holds a dead-man
+  and clears the siren when the stream stops, which is what silences it if the
+  guard dies mid-alarm. An edge-only publisher is indistinguishable from a dead
+  one, so the siren cleared `stale_off_s` into every alarm and nothing ever
+  turned it back on. `alert_signal`'s `max_on_s` (310 s) must also exceed the
+  guard's `max_alert_s` (300 s) or the sink expires first.
+- **Silence is not an all-clear, and it is not a fault either.**
+  `pose_detector` publishes only when it SEES somebody, so an empty box and a
+  dead detector look identical. Treating silence as a fault leaves the system
+  permanently faulted on a quiet night; treating it as "box clear" reports a
+  measurement nothing made. So the clear window needs a frame that actually
+  ARRIVED reporting nobody there, and a detector that dies mid-alarm exits via
+  the dead-man instead, which says so.
 - **The pose model is not tracked and the detector refuses to start without it.**
   `scripts/fetch_pose_model.sh` pulls it with a SHA-256 check. Coming up without a
   model would mean publishing nothing, and silence there is indistinguishable from a
@@ -155,10 +201,11 @@ Full frame table and TF tree: `docs/frames.md`.
   numpy it drags in: pip pulls numpy 2.x, which shadows the system numpy 1.26/scipy
   1.11 pair that `detector_node` and the Kalman path rely on. Run the node with
   `PYTHONPATH=~/.local/ros-deps`, never on the global path.
-- **`pose_detector` and `scenario_player` must never run together.** Both publish
-  `/action/keypoints`, so the window would interleave a real body and a synthetic one.
-  Same rule as `oracle_detector` versus `detector` on `/threat/centroid`. The launch
-  file ships `with_pose_detector:=false`; pass `with_scenario:=false` alongside it.
+- **`with_pose_detector` ships `false`, and a hand-published detection is the
+  supported way to exercise the chain.** The model is not in the repo and the
+  detector refuses to start without it, so the default graph is complete except
+  for the camera. Publish a frame on `/guard/detections` to drive the whole
+  decision path with no camera and no drone.
 - **Monocular range is a scale estimate, not a measurement.** It assumes a standing
   adult of 1.70 m seen full length. A crouching, seated or partly framed subject gets a
   proportionally wrong range and therefore a wrong closing speed. Out-of-range values
@@ -180,12 +227,12 @@ Full frame table and TF tree: `docs/frames.md`.
   `install/setup.bash` in a shell that already sourced an older one short-circuits,
   and `ros2 launch` then reports the package as not found while it sits installed.
   `unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH` before sourcing.
-- **`use_sim_time` defaults to `false` in `action_escalation.launch.py`**, unlike
+- **`use_sim_time` defaults to `false` in `guard.launch.py`**, unlike
   every other launch file here. Nothing publishes `/clock` for this subsystem, so
   defaulting it true kills every node on the clock guard after the 5 s grace window.
-- **The alert is `/action/alert_request`, never `/payload/alarm`.** `supervisor.py`
+- **The alert is `/guard/alarm_request`, never `/payload/alarm`.** `supervisor.py`
   transitions PATROL to EVADE on `/payload/alarm`, and that is the only edge into
-  EVADE in the state machine, so publishing there would let a body-motion heuristic
+  EVADE in the state machine, so publishing there would let a presence alarm
   command evasive flight.
 - **There is no GPIO backend, deliberately.** `payload_node` already holds GPIO 18
   and gpiochip0 line 17, and Linux GPIO line requests are exclusive, so a second

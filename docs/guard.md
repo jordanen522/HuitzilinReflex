@@ -1,295 +1,251 @@
-# Action escalation
+# Guard alarm
 
-A privacy-preserving subsystem that recognises **aggressive body motion** and, on
-confirmation, asks for the warning lights and siren. It is architecturally separate from
-the projectile-evasion pipeline and cannot command flight.
+A security alarm carried by the drone. It flies the perimeter of a rectangle and, while
+armed, turns on lights and a siren when a person is inside that rectangle.
 
-**Status: a real detection stage exists; no camera does.** `pose_detector` runs an actual
-pose model (YOLOv8n-pose, ONNX, CPU) and has been verified end to end on real photographic
-input, producing metric body joints that the recogniser consumes. What does not exist is a
-camera: hardware bring-up has not started, so no frame has ever come from an OAK-D, and the
-`depth` range mode has never run. Nor has any of it been tested against real aggressive
-motion. **No number in this document is a measured detection, false-positive or latency
-rate, because none has ever been measured.**
+It works like a house alarm panel: somebody arms it, somebody disarms it, and in between it
+watches. Nothing about it is personal. It reports **that** a person is in the area, never who
+they are or what they are doing, which is what makes it usable for something like a curfew on
+a city block without becoming a judgement about the individual crossing it.
 
-## What it does
+**No camera has ever been connected to this system.** No detection rate, false-positive rate
+or latency has been measured. Everything below describes what the code does, not how well it
+works in the world. See [Limits](#limits).
+
+---
+
+## The box
+
+The box is a rectangle in **ENU metres** (x east, y north), measured from the point where the
+aircraft was armed — that is the origin `/huitzilin/odom` reports against. Park the drone at
+one corner of the area you want guarded and the four numbers are distances from there.
 
 ```
-/action/keypoints ---> action_recognizer ---> /action/alert_request ---> alert_signal
-   (body joints)        window / score            (Bool)                     |
-                        confirm / cooldown                                   v
-                              |                                    /action/alert_state
-                              |---> /action/escalation_event
-                              |---> /action/status
+        (min_x,max_y) +-----------------+ (max_x,max_y)
+                      |                 |
+                      |   guarded area  |   flight path = the outline
+                      |                 |   alarm region = the whole rectangle
+        (min_x,min_y) +-----------------+ (max_x,min_y)
+                        start, then CCW
 ```
 
-| Node | Role |
-|---|---|
-| `pose_detector` | Runs the pose model on a camera image, emits body joints |
-| `action_recognizer` | Scores joint frames, applies confirmation and cooldown, requests the alert |
-| `alert_signal` | Drives the light/siren sink, holds its own dead-man |
-| `scenario_player` | Replays a synthetic sequence so the chain runs with no camera |
+The drone flies the **perimeter only**, counter-clockwise from `(min_x, min_y)`. It never
+crosses the interior. Rectangles are supported as well as squares, so a block that is 80 m by
+25 m is expressed directly.
 
-`pose_detector` and `scenario_player` are **mutually exclusive**: both publish
-`/action/keypoints`, so running them together would interleave a real body and a synthetic
-one into a single feature window. This is the same rule that keeps `oracle_detector` and
-`detector` from both publishing `/threat/centroid`.
+`contains_xy` is **two-dimensional on purpose** and never looks at height. Range to a person
+is a monocular scale estimate, so the height it implies is the least trustworthy number
+available; testing it would drop a tall person, a crouching one, or one at a badly estimated
+range out of a box they are standing in. Edges count as inside.
 
-## Categories, and the non-goals
+### Changing it
 
-**Aggressive motion only. Three categories: `LUNGE`, `STRIKE`, `SHOVE`.**
+Edit **one file**, `src/huitzilin_guard/params/guard.yaml`. The five `box_*` values appear
+under both `patrol:` and `guard:` and **must be identical** — `test_guard_params.py` fails the
+build if they are not. Two boxes that quietly disagree mean the drone patrols one area and
+guards another, and nothing looks wrong: it flies, the detector detects, the siren stays quiet.
 
-There is **no benign category**. Benign motion is not labelled; it is simply the case
-where nothing crossed a threshold. The system never builds a description of what a person
-is doing, only whether an aggression threshold tripped. That is a privacy property as much
-as a scope one: it keeps this an alarm rather than an activity log.
+### Before you enlarge it
 
-Two categories were considered and cut:
+**The geofence is a circle and the box is a rectangle, so it is the corners that breach.**
+`hw_frame.parm` sets `FENCE_RADIUS 10` with `FENCE_ACTION 1` (RTL). `patrol_node` checks
+`box.max_corner_radius_m()` against `fence_radius_m` at construction, before the MAVLink
+connect, and refuses to start naming the parameter to change. Without that check the failure
+appears in the air: the drone flies, reaches a corner, breaches, and returns to launch in the
+middle of its patrol, which reads as a flight-controller fault rather than a configuration one.
 
-- **`GRAPPLE_PROXIMITY`**: proximity is not aggression. Two bodies close together and
-  moving quickly is also an embrace, a handshake, or helping someone up. It generates
-  false alarms while wearing a threat label.
-- **`RAISED_OBJECT`**: **not detectable from this input at all.** The whitelist is twelve
-  body joints with no object detection, so a raised hand holding a weapon and a raised
-  hand hailing a taxi are the identical signal. Deferred rather than dropped: it needs a
-  real object detector, a separate capability with its own compute budget. Object
-  detection would not breach the privacy contract, since an object is not an identity,
-  but it is not free.
+SITL loads no fence parameters at all, so this check is the only thing standing between a
+too-large box and a surprise on the first real flight.
 
-Permanent non-goals, for this subsystem and the project: face detection, facial
-recognition, person identification, re-identification, persistent person tracking,
-biometric embeddings, gait or soft-biometric matching, and raw-video retention.
+The shipped 5 x 5 m box reaches **7.07 m** at its far corner, inside the 10 m fence. A 9 x 9 m
+box has every *edge* inside 10 m and a corner at 12.7 m, which is why the check is on the
+corner.
 
-## Privacy contract
+---
 
-Enforced by `pose_frame.py`, in code, at the boundary, rather than by a policy that
-downstream code is trusted to honour.
+## Pipeline
 
-- **`ALLOWED_JOINTS` is COCO-17 minus keypoints 0-4**: nose, both eyes, both ears. Those
-  five are the face. Twelve remain: shoulders, elbows, wrists, hips, knees, ankles. No
-  face can be reconstructed from what this subsystem holds.
-- **Parsing is strict.** An unknown top-level key, an unknown joint name, or a
-  string-valued `subject` rejects the **whole frame**. A lenient parser that ignored
-  fields it did not recognise is exactly how an `image`, a `crop` or an `embedding` field
-  arrives and then gets copied along by everything downstream.
-- **`subject` is an integer index within one frame.** It is not a track id and is not
-  stable between frames. A string subject is refused because a stable identifier is the
-  shape identity smuggles itself in as.
-- **Bounded memory.** A `FeatureWindow` holds `window_s` (0.6 s) of frames and nothing
-  survives it. There is no history a person could be tracked through.
-- **No recording.** `record_video` defaults false and the node refuses to start if it is
-  set true. `publish_observations` defaults false.
-- **Events say what was decided, never what was seen.** No identifier, no bounding box, no
-  image reference, no joint positions. That is the difference between an event log and a
-  surveillance record.
-- **`frames_rejected` is published on `/action/status`.** Non-zero means something
-  upstream is sending fields this subsystem refuses, visible from `ros2 topic echo` rather
-  than only in a log.
+```
+  box corners --+--> patrol path (fly the perimeter)
+                +--> alarm region (is a person inside?)
 
-## Expected input
-
-`/action/keypoints`, `std_msgs/String` carrying JSON. Camera optical frame: +Z depth away
-from the camera, +Y down, metres.
-
-```json
-{"schema": 1, "stamp_s": 12.345, "frame_id": "camera_optical_frame",
- "source": "scenario_player", "subject": 0,
- "joints": {"shoulder_l": [-0.20, -0.50, 4.00, 0.95],
-            "wrist_r": [0.28, 0.05, 3.96, 0.88]}}
+  camera --> pose_detector --> /guard/detections --> guard --> /guard/alarm_request
+                                                       ^                |
+                          /huitzilin/odom -------------+                v
+                                  armed?  <-- /guard/arm           alert_signal
+                                                                   siren + lights
 ```
 
-Joint values are `[x, y, z, conf]`. `std_msgs/String` rather than a typed message because
-the privacy contract rests on **rejecting unknown fields**, and a typed message has no
-rejection hook. `sensor_msgs/JointState` is the closest stock alternative and was not
-used: it is one scalar per name, carries no confidence, and imports robot-joint semantics.
+| Interface | Type | Meaning |
+|---|---|---|
+| `/guard/detections` | `std_msgs/String` (JSON) | body joints from `pose_detector` |
+| `/huitzilin/odom` | `nav_msgs/Odometry` | the drone's own pose, ENU. Telemetry in, nothing out |
+| `/guard/alarm_request` | `std_msgs/Bool` | the guard's decision, republished continuously |
+| `/guard/alarm_state` | `std_msgs/Bool` | what the sink actually did |
+| `/guard/status` | `std_msgs/String` (JSON, 1 Hz) | the heartbeat, below |
+| `/guard/arm` | `std_srvs/SetBool` | **the** operator interface |
 
-## The detection stage
+`/guard/arm` is **not** the motor-arming service. That one belongs to a different subsystem.
+Arming the alarm on a disarmed aircraft is normal: that is a guard sitting on the bench,
+watching.
 
-`pose_detector` is the real perception front end: camera image in, metric body joints out.
-
-| | |
-|---|---|
-| Model | YOLOv8n-pose, ONNX export, 17 COCO keypoints, 640x640 input |
-| Runtime | onnxruntime, CPU |
-| Output | 12 body joints in the camera optical frame, metres |
-| Tracked in this repo? | **No.** 13 MB of weights, fetched by `scripts/fetch_pose_model.sh` with a SHA-256 check |
-
-### The face drop is on our side of the boundary
-
-The model emits **17** keypoints and five of them are the face: nose, both eyes, both ears,
-COCO indices 0-4. On a real photograph it reports them confidently (0.48 to 1.00). They are
-discarded in `pose_detector.decode` before any value is returned, so no face coordinate
-reaches a topic, a log, a window or a disk.
-
-This is deliberately stronger than choosing a model that never computes a face. The drop is
-ours, so it survives swapping the model: any pose network emitting COCO-17 gets the same
-five indices removed at the same line. `test_pose_detector.py` puts sentinel coordinates in
-the face slots and asserts they appear nowhere in the output.
-
-Verified at runtime, not only in unit tests: over 128 consecutive frames from the real
-model, the recogniser reported `frames_rejected: 0`. Its parser rejects any frame carrying
-a face joint, so zero rejections is a live proof that none was ever sent.
-
-### Range, and why it is the weak point
-
-The recogniser needs metric range because LUNGE and SHOVE both require closing speed; a
-pipeline reporting a constant Z scores every approach as zero.
-
-- **`monocular`** (default, works today). Range from bounding-box height against an assumed
-  1.70 m standing subject: a closing person grows in frame. This is **a scale estimate, not
-  a measurement.** It assumes a standing adult seen full length, and degrades exactly where
-  that assumption breaks. A crouching, seated, partly framed or unusually tall subject gets
-  a proportionally wrong range and therefore a wrong closing speed. Out-of-range estimates
-  are dropped rather than clamped, so a posture change cannot manufacture a closing speed.
-  All joints share one Z, because a monocular camera has no per-joint depth and inventing
-  one would fabricate limb extension along the optical axis.
-- **`depth`** (correct, **unverified**). Samples an aligned depth image at each joint, median
-  over a small patch, ignoring the zero and non-finite no-data markers. This is the path an
-  OAK-D would use. No camera has ever run it.
+`/guard/alarm_request` carries a **level**, republished on every evaluation rather than only
+on edges. `alert_signal` holds its own dead-man and clears the siren when the stream stops,
+which is what silences a siren if the guard node dies mid-alarm. An edge-only publisher is
+indistinguishable from a dead one.
 
 ### Running it
 
 ```bash
-./scripts/fetch_pose_model.sh
-python3 -m pip install --target ~/.local/ros-deps onnxruntime
-# then delete the numpy that pip drags in, so the system numpy/scipy pair the
-# projectile detector relies on is not shadowed
-export PYTHONPATH=~/.local/ros-deps
-ros2 launch huitzilin_action_escalation action_escalation.launch.py \
-  with_pose_detector:=true with_scenario:=false
+ros2 launch huitzilin_guard guard.launch.py
+ros2 service call /guard/arm std_srvs/srv/SetBool '{data: true}'
+ros2 topic echo /guard/status --full-length
 ```
 
-### What was verified, and what that is worth
+`--full-length` matters: `ros2 topic echo` truncates long strings, and a truncated JSON
+payload reads as a malformed one.
 
-On a real photograph the model returned **12 of 12** body joints above 0.5 confidence,
-anatomically coherent. Driven with a zoom sequence simulating approach, the pipeline
-measured a real closing speed of 0.82 m/s and scored **LUNGE 0.0** -- which is the correct
-answer, because a subject growing in frame is an approach and not an aggressive action.
+With `with_pose_detector:=false` (the default) the graph is complete except for the camera, so
+a synthetic detection published by hand on `/guard/detections` exercises the whole decision
+path. The detector needs a model that is not tracked in this repository; fetch it with
+`scripts/fetch_pose_model.sh` and run with `PYTHONPATH=~/.local/ros-deps`.
 
-That is a test of plumbing and of the conjunctive scoring, not of aggression detection. It
-says the stage decodes, back-projects, passes the privacy parser and feeds the recogniser.
-It says nothing about how often this system would be right or wrong about a real person,
-because no labelled footage of real aggressive motion has ever been put through it.
+---
 
-## Confidence and temporal confirmation
+## When it sounds, and when it stops
 
-The published field is **`score`, not `confidence`**: it is a normalised threshold score,
-not a probability. Every event carries `"provenance": "UNVALIDATED_HEURISTIC"`.
+The asymmetry is deliberate in both directions.
 
-**Scoring is conjunctive.** Each category takes the **minimum** over its required evidence
-terms, never the maximum or a sum:
+| Setting | Default | Why |
+|---|---|---|
+| `confirm_frames` | 3 | One frame is a detector artefact often enough that a single-frame trigger would make the siren untrustworthy, and an alarm nobody believes is worse than none |
+| `clear_after_s` | 3 s | Of an **empty box**, not one empty frame. A person standing still is what the detector misses most |
+| `min_alert_s` | 3 s | A brief intrusion must still produce a signal somebody can perceive |
+| `max_alert_s` | 300 s | Stuck-detector guard, long on purpose: a real intruder standing still must not be able to outwait the alarm |
+| `stale_input_s` | 5 s | Dead-man on the frames feeding a **sounding** alarm |
 
-| Category | Requires, simultaneously |
-|---|---|
-| `LUNGE` | closing speed, whole-body translation, and torso pitch rate |
-| `STRIKE` | hand speed, and shoulder-to-wrist opening rate |
-| `SHOVE` | **both** arms driving forward, and closing speed |
+**There is no cooldown.** Someone still in the box is still an intruder, and a quiet period
+after a clear is a window in which the alarm deliberately does not do its job.
 
-Disjunctive scoring fires on any single term, so a person walking briskly toward the
-aircraft would read as a lunge on approach speed alone. The cost of a false positive here
-is a siren pointed at a bystander.
+### Silence is not an all-clear
 
-The shipped `benign_wave` scenario demonstrates this: it reaches a **higher** peak wrist
-speed than the `strike` scenario does, and still scores STRIKE 0.13, because a wave moves
-an already-extended arm instead of opening it.
+`pose_detector` publishes only when it **sees** somebody, so an empty box and a dead detector
+both look like silence. Two consequences, both load-bearing:
 
-Then, in order:
+- Silence alone is **never** treated as a fault. Doing so would leave the system permanently
+  faulted on any quiet night, which is exactly how a real fault gets trained out of an
+  operator's attention.
+- An alarm only stops with the reason *"box clear"* when a frame has actually **arrived** and
+  reported nobody there. If the detector dies mid-alarm, no frame ever observes an empty box,
+  so the dead-man stops it instead and says so. Elapsed time is not evidence.
 
-1. **Confirmation**: `min_confirm_frames` (4) above `enter_score` (0.70) within
-   `confirm_window_s` (0.6 s). A single spike does nothing.
-2. **Hysteresis**: staying confirmed only needs `exit_score` (0.45). Without the gap a
-   score hovering at the threshold chatters the siren.
-3. **`min_alert_s`** (2.0 s): a lone confirmation still produces a perceptible signal.
-4. **`max_alert_s`** (10 s) dead-man: a stuck-high scorer cannot latch the alert on.
-5. **`cooldown_s`** (15 s): one incident is one alert, not a burst.
-6. **`stale_input_s`** (2 s): no *new* frame forces `DEGRADED` and drops the alert. A
-   frame whose stamp has not advanced does not count as new, so a producer republishing an
-   identical frame reads as stale rather than as a permanent alarm.
+`alert_signal`'s `max_on_s` (310 s) must exceed the guard's `max_alert_s` (300 s). If the sink
+expired first it would silence the siren while the guard still believed it was sounding.
 
-`alert_signal` holds an independent dead-man (`max_on_s` 12 s), longer than the
-recogniser's cap so the two do not race.
+---
 
-## Lights and siren: why there is no GPIO backend
+## While disarmed
 
-`payload_node` (huitzilin_perception) already owns the WS2812B data line (GPIO 18) and the
-siren line (gpiochip0 line 17). **Linux GPIO line requests are exclusive.** If
-`alert_signal` started first and took line 17, `payload_node` could not acquire it, so a
-discretionary body-motion warning would have silently disabled the **projectile** threat
-annunciator, which is the safety-critical one. That priority inversion is unacceptable in
-either direction of timing luck.
+The node still parses detections and still reports `person_in_box` in its status. It just
+fires no alarm. Reporting an empty box while somebody stands in it would be a lie told by the
+only instrument an operator has.
 
-So `backend: hardware` is **refused**: it returns a null sink and logs a reason naming the
-conflict. It does not raise, because `payload.select_backend` documents a never-raises
-contract and `SAFETY_CASE.md` section 1 rates a payload/GPIO fault log-and-continue.
+Arming **resets the confirm window**, so somebody already standing in the box when the panel is
+armed is confirmed over the next three frames rather than sirened instantly.
 
-**The deferred fix, not built here:** `payload_node` grows a second, lower-priority input,
-so one process continues to own the line and the projectile alarm always wins arbitration.
-Implementing it from this package would put escalation logic inside the projectile package
-and destroy the isolation this subsystem exists to keep.
+### Status heartbeat
 
-## Compute and latency on a Pi 5 / OAK-D Lite
-
-**What may be claimed:** the recogniser's own arithmetic is a few dozen floating-point
-operations over a bounded window (`window_s` x `rate_hz` frames, at most 12 joints) and is
-negligible against everything else on the companion computer. That is arithmetic that can
-be counted, not a measurement.
-
-**What may NOT be claimed, and is not claimed anywhere in this repository:**
-
-- Any pose-estimation frame rate, latency or accuracy. No estimator exists here.
-- Any detection, false-positive or false-negative rate for `LUNGE`, `STRIKE` or `SHOVE`.
-  There is no labelled data and no ground truth. Passing self-authored scenarios is the
-  same saturation `CLAUDE.md` already records for the projectile bag library.
-- That this runs alongside the projectile pipeline without degrading it. Untested.
-- Any end-to-end escalation latency. Under `scenario_player`, `input_latency_s` reads
-  about zero because the stamp and the clock come from the same place. It measures the
-  player, not a camera.
-- Any power figure. `SAFETY_CASE.md` section 1 already carries an inference-power-spike
-  (5 V/5 A) to companion-reset to FAILSAFE row, written before this feature existed. A
-  pose estimator is exactly that spike.
-
-Running an estimator on the OAK-D Lite's MyriadX would contend with the on-chip stereo
-depth that feeds the **safety-critical** projectile detector. That direction of contention
-must be stated rather than discovered.
-
-## Known risks
-
-- **False positives.** Thresholds are engineering starting points, not fitted values.
-  Movement alone cannot establish intent: a person stumbling, catching a falling object,
-  playing, or reacting to a startle can produce the same kinematics as aggression. An
-  alert means "motion consistent with an aggressive action", never "an assault occurred".
-- **Bias.** Kinematic thresholds in absolute metres per second are not neutral across body
-  size, age, mobility-aid use, or gait. A child, a person using crutches, or someone
-  dancing may score differently for reasons unrelated to aggression, in either direction.
-  None of this has been characterised.
-- **Occlusion.** Partial bodies contribute no lean or bilateral-reach evidence, so a
-  partly occluded person scores lower. Conjunctive scoring biases toward missing an event
-  rather than inventing one, which is the correct direction here, but it is still a miss.
-- **Viewpoint.** All geometry is relative to the camera optical frame. Motion across the
-  frame is measured well; motion along the optical axis relies on depth, the noisiest axis
-  on a stereo camera. A drone that is itself moving adds ego-motion this subsystem does
-  not compensate for.
-- **Single-window memory.** No action longer than `window_s` is representable.
-- **Self-authored evaluation.** The scenarios were written by the same hand that set the
-  thresholds. Only the negative controls can fail informatively.
-
-## Running it
-
-```bash
-ros2 launch huitzilin_action_escalation action_escalation.launch.py scenario:=lunge.yaml
+```json
+{"armed": false, "alarm": false, "person_in_box": true, "frames_seen": 25972,
+ "frames_rejected": 0, "frames_unplaceable": 2, "consecutive_in_box": 0,
+ "secs_since_detection": 0.03, "have_odom": true, "recording": false,
+ "last_stop_reason": "box clear for 3 s", "box": [0.0, 5.0, 0.0, 5.0]}
 ```
 
-Scenarios: `lunge.yaml`, `strike.yaml`, `shove.yaml` (expect an alert),
-`benign_wave.yaml`, `ambiguous_approach.yaml` (must **not** alert).
+- `frames_rejected` is the **privacy telemetry**: non-zero means something upstream is sending
+  fields this subsystem refuses.
+- `frames_unplaceable` counts detections that arrived with no odometry or an unconverged
+  attitude. Those are dropped, never guessed at: calling them "not in the box" would be a
+  guess in the unsafe direction.
+- `secs_since_detection` is tracked armed **or not**, so it never reads as a dead detector
+  while `frames_seen` climbs.
+- `recording` is stated in the heartbeat so the property is checkable at runtime by anyone
+  with a terminal, rather than only promised in this document.
 
-`use_sim_time` defaults to **false** here, unlike every other launch file in this
-workspace: there is no Gazebo world behind this subsystem, so nothing publishes `/clock`,
-and defaulting it true would take every node down on the clock guard.
+---
 
-```bash
-ros2 topic echo /action/escalation_event
-ros2 topic echo /action/alert_state
-ros2 topic echo /action/status
-```
+## Privacy
 
-Tests run as part of `./scripts/run_tests.sh`.
+The guarantee is not a policy this code is trusted to honour; it is a parser that rejects
+anything it was not promised, plus tests that assert it against the source.
+
+- `pose_frame.py` accepts **COCO-17 minus keypoints 0-4** — nose, both eyes, both ears are
+  absent, so twelve limb and torso joints remain and no face can be reconstructed. A frame
+  carrying a face joint, an image, a crop, an embedding or a string `subject` is discarded
+  **whole**, not partially used.
+- No recording path exists in any node. `record_video: true` makes `pose_detector` refuse to
+  start.
+- Only `pose_detector_node.py` may import `cv2` or `onnxruntime`; a second file doing so fails
+  `test_privacy_invariants.py`. It is the only place that ever holds an image.
+- The published status carries no identifying field, not even the position of the person or
+  the subject index the parser accepted. An operator learns the area is occupied. That is all
+  a presence alarm is entitled to tell them.
+
+No database, no SQL, no network notification, no stored video. The alarm is entirely on the
+aircraft.
+
+## The alarm never flies the aircraft
+
+`package.xml` declares no `geometry_msgs`, so no `Twist` can be constructed anywhere in the
+package. `test_isolation.py` additionally asserts, against the source:
+
+- no file names a flight or projectile topic in a string constant (docstrings excluded, so the
+  reasoning can be written down without the ban deleting the explanation);
+- no file calls `create_client` — this subsystem answers requests, it does not make them;
+- only `guard_node.py` imports `std_srvs`, and only to **serve** the arm switch;
+- no file imports `mav_bridge`, which owns the MAVLink connection and the setpoint senders.
+
+`std_srvs` used to be banned outright. The arm switch needs it, so the guarantee moved to the
+narrower rules above rather than being dropped.
+
+### No GPIO backend, deliberately
+
+`payload_node` already owns the WS2812B data line (GPIO 18) and the siren line (gpiochip0
+line 17), and **Linux GPIO line requests are exclusive**. A second process taking those lines
+would silently stop the *projectile* alarm from firing — a discretionary intrusion warning
+disabling the safety-critical annunciator. That is a priority inversion and is not acceptable
+in either direction of timing luck.
+
+So `backend: hardware` **logs a refusal and runs inert** rather than raising: a node killed by
+a params typo is worse than one running loudly degraded.
+
+The correct hardware design, deferred and deliberately not built here: `payload_node` grows a
+second, lower-priority input, so one process keeps owning the line and the projectile alarm
+always wins arbitration. Building that from this package would put guard logic inside the
+projectile package and destroy the isolation this subsystem exists to keep.
+
+---
+
+## Limits
+
+State these; do not paper over them.
+
+- **Coverage is partial.** A forward-facing camera on a perimeter loop does not see the middle
+  of a large box. It reliably catches somebody crossing or near the boundary; for a city block,
+  most of the interior is unobserved most of the time. The alarm region is the whole rectangle,
+  but the *observed* area is a moving wedge along the edge.
+- **Range is a monocular scale estimate** from bounding-box height against an assumed standing
+  adult (1.70 m). A crouching, seated or partly framed person gets a proportionally wrong range
+  and can land on the wrong side of a box edge. A `depth` mode exists in the detector and **has
+  never been run**.
+- **No camera has ever been connected.** No detection rate, false-positive rate, or latency
+  figure exists. Claim none.
+- **The camera mount offset is not modelled.** A detection is placed from the body origin, so a
+  lens mounted a few centimetres forward contributes an error far smaller than the range
+  estimate above, but not zero.
+- **One person per frame.** `pose_detector.decode` returns only the highest-confidence person.
+  A second person in the same frame is not separately reported, which does not affect the
+  alarm: the question is only whether *anybody* is inside.
+- **The box origin is the arming point.** A box written against any other origin is not wrong
+  at construction and cannot be detected in software; it simply guards the wrong patch of
+  ground.
