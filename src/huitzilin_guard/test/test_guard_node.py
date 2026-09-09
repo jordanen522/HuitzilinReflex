@@ -80,6 +80,7 @@ def make_node(armed=True, position=(2.5, 0.0, 2.0)):
     node._frames_seen = 0
     node._frames_rejected = 0
     node._frames_unplaceable = 0
+    node._last_detection_s = None
     node._alarm_pub = Recorder()
     node._status_pub = Recorder()
 
