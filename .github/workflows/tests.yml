@@ -12,14 +12,18 @@ name: tests
 #
 # Not run here, and not an oversight:
 #   test_evasion_params - imports evasion_node, which imports rclpy.
+#   test_guard_node     - imports guard_node, which imports rclpy.
 # test_clock_guard IS run: clock_guard imports rclpy.clock only inside
 # install_clock_guard, and those tests skip themselves without it.
 #
-# huitzilin_action_escalation needs no exclusion either, and that is a
-# property of how its tests are written rather than luck: the two
-# invariant modules read node source as TEXT and parse it with ast, so
-# they check the nodes without importing them. If a test here ever needs
-# a live node, name it below rather than dropping the whole directory.
+# Every OTHER module in huitzilin_guard runs here, and that is a property
+# of how they are written rather than luck: the invariant modules read
+# node source as TEXT and parse it with ast, so they check the nodes
+# without importing them, and box, presence and world are rclpy-free by
+# design. test_guard_node is named above rather than the directory being
+# dropped, which is the whole point of a deny-list: excluding the
+# directory would have silently stopped running the modules that do work
+# here.
 #
 # Run the whole suite, that module included, on the Dell:
 #   ./scripts/run_tests.sh
@@ -47,10 +51,11 @@ jobs:
         env:
           # The tests import huitzilin_sim / huitzilin_perception by package
           # name, which colcon normally arranges.
-          PYTHONPATH: src/huitzilin_sim:src/huitzilin_perception:src/huitzilin_action_escalation
+          PYTHONPATH: src/huitzilin_sim:src/huitzilin_perception:src/huitzilin_guard
         run: |
           python -m pytest -q \
             src/huitzilin_sim/test \
             src/huitzilin_perception/test \
-            src/huitzilin_action_escalation/test \
-            --ignore=src/huitzilin_perception/test/test_evasion_params.py
+            src/huitzilin_guard/test \
+            --ignore=src/huitzilin_perception/test/test_evasion_params.py \
+            --ignore=src/huitzilin_guard/test/test_guard_node.py

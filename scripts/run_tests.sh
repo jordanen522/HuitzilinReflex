@@ -28,5 +28,5 @@ cd "$WS"
 exec python3 -m pytest \
   src/huitzilin_sim/test \
   src/huitzilin_perception/test \
-  src/huitzilin_action_escalation/test \
+  src/huitzilin_guard/test \
   -q "$@"

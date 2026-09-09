@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>huitzilin_guard</name>
+  <version>0.1.0</version>
+  <description>HuitzilinReflex guard alarm: sounds a siren and lights when a person is inside the patrolled box. Presence only. Independent of the projectile-evasion pipeline.</description>
+  <maintainer email="j602eng1z@gmail.com">Jordan</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <!-- Camera Image only, for pose_detector_node. The projectile depth
+       cloud on /oak/points stays off limits; test_isolation.py bans that
+       topic by name, which is the guarantee that matters here. -->
+  <depend>sensor_msgs</depend>
+  <!-- Odometry only, to place a detection in the same frame as the box.
+       Telemetry in; nothing here commands the aircraft. -->
+  <depend>nav_msgs</depend>
+  <!-- SetBool, for the /guard/arm switch and NOTHING else. This is a
+       deliberate widening of the manifest and it is the reason the rule
+       below changed shape: std_srvs is what a service SERVER needs, and it
+       is equally what a client to a flight service would need. So the
+       guarantee moved from "this package cannot depend on std_srvs" to
+       "no file here creates a service CLIENT, and only guard_node imports
+       it"; both are asserted in test_isolation.py. -->
+  <depend>std_srvs</depend>
+
+  <exec_depend>python3-yaml</exec_depend>
+  <!-- Scenario and params files are resolved through the ament index. -->
+  <exec_depend>ament_index_python</exec_depend>
+  <!-- clock_guard only. Nothing else from huitzilin_sim is imported. -->
+  <exec_depend>huitzilin_sim</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <!--
+    DELIBERATELY ABSENT, and this is the isolation guarantee rather than a
+    convenience: geometry_msgs, rcl_interfaces and huitzilin_perception.
+
+    Without geometry_msgs there is no Twist, so no velocity command can be
+    constructed at all, neither for /cmd/evade nor for the bridge's own
+    command topic. Adding it is a manifest edit, which is visible in every
+    diff, as opposed to an import quietly appearing in a node file nobody
+    rereads.
+
+    std_srvs used to be on this list and no longer is; the guard panel needs
+    SetBool to offer an arm switch. What replaced it is narrower and checks
+    the thing that actually matters: test_isolation.py asserts that no file
+    here calls create_client, so this package can SERVE a service but cannot
+    CALL one, and that the flight service names appear in no string constant.
+
+    This subsystem may drive lights and a siren. It may not fly the aircraft.
+  -->
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -14,6 +14,7 @@ from std_srvs.srv import SetBool
 from visualization_msgs.msg import Marker, MarkerArray
 
 from huitzilin_sim.mav_bridge import MavBridge  # reuse frame helpers
+from huitzilin_sim.box import box_from_params, check_fence_radius
 from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 
 
@@ -62,7 +63,45 @@ class PatrolNode(Node):
         self.declare_parameter("loop", True)
         self.declare_parameter("autostart", True)      # True = patrol on launch (demo-friendly)
 
-        self.wps = parse_waypoints(self.get_parameter("waypoints_ned").value)
+        # Optional: fly the perimeter of the guarded box instead of the
+        # literal list above. Defaults FALSE so week4_patrol.yaml and the
+        # dodge battery keep the exact circuit they were measured on --
+        # deriving waypoints unconditionally would silently rewrite the
+        # flight path every recorded result depends on.
+        self.declare_parameter("box_enabled", False)
+        self.declare_parameter("box_min_x", 0.0)       # ENU metres, east
+        self.declare_parameter("box_max_x", 5.0)
+        self.declare_parameter("box_min_y", 0.0)       # ENU metres, north
+        self.declare_parameter("box_max_y", 5.0)
+        self.declare_parameter("box_alt_m", 2.0)       # metres above arming
+        # Metres. The flight controller's FENCE_RADIUS, mirrored here so a
+        # box that cannot be flown is refused on the bench instead of at a
+        # corner in mid-air.
+        self.declare_parameter("fence_radius_m", 10.0)
+
+        self.box = None
+        if bool(self.get_parameter("box_enabled").value):
+            # Both calls raise BoxError naming the parameter at fault, and
+            # both happen BEFORE the MAVLink connect below. A box that
+            # breaches the geofence must stop the node while it is still on
+            # the ground: the alternative is a patrol that flies, reaches a
+            # corner, breaches and RTLs, which looks like a flight-controller
+            # fault rather than a configuration one.
+            self.box = box_from_params(
+                lambda name: self.get_parameter(name).value)
+            check_fence_radius(
+                self.box, float(self.get_parameter("fence_radius_m").value))
+            self.wps = parse_waypoints(self.box.to_waypoints_ned())
+            self.get_logger().info(
+                "patrol circuit derived from the guarded box: x [%g, %g] "
+                "y [%g, %g] at %g m, furthest corner %.2f m of %.2f m fence"
+                % (self.box.min_x, self.box.max_x, self.box.min_y,
+                   self.box.max_y, self.box.alt_m,
+                   self.box.max_corner_radius_m(),
+                   float(self.get_parameter("fence_radius_m").value)))
+        else:
+            self.wps = parse_waypoints(
+                self.get_parameter("waypoints_ned").value)
         self.accept = float(self.get_parameter("accept_radius_m").value)
         self.cruise = float(self.get_parameter("cruise_speed_ms").value)
         self.mode = self.get_parameter("mode").value

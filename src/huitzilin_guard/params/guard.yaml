@@ -1,0 +1,94 @@
+# guard.yaml -- the guarded box, and the alarm that watches it.
+#
+# THIS IS THE ONE FILE YOU EDIT TO MOVE THE GUARDED AREA.
+#
+# The box is a rectangle in ENU metres (x east, y north) measured from the
+# point where the aircraft was ARMED, which is the origin /huitzilin/odom
+# reports against. Park the drone at one corner of what you want guarded and
+# the numbers below are distances from there.
+#
+# The drone flies the PERIMETER: (min_x,min_y) -> (max_x,min_y) ->
+# (max_x,max_y) -> (min_x,max_y) and back round, counter-clockwise. It never
+# crosses the interior. A person anywhere inside the rectangle raises the
+# alarm; how much of the interior the camera actually sees is a separate and
+# much smaller area, and docs/guard.md is explicit about that gap.
+#
+# The five box_* values are REPEATED under both nodes and must be identical.
+# test_guard_params.py fails the build if they are not, because a drone that
+# patrols one rectangle while guarding another looks healthy from every
+# angle: it flies, the detector detects, the siren stays quiet.
+#
+# BEFORE ENLARGING THE BOX, read fence_radius_m below. The geofence is a
+# CIRCLE and the box is a rectangle, so it is the corners that breach.
+
+patrol:
+  ros__parameters:
+    # false keeps the literal waypoints_ned list in patrol_node, which the
+    # dodge battery and week4_patrol.yaml still depend on. true derives the
+    # circuit from the box instead.
+    box_enabled: true
+    box_min_x: 0.0
+    box_max_x: 5.0
+    box_min_y: 0.0
+    box_max_y: 5.0
+    box_alt_m: 2.0
+
+    # Metres. Must equal FENCE_RADIUS in params/hw_frame.parm, which is the
+    # circle the flight controller enforces with FENCE_ACTION 1 (RTL).
+    # patrol_node refuses to start if any box corner falls outside it,
+    # because the failure otherwise appears mid-flight: the drone reaches a
+    # corner, breaches, and returns to launch in the middle of its patrol.
+    # A 5 x 5 box anchored at the origin reaches 7.07 m at its far corner.
+    # Raising this means raising FENCE_RADIUS *and* the supervisor's
+    # fence_radius_m together; test_hw_config.py pins them to each other.
+    fence_radius_m: 10.0
+
+    accept_radius_m: 0.6
+    cruise_speed_ms: 1.5
+    mode: "position"
+    loop: true
+    # Never true. Patrol setpoints sent during takeoff flood GUIDED and the
+    # aircraft never leaves the ground. Start it after takeoff with
+    # the start_patrol service.
+    autostart: false
+
+guard:
+  ros__parameters:
+    # Identical to the patrol block above. Asserted by test_guard_params.py.
+    box_min_x: 0.0
+    box_max_x: 5.0
+    box_min_y: 0.0
+    box_max_y: 5.0
+    box_alt_m: 2.0
+
+    detections_topic: "/guard/detections"
+    odom_topic: "/huitzilin/odom"
+    alarm_topic: "/guard/alarm_request"
+    status_topic: "/guard/status"
+    arm_service: "/guard/arm"
+
+    # Consecutive in-box detections before the siren sounds. One frame is a
+    # detector artefact often enough that a single-frame trigger would make
+    # the alarm untrustworthy, and an alarm nobody believes is worse than
+    # none. At the detector's 10 Hz ceiling, 3 is under half a second.
+    confirm_frames: 3
+    # Seconds of EMPTY box before it stops, not one empty frame. A person
+    # standing still is the case the detector misses most, and one dropped
+    # frame must never silence a correct alarm.
+    clear_after_s: 3.0
+    # Seconds. A brief intrusion must still produce a perceptible signal.
+    min_alert_s: 3.0
+    # Seconds. Stuck-detector guard, deliberately long: a real intruder who
+    # stands still must not be able to outwait the alarm. Five minutes.
+    max_alert_s: 300.0
+    # Seconds without a detection frame before a SOUNDING alarm gives up.
+    # This is a dead-man, not a health check: an empty box also produces
+    # silence, so silence alone is never treated as a fault. See presence.py.
+    stale_input_s: 5.0
+
+    tick_hz: 10.0
+    status_hz: 1.0
+
+    # Disarmed at boot, like any alarm panel. Arm it deliberately:
+    #   ros2 service call /guard/arm std_srvs/srv/SetBool '{data: true}'
+    start_armed: false

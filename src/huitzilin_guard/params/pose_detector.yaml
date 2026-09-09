@@ -1,0 +1,54 @@
+# pose_detector.yaml -- the real detection stage: camera image to body joints.
+#
+# The model emits 17 COCO keypoints and five of them are the face. Those five
+# are dropped in pose_detector.decode before anything is published, so no face
+# coordinate leaves this node. No image, crop or embedding is ever published,
+# stored or logged.
+#
+# The model is NOT tracked in this repository. Fetch it with
+# scripts/fetch_pose_model.sh and point model_path at the result. The node
+# refuses to start without it rather than coming up and publishing nothing,
+# because silence is indistinguishable from an empty scene.
+
+pose_detector:
+  ros__parameters:
+    image_topic: "/camera/image_raw"
+    depth_topic: "/camera/depth"
+    keypoints_topic: "/guard/detections"
+
+    # Absolute path, or ~ expanded. Deliberately has no default that would
+    # resolve to something: see the header.
+    model_path: "~/models/yolov8n-pose.onnx"
+
+    # Person detection. Below this the frame yields nothing, which is the safe
+    # direction: a missed person cannot raise an alarm.
+    person_conf: 0.5
+    # Per-joint. Below this a joint is omitted rather than emitted weakly;
+    # action_features treats a missing joint as absent, and a hallucinated one
+    # moves fast.
+    joint_conf: 0.5
+    input_size: 640
+
+    # monocular - range from bounding-box height against subject_height_m.
+    #             Works with any camera. A scale estimate, not a measurement:
+    #             a crouching, seated or partly framed subject gets a
+    #             proportionally wrong range and therefore a wrong closing
+    #             speed.
+    # depth     - sample an aligned depth image. Correct, and the path an
+    #             OAK-D would use. UNVERIFIED: no camera has ever run this.
+    range_mode: "monocular"
+    subject_height_m: 1.7
+    # OAK-D Lite colour sensor horizontal FOV. Used to derive focal length
+    # when no CameraInfo is available.
+    fov_h_deg: 69.0
+    # Outside this the height assumption has clearly failed and the frame is
+    # dropped. A wrong range manufactures closing speed out of a posture
+    # change.
+    min_range_m: 0.8
+    max_range_m: 25.0
+
+    # Inference is slower than the camera. Dropping frames keeps latency
+    # bounded; queueing them does not.
+    max_rate_hz: 10.0
+
+    record_video: false
