@@ -121,6 +121,12 @@ class GuardNode(Node):
         self._frames_seen = 0
         self._frames_rejected = 0
         self._frames_unplaceable = 0
+        # When the detector last said anything, tracked HERE rather than read
+        # off the latch. The latch is only fed while armed, so reporting its
+        # figure left the status showing "no detections" beside a
+        # frames_seen in the thousands whenever the panel was disarmed --
+        # which reads exactly like a dead detector.
+        self._last_detection_s = None
 
         self._alarm_pub = self.create_publisher(
             Bool, str(p("alarm_topic")), RELIABLE_QOS)
@@ -174,6 +180,7 @@ class GuardNode(Node):
 
     def _detection_cb(self, msg) -> None:
         self._frames_seen += 1
+        self._last_detection_s = self._now_s()
 
         try:
             frame = parse_pose_frame(json.loads(msg.data))
@@ -237,10 +244,13 @@ class GuardNode(Node):
                 self.get_logger().info(
                     "ALARM ON -- a person is inside the guarded area")
             else:
-                self.get_logger().info(
-                    "ALARM OFF: %s"
-                    % (self._latch.last_stop_reason
-                       or ("disarmed" if force else "clear")))
+                # "disarmed" wins over the latch's reason on a forced stop.
+                # The latch keeps its last reason, so reading it here logged
+                # a stale "box clear" for an alarm an operator had just
+                # switched off by hand.
+                reason = ("disarmed" if force
+                          else (self._latch.last_stop_reason or "clear"))
+                self.get_logger().info("ALARM OFF: %s" % reason)
         self._alarm_pub.publish(Bool(data=bool(self._latch.is_on)))
 
     def _publish_status(self) -> None:
@@ -249,7 +259,8 @@ class GuardNode(Node):
         Use --full-length when reading it: echo truncates long strings, and a
         truncated JSON payload reads as a malformed one.
         """
-        secs = self._latch.seconds_since_input(self._now_s())
+        secs = (None if self._last_detection_s is None
+                else self._now_s() - self._last_detection_s)
         self._status_pub.publish(String(data=json.dumps({
             "armed": bool(self.armed),
             "alarm": bool(self._latch.is_on),
@@ -258,8 +269,11 @@ class GuardNode(Node):
             "frames_rejected": int(self._frames_rejected),
             "frames_unplaceable": int(self._frames_unplaceable),
             "consecutive_in_box": int(self._latch.consecutive_in_box),
-            # None is the normal resting state on an empty box: the detector
-            # publishes only when it sees somebody. Not a fault on its own.
+            # Age of the last frame the DETECTOR sent, armed or not, so this
+            # never reads as a dead detector while frames_seen is climbing.
+            # None means none has ever arrived, which is also the normal
+            # resting state on an empty box: the detector publishes only when
+            # it sees somebody. Not a fault on its own either way.
             "secs_since_detection": (None if secs is None
                                      else round(float(secs), 2)),
             "have_odom": self._position_enu is not None,

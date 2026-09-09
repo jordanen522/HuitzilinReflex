@@ -300,6 +300,36 @@ def test_an_empty_box_reports_no_detection_age_rather_than_a_fault():
     assert status_of(make_node())["secs_since_detection"] is None
 
 
+def test_the_detection_age_is_reported_even_while_disarmed():
+    """The latch is only fed while armed, so reading its figure showed
+    "no detections" next to a frames_seen in the thousands whenever the
+    panel was off, which is indistinguishable from a dead detector."""
+    node = make_node(armed=False)
+    node.clock["t"] = 10.0
+    node._detection_cb(detection(2.0))
+    node.clock["t"] = 10.5
+    report = status_of(node)
+    assert report["frames_seen"] == 1
+    assert report["secs_since_detection"] == pytest.approx(0.5)
+
+
+def test_disarming_is_logged_as_disarmed_not_as_a_stale_clear_reason():
+    """The latch keeps its last stop reason, so reading it on a forced stop
+    logged "box clear" for an alarm an operator had just switched off."""
+    logged = []
+    node = make_node()
+
+    class Recording(Logger):
+        def info(self, text, *a, **k):
+            logged.append(text)
+
+    node.get_logger = lambda: Recording()
+    node._latch.last_stop_reason = "box clear for 3 s"
+    node._srv_arm(Request(False), Response())
+    assert any("disarmed" in line for line in logged), logged
+    assert not any("box clear" in line for line in logged), logged
+
+
 def test_the_node_holds_no_mavlink_connection():
     """Belt and braces next to test_isolation, asserted on the live class.
 
