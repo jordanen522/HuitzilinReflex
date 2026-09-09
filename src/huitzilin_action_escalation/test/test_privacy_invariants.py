@@ -26,12 +26,20 @@ PY_FILES = sorted((PKG / "huitzilin_action_escalation").glob("*.py"))
 PARAMS_FILES = sorted((PKG / "params").glob("*.yaml"))
 
 # Libraries whose presence would mean this subsystem had grown a face or
-# identity capability. None is a dependency; none may become one quietly.
+# identity capability. Forbidden in EVERY file, the detector included.
 FORBIDDEN_LIBS = (
-    "cv2", "mediapipe", "dlib", "face_recognition", "insightface",
+    "mediapipe", "dlib", "face_recognition", "insightface",
     "facenet", "deepface", "retinaface", "arcface", "torch",
-    "torchvision", "tensorflow", "onnxruntime", "sklearn", "PIL",
+    "torchvision", "tensorflow", "sklearn", "PIL",
 )
+
+# cv2 and onnxruntime are permitted in ONE file: the detector is the only place
+# that legitimately holds an image and runs the model. Anywhere else they would
+# mean an image path had appeared where none belongs. Narrowing the rule to a
+# single file is the point; blanket-allowing them across the package would give
+# up the property entirely.
+IMAGE_STAGE_FILE = "pose_detector_node.py"
+IMAGE_STAGE_LIBS = ("cv2", "onnxruntime")
 
 FACE_KEYPOINTS = ("nose", "left_eye", "right_eye", "left_ear", "right_ear")
 
@@ -75,11 +83,24 @@ def test_the_privacy_predicates_are_not_vacuous():
 @pytest.mark.parametrize("path", PY_FILES, ids=lambda p: p.name)
 def test_no_module_imports_a_vision_or_face_library(path):
     roots = imported_roots(path.read_text(encoding="utf-8"))
-    for lib in FORBIDDEN_LIBS:
+    banned = FORBIDDEN_LIBS
+    if path.name != IMAGE_STAGE_FILE:
+        banned = banned + IMAGE_STAGE_LIBS
+    for lib in banned:
         assert lib not in roots, (
-            "%s imports %s. This subsystem consumes body joints only; a "
-            "vision or model library here would mean it had grown an image "
-            "path it is not allowed to have." % (path.name, lib))
+            "%s imports %s. Only %s may hold an image or run the model; a "
+            "vision, model or face library anywhere else means an image path "
+            "has appeared where none belongs."
+            % (path.name, lib, IMAGE_STAGE_FILE))
+
+
+def test_the_image_stage_is_the_only_file_that_touches_an_image():
+    """Guards the exemption above. If a second file started importing cv2 the
+    per-file rule would quietly become a package-wide allowance."""
+    holders = [p.name for p in PY_FILES
+               if imported_roots(p.read_text(encoding="utf-8"))
+               & set(IMAGE_STAGE_LIBS)]
+    assert holders == [IMAGE_STAGE_FILE], holders
 
 
 @pytest.mark.parametrize("path", PARAMS_FILES, ids=lambda p: p.name)
@@ -89,6 +110,11 @@ def test_no_params_file_enables_recording(path):
         prms = (body or {}).get("ros__parameters") or {}
         for key, value in prms.items():
             low = key.lower()
+            # *_topic names a stream to read, not storage to enable. The
+            # detector legitimately subscribes to /camera/image_raw; what must
+            # stay off is anything that CAPTURES or KEEPS what it sees.
+            if low.endswith("_topic"):
+                continue
             if any(word in low for word in ("record", "video", "image",
                                             "crop", "dump", "save")):
                 assert value in (False, "", None), (

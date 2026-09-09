@@ -145,6 +145,31 @@ Full frame table and TF tree: `docs/frames.md`.
 
 ### Action escalation
 
+- **The pose model is not tracked and the detector refuses to start without it.**
+  `scripts/fetch_pose_model.sh` pulls it with a SHA-256 check. Coming up without a
+  model would mean publishing nothing, and silence there is indistinguishable from a
+  scene with nobody in it.
+- **`onnxruntime` is not a ROS package, and the system interpreter is externally
+  managed (PEP 668).** Do not pass the override flag on a working robotics box.
+  Install it with `pip install --target ~/.local/ros-deps onnxruntime`, then DELETE the
+  numpy it drags in: pip pulls numpy 2.x, which shadows the system numpy 1.26/scipy
+  1.11 pair that `detector_node` and the Kalman path rely on. Run the node with
+  `PYTHONPATH=~/.local/ros-deps`, never on the global path.
+- **`pose_detector` and `scenario_player` must never run together.** Both publish
+  `/action/keypoints`, so the window would interleave a real body and a synthetic one.
+  Same rule as `oracle_detector` versus `detector` on `/threat/centroid`. The launch
+  file ships `with_pose_detector:=false`; pass `with_scenario:=false` alongside it.
+- **Monocular range is a scale estimate, not a measurement.** It assumes a standing
+  adult of 1.70 m seen full length. A crouching, seated or partly framed subject gets a
+  proportionally wrong range and therefore a wrong closing speed. Out-of-range values
+  are dropped rather than clamped, so a posture change cannot manufacture an approach.
+  The `depth` mode is the correct path and has never run: there is no camera.
+- **`ros2 topic echo` truncates long strings**, so a JSON payload on a `String` topic
+  comes back ending in `...` and a grep over it silently finds nothing. Use
+  `--full-length`. The frames were fine; the echo was lying.
+- **A `grep` that matches nothing returns 1 and kills a `set -e` script.** Two smoke
+  scripts here died at their first clean check and looked like a pipeline failure. Put
+  `|| true` on any grep used as a report rather than a test.
 - **A `--` inside an XML comment silently downgrades a package.** It makes
   `package.xml` malformed; colcon then falls back to build type `python` instead of
   `ament_python`, skips the `ament_prefix_path` environment hook, and the package

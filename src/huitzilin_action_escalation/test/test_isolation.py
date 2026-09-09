@@ -34,8 +34,12 @@ FORBIDDEN_TOPICS = (
     "/oak/points", "/gz/dynamic_poses",
 )
 
-FORBIDDEN_IMPORTS = ("geometry_msgs", "std_srvs", "sensor_msgs",
-                     "rcl_interfaces", "huitzilin_perception", "pymavlink")
+# sensor_msgs is NOT here: pose_detector_node needs Image to read a camera.
+# Allowing the message package does not loosen the real guarantee, which is
+# the topic ban below -- /oak/points remains forbidden by name, so the
+# projectile depth cloud still cannot be subscribed from this package.
+FORBIDDEN_IMPORTS = ("geometry_msgs", "std_srvs", "rcl_interfaces",
+                     "huitzilin_perception", "pymavlink")
 
 
 def code_strings(source: str):
@@ -119,8 +123,7 @@ def test_the_manifest_declares_no_flight_dependency():
     cannot be written without editing package.xml, and a manifest edit shows
     up in every diff."""
     manifest = (PKG / "package.xml").read_text(encoding="utf-8")
-    for dep in ("geometry_msgs", "std_srvs", "sensor_msgs",
-                "huitzilin_perception"):
+    for dep in ("geometry_msgs", "std_srvs", "huitzilin_perception"):
         assert "<depend>%s</depend>" % dep not in manifest
         assert "<exec_depend>%s</exec_depend>" % dep not in manifest
 

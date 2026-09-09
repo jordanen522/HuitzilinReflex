@@ -4,10 +4,13 @@ A privacy-preserving subsystem that recognises **aggressive body motion** and, o
 confirmation, asks for the warning lights and siren. It is architecturally separate from
 the projectile-evasion pipeline and cannot command flight.
 
-**Status: no real input path exists.** There is no pose estimator in this project, on the
-camera or on the Pi. Everything below has been exercised only against hand-authored
-synthetic keypoint sequences. No number in this document is a measured detection rate,
-because none has ever been measured.
+**Status: a real detection stage exists; no camera does.** `pose_detector` runs an actual
+pose model (YOLOv8n-pose, ONNX, CPU) and has been verified end to end on real photographic
+input, producing metric body joints that the recogniser consumes. What does not exist is a
+camera: hardware bring-up has not started, so no frame has ever come from an OAK-D, and the
+`depth` range mode has never run. Nor has any of it been tested against real aggressive
+motion. **No number in this document is a measured detection, false-positive or latency
+rate, because none has ever been measured.**
 
 ## What it does
 
@@ -22,9 +25,15 @@ because none has ever been measured.
 
 | Node | Role |
 |---|---|
+| `pose_detector` | Runs the pose model on a camera image, emits body joints |
 | `action_recognizer` | Scores joint frames, applies confirmation and cooldown, requests the alert |
 | `alert_signal` | Drives the light/siren sink, holds its own dead-man |
 | `scenario_player` | Replays a synthetic sequence so the chain runs with no camera |
+
+`pose_detector` and `scenario_player` are **mutually exclusive**: both publish
+`/action/keypoints`, so running them together would interleave a real body and a synthetic
+one into a single feature window. This is the same rule that keeps `oracle_detector` and
+`detector` from both publishing `/threat/centroid`.
 
 ## Categories, and the non-goals
 
@@ -93,6 +102,74 @@ Joint values are `[x, y, z, conf]`. `std_msgs/String` rather than a typed messag
 the privacy contract rests on **rejecting unknown fields**, and a typed message has no
 rejection hook. `sensor_msgs/JointState` is the closest stock alternative and was not
 used: it is one scalar per name, carries no confidence, and imports robot-joint semantics.
+
+## The detection stage
+
+`pose_detector` is the real perception front end: camera image in, metric body joints out.
+
+| | |
+|---|---|
+| Model | YOLOv8n-pose, ONNX export, 17 COCO keypoints, 640x640 input |
+| Runtime | onnxruntime, CPU |
+| Output | 12 body joints in the camera optical frame, metres |
+| Tracked in this repo? | **No.** 13 MB of weights, fetched by `scripts/fetch_pose_model.sh` with a SHA-256 check |
+
+### The face drop is on our side of the boundary
+
+The model emits **17** keypoints and five of them are the face: nose, both eyes, both ears,
+COCO indices 0-4. On a real photograph it reports them confidently (0.48 to 1.00). They are
+discarded in `pose_detector.decode` before any value is returned, so no face coordinate
+reaches a topic, a log, a window or a disk.
+
+This is deliberately stronger than choosing a model that never computes a face. The drop is
+ours, so it survives swapping the model: any pose network emitting COCO-17 gets the same
+five indices removed at the same line. `test_pose_detector.py` puts sentinel coordinates in
+the face slots and asserts they appear nowhere in the output.
+
+Verified at runtime, not only in unit tests: over 128 consecutive frames from the real
+model, the recogniser reported `frames_rejected: 0`. Its parser rejects any frame carrying
+a face joint, so zero rejections is a live proof that none was ever sent.
+
+### Range, and why it is the weak point
+
+The recogniser needs metric range because LUNGE and SHOVE both require closing speed; a
+pipeline reporting a constant Z scores every approach as zero.
+
+- **`monocular`** (default, works today). Range from bounding-box height against an assumed
+  1.70 m standing subject: a closing person grows in frame. This is **a scale estimate, not
+  a measurement.** It assumes a standing adult seen full length, and degrades exactly where
+  that assumption breaks. A crouching, seated, partly framed or unusually tall subject gets
+  a proportionally wrong range and therefore a wrong closing speed. Out-of-range estimates
+  are dropped rather than clamped, so a posture change cannot manufacture a closing speed.
+  All joints share one Z, because a monocular camera has no per-joint depth and inventing
+  one would fabricate limb extension along the optical axis.
+- **`depth`** (correct, **unverified**). Samples an aligned depth image at each joint, median
+  over a small patch, ignoring the zero and non-finite no-data markers. This is the path an
+  OAK-D would use. No camera has ever run it.
+
+### Running it
+
+```bash
+./scripts/fetch_pose_model.sh
+python3 -m pip install --target ~/.local/ros-deps onnxruntime
+# then delete the numpy that pip drags in, so the system numpy/scipy pair the
+# projectile detector relies on is not shadowed
+export PYTHONPATH=~/.local/ros-deps
+ros2 launch huitzilin_action_escalation action_escalation.launch.py \
+  with_pose_detector:=true with_scenario:=false
+```
+
+### What was verified, and what that is worth
+
+On a real photograph the model returned **12 of 12** body joints above 0.5 confidence,
+anatomically coherent. Driven with a zoom sequence simulating approach, the pipeline
+measured a real closing speed of 0.82 m/s and scored **LUNGE 0.0** -- which is the correct
+answer, because a subject growing in frame is an approach and not an aggressive action.
+
+That is a test of plumbing and of the conjunctive scoring, not of aggression detection. It
+says the stage decodes, back-projects, passes the privacy parser and feeds the recogniser.
+It says nothing about how often this system would be right or wrong about a real person,
+because no labelled footage of real aggressive motion has ever been put through it.
 
 ## Confidence and temporal confirmation
 

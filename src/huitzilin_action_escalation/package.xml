@@ -9,6 +9,10 @@
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
+  <!-- Camera Image only, for pose_detector_node. The projectile depth
+       cloud on /oak/points stays off limits; test_isolation.py bans that
+       topic by name, which is the guarantee that matters here. -->
+  <depend>sensor_msgs</depend>
 
   <exec_depend>python3-yaml</exec_depend>
   <!-- Scenario and params files are resolved through the ament index. -->
@@ -20,7 +24,7 @@
 
   <!--
     DELIBERATELY ABSENT, and this is the isolation guarantee rather than a
-    convenience: std_srvs, geometry_msgs, sensor_msgs, rcl_interfaces and
+    convenience: std_srvs, geometry_msgs, rcl_interfaces and
     huitzilin_perception.
 
     Without std_srvs there is no service client to /huitzilin/arm, /takeoff,

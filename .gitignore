@@ -19,3 +19,7 @@ mav.parm
 eeprom.bin
 terrain/
 week2_telemetry_*.csv
+
+# Pose model weights: fetched by scripts/fetch_pose_model.sh, never tracked.
+models/
+*.onnx

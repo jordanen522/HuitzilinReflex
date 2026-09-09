@@ -36,6 +36,8 @@ setup(
             "huitzilin_action_escalation.alert_signal_node:main",
             "scenario_player = "
             "huitzilin_action_escalation.scenario_player_node:main",
+            "pose_detector = "
+            "huitzilin_action_escalation.pose_detector_node:main",
         ],
     },
 )

@@ -28,6 +28,13 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("use_sim_time", default_value="false"),
         DeclareLaunchArgument("with_scenario", default_value="true"),
         DeclareLaunchArgument("scenario", default_value="lunge.yaml"),
+        # The real detection stage. Mutually exclusive with the scenario
+        # player: both publish /action/keypoints, so running them together
+        # would interleave a synthetic body and a real one into a single
+        # feature window, exactly as oracle_detector and detector must never
+        # both publish /threat/centroid. Set with_scenario:=false when using
+        # this.
+        DeclareLaunchArgument("with_pose_detector", default_value="false"),
         DeclareLaunchArgument(
             "recognizer_params",
             default_value=os.path.join(pkg, "params",
@@ -39,6 +46,9 @@ def generate_launch_description() -> LaunchDescription:
             "player_params",
             default_value=os.path.join(pkg, "params",
                                        "scenario_player.yaml")),
+        DeclareLaunchArgument(
+            "detector_params",
+            default_value=os.path.join(pkg, "params", "pose_detector.yaml")),
     ]
 
     use_sim_time = {"use_sim_time": LaunchConfiguration("use_sim_time")}
@@ -72,4 +82,13 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    return LaunchDescription(args + [recognizer, alert, player])
+    detector = Node(
+        package="huitzilin_action_escalation",
+        executable="pose_detector",
+        name="pose_detector",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("with_pose_detector")),
+        parameters=[LaunchConfiguration("detector_params"), use_sim_time],
+    )
+
+    return LaunchDescription(args + [recognizer, alert, player, detector])
