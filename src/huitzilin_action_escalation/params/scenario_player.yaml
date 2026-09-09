@@ -1,0 +1,18 @@
+# scenario_player.yaml -- synthetic keypoint source.
+#
+# This is the ONLY input path this subsystem has today. There is no pose
+# estimator, on the camera or on the Pi, so nothing here has ever consumed a
+# real body. Anything measured through the player measures the player.
+
+scenario_player:
+  ros__parameters:
+    keypoints_topic: "/action/keypoints"
+    # Resolved against the installed share/ directory when not absolute.
+    scenario: "lunge.yaml"
+    # Replay the sequence continuously, so a stack left running keeps
+    # producing input rather than going stale after one pass.
+    loop: true
+    # Gap between repeats. Must exceed the recogniser's cooldown_s or a
+    # looping scenario cannot produce a second alert and the loop looks
+    # broken.
+    loop_gap_s: 18.0

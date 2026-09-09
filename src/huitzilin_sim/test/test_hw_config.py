@@ -21,6 +21,25 @@ SIM = pathlib.Path(__file__).resolve().parents[1]          # src/huitzilin_sim
 SRC = SIM.parent                                            # src/
 PERCEPTION = SRC / "huitzilin_perception"
 
+# Every ament package in the tree, discovered rather than listed. The three
+# repo-wide walks below -- params yaml against declared node names, and the
+# use_sim_time ban -- iterated a hardcoded (SIM, PERCEPTION) pair, so a third
+# package's params/ was invisible to all of them. That failure is silent in the
+# worst way: nothing goes red, the walk simply covers less than it reads as
+# covering. Same argument as ALL_PARM_FILES below, one axis out.
+PACKAGES = sorted(p for p in SRC.iterdir() if (p / "package.xml").is_file())
+
+
+def test_the_package_scan_finds_every_ament_package():
+    """Guards the three repo-wide walks below: a scan that missed a package
+    would narrow their coverage silently -- the exact failure mode of the
+    hardcoded pair this replaced."""
+    found = {p.name for p in PACKAGES}
+    assert {"huitzilin_sim", "huitzilin_perception"} <= found
+    # Derived a second, different way on purpose. A scan that silently dropped
+    # a package would still satisfy the subset assertion above.
+    assert found == {p.parent.name for p in SRC.glob("*/package.xml")}
+
 
 def load_yaml(path):
     return yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -139,14 +158,14 @@ def test_overlay_check_catches_a_typoed_node_name():
 
 # yaml node keys vs the names nodes actually declare
 
-ALL_PARAMS_YAML = (sorted((SIM / "params").glob("*.yaml"))
-                   + sorted((PERCEPTION / "params").glob("*.yaml")))
+ALL_PARAMS_YAML = sorted(path for pkg in PACKAGES
+                         for path in (pkg / "params").glob("*.yaml"))
 
 
 def declared_names():
     """Every node name declared anywhere in either package's Python."""
     names = set()
-    for pkg in (SIM, PERCEPTION):
+    for pkg in PACKAGES:
         for path in sorted((pkg / pkg.name).glob("*.py")):
             names |= declared_node_names(path.read_text(encoding="utf-8"))
     return names
@@ -179,7 +198,7 @@ def test_no_params_yaml_bakes_in_use_sim_time():
     use_sim_time overrides the launch argument and re-creates exactly the
     silent wrong-clock failure the guard exists to prevent."""
     offenders = []
-    for pkg in (SIM, PERCEPTION):
+    for pkg in PACKAGES:
         for path in sorted((pkg / "params").glob("*.yaml")):
             for node, body in (load_yaml(path) or {}).items():
                 if isinstance(body, dict) and "use_sim_time" in (

@@ -1,0 +1,149 @@
+"""The privacy properties, asserted against the code rather than a document.
+
+Runs without ROS (yaml only):
+    python -m pytest src/huitzilin_action_escalation/test/test_privacy_invariants.py
+
+Like test_isolation, the source checks look at string constants and imports
+rather than raw text: the modules discuss faces and identity at length in
+their docstrings, explaining what is excluded and why, and a test that banned
+the words would delete the reasoning while permitting the capability.
+"""
+
+import ast
+import pathlib
+
+import pytest
+import yaml
+
+from huitzilin_action_escalation.pose_frame import (
+    ALLOWED_JOINTS,
+    forbidden_key_problems,
+    joint_problems,
+)
+
+PKG = pathlib.Path(__file__).resolve().parents[1]
+PY_FILES = sorted((PKG / "huitzilin_action_escalation").glob("*.py"))
+PARAMS_FILES = sorted((PKG / "params").glob("*.yaml"))
+
+# Libraries whose presence would mean this subsystem had grown a face or
+# identity capability. None is a dependency; none may become one quietly.
+FORBIDDEN_LIBS = (
+    "cv2", "mediapipe", "dlib", "face_recognition", "insightface",
+    "facenet", "deepface", "retinaface", "arcface", "torch",
+    "torchvision", "tensorflow", "onnxruntime", "sklearn", "PIL",
+)
+
+FACE_KEYPOINTS = ("nose", "left_eye", "right_eye", "left_ear", "right_ear")
+
+
+def imported_roots(source):
+    roots = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            roots.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
+def test_the_file_scan_is_not_empty():
+    """Guards every check below."""
+    assert len(PY_FILES) >= 6, [p.name for p in PY_FILES]
+    assert len(PARAMS_FILES) >= 3, [p.name for p in PARAMS_FILES]
+
+
+def test_the_joint_whitelist_excludes_every_face_keypoint():
+    """COCO-17 minus keypoints 0-4. This is the privacy contract: no face
+    point is ever accepted, so no face can be reconstructed from anything
+    this subsystem holds."""
+    for name in FACE_KEYPOINTS:
+        assert name not in ALLOWED_JOINTS
+    assert len(ALLOWED_JOINTS) == 12
+
+
+def test_the_privacy_predicates_are_not_vacuous():
+    """Positive controls. Predicates that accepted everything would make this
+    whole module green while enforcing nothing."""
+    assert joint_problems(["nose"]) != []
+    assert forbidden_key_problems(["face_landmark"]) != []
+    assert forbidden_key_problems(["identity"]) != []
+    assert forbidden_key_problems(["embedding"]) != []
+    assert forbidden_key_problems(["image"]) != []
+    assert forbidden_key_problems(["shoulder_l"]) == []
+
+
+@pytest.mark.parametrize("path", PY_FILES, ids=lambda p: p.name)
+def test_no_module_imports_a_vision_or_face_library(path):
+    roots = imported_roots(path.read_text(encoding="utf-8"))
+    for lib in FORBIDDEN_LIBS:
+        assert lib not in roots, (
+            "%s imports %s. This subsystem consumes body joints only; a "
+            "vision or model library here would mean it had grown an image "
+            "path it is not allowed to have." % (path.name, lib))
+
+
+@pytest.mark.parametrize("path", PARAMS_FILES, ids=lambda p: p.name)
+def test_no_params_file_enables_recording(path):
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    for node, body in doc.items():
+        prms = (body or {}).get("ros__parameters") or {}
+        for key, value in prms.items():
+            low = key.lower()
+            if any(word in low for word in ("record", "video", "image",
+                                            "crop", "dump", "save")):
+                assert value in (False, "", None), (
+                    "%s:%s sets %s=%r" % (path.name, node, key, value))
+
+
+def test_recording_is_off_by_default_and_declared_explicitly():
+    """record_video exists as a key so the default is visible in config, not
+    only asserted in prose. It is also reported in the status heartbeat, so
+    the property is observable at runtime."""
+    doc = yaml.safe_load(
+        (PKG / "params" / "action_recognizer.yaml").read_text(
+            encoding="utf-8"))
+    prms = doc["action_recognizer"]["ros__parameters"]
+    assert prms["record_video"] is False
+    assert prms["publish_observations"] is False
+
+
+def test_the_published_event_carries_no_identifying_field():
+    """The event says what was DECIDED, never what was seen.
+
+    Asserted against the node source so a field added later is caught: the
+    event dict is built in one place, and any key resembling an identifier,
+    an image reference or a joint position must not appear in it.
+    """
+    source = (PKG / "huitzilin_action_escalation"
+              / "action_recognizer_node.py").read_text(encoding="utf-8")
+    event_keys = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = [k.value for k in node.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+        if "event" in keys and "provenance" in keys:
+            event_keys = keys
+    assert event_keys, "could not locate the event payload in the node"
+    assert forbidden_key_problems(event_keys) == []
+    for banned in ("subject", "joints", "bbox", "keypoints", "position"):
+        assert banned not in event_keys
+
+
+def test_every_event_carries_its_unvalidated_provenance():
+    """A recorded score must never be readable as a measured detection."""
+    from huitzilin_action_escalation.action_features import PROVENANCE
+    assert PROVENANCE == "UNVALIDATED_HEURISTIC"
+    source = (PKG / "huitzilin_action_escalation"
+              / "action_recognizer_node.py").read_text(encoding="utf-8")
+    assert "PROVENANCE" in source
+
+
+def test_the_status_heartbeat_reports_the_recording_state():
+    """Observable from topic echo, rather than only promised in a document.
+    frames_rejected is the privacy telemetry: non-zero means something
+    upstream is sending fields this subsystem refuses."""
+    source = (PKG / "huitzilin_action_escalation"
+              / "action_recognizer_node.py").read_text(encoding="utf-8")
+    assert '"recording"' in source
+    assert '"frames_rejected"' in source

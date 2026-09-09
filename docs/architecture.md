@@ -119,6 +119,37 @@ conversion lives in `mav_bridge` (see `docs/frames.md`). Velocity setpoints use
 | `/threat/intercept_marker` | `visualization_msgs/Marker` | Reliable | `base_link` |
 | `/payload/alarm` | `std_msgs/Bool` | Reliable | N/A (consumer: `payload_node`) |
 
+## Action escalation (independent subsystem)
+
+`huitzilin_action_escalation` shares **no topic, no service and no node** with the
+graph above. It is an alarm, not a control path.
+
+```
+/action/keypoints -> action_recognizer -> /action/alert_request -> alert_signal
+                                       -> /action/escalation_event
+                                       -> /action/status
+```
+
+| Topic | Type | QoS | Publisher |
+|---|---|---|---|
+| `/action/keypoints` | `std_msgs/String` (JSON) | Reliable | `scenario_player` |
+| `/action/escalation_event` | `std_msgs/String` (JSON) | Reliable | `action_recognizer` |
+| `/action/status` | `std_msgs/String` (JSON) | Reliable | `action_recognizer` |
+| `/action/alert_request` | `std_msgs/Bool` | Reliable | `action_recognizer` |
+| `/action/alert_state` | `std_msgs/Bool` | Reliable | `alert_signal` |
+
+The alert is `/action/alert_request` and deliberately **not** `/payload/alarm`.
+`supervisor.py` transitions PATROL to EVADE on `/payload/alarm`, and that is the only
+edge into EVADE in the whole state machine, so publishing there would let a
+body-motion heuristic command evasive flight. `test_isolation.py` enforces the
+separation, and `package.xml` declares neither `geometry_msgs` nor `std_srvs`, so no
+flight publisher or service client can be written without a visible manifest change.
+
+`scenario_player` is a measurement-lane node in the sense `oracle_detector` is: it
+fabricates an input so the chain is exercisable. There is no pose estimator in this
+project, so nothing downstream of it has consumed a real body. See
+`docs/action_escalation.md`.
+
 Both marker topics are RViz-only: nothing subscribes to them in flight, and the
 detector publishes its own best-effort rather than reliable, so a slow RViz cannot
 back-pressure the detection path.

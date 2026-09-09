@@ -56,6 +56,17 @@ ros2 launch huitzilin_perception week4_evasion.launch.py \
 ros2 run huitzilin_perception payload --ros-args \
   --params-file src/huitzilin_perception/params/payload.yaml
 ```
+
+The action-escalation subsystem is standalone: it shares no topic, service or node
+with the projectile stack, and needs neither Gazebo nor SITL.
+```bash
+ros2 launch huitzilin_action_escalation action_escalation.launch.py \
+  scenario:=lunge.yaml
+```
+Scenarios: `lunge`, `strike`, `shove` alert; `benign_wave` and
+`ambiguous_approach` must not. Read `docs/action_escalation.md` before quoting any
+score as performance -- none of them is a measured rate.
+
 The supervisor logs which watches are armed at startup
 (`watching: odom(1.0s) patrol_state(2.0s) cloud(1.0s) | disabled: cmd_vel`).
 A timeout of `0.0` disables that watch -- see the sharp edge below for why `cmd_vel`
@@ -131,6 +142,35 @@ Full frame table and TF tree: `docs/frames.md`.
 - **Score saves on the counterfactual, never on `dodged`.** A throw is on a hit course only if `counterfactual_min_m` ≤ 0.30 m. A fire count and a save rate are different numbers, and a cell with no on-course throws measured nothing — never report it as 0/N.
 - **`counterfactual_min_m` is blank on `NO_DODGE` rows, and that blank is a trap.** Join on it naively and every no-fire leaves the denominator, turning a save rate into a rate over only the throws that fired — on the 26 m / 20 m/s cell, a true 21/30 (70%) reads as 21/21 (100%). When no dodge fired the drone never deviated, so the actual path *is* the counterfactual: substitute `counterfactual_min_m := actual_min_m` and count a `NO_DODGE` inside the hit radius as a loss. `scripts/hz_counterfactual.py` emits the blank on purpose so recorded CSVs stay reproducible; the substitution belongs in whatever scores them.
 - **Kill lab stacks by installed path, never a guessed `_node` name.** `evasion_nod[e]`/`patrol_nod[e]` match nothing, and surviving stacks return plausible numbers with no error. The decisive contamination check is the implied rate `(track_updates - 1) / track_age_s` reading above the launched oracle rate.
+
+### Action escalation
+
+- **A `--` inside an XML comment silently downgrades a package.** It makes
+  `package.xml` malformed; colcon then falls back to build type `python` instead of
+  `ament_python`, skips the `ament_prefix_path` environment hook, and the package
+  installs cleanly while staying invisible to `ros2 launch` and `ros2 run`. The build
+  reports success. `colcon list` showing `(python)` rather than `(ros.ament_python)`
+  is the tell; `test_isolation.py` now parses the manifest to catch it.
+- **A stale `AMENT_PREFIX_PATH` hides a newly added package.** Re-sourcing
+  `install/setup.bash` in a shell that already sourced an older one short-circuits,
+  and `ros2 launch` then reports the package as not found while it sits installed.
+  `unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH` before sourcing.
+- **`use_sim_time` defaults to `false` in `action_escalation.launch.py`**, unlike
+  every other launch file here. Nothing publishes `/clock` for this subsystem, so
+  defaulting it true kills every node on the clock guard after the 5 s grace window.
+- **The alert is `/action/alert_request`, never `/payload/alarm`.** `supervisor.py`
+  transitions PATROL to EVADE on `/payload/alarm`, and that is the only edge into
+  EVADE in the state machine, so publishing there would let a body-motion heuristic
+  command evasive flight.
+- **There is no GPIO backend, deliberately.** `payload_node` already holds GPIO 18
+  and gpiochip0 line 17, and Linux GPIO line requests are exclusive, so a second
+  process taking them would silently stop the projectile alarm firing.
+  `backend: hardware` logs a refusal and runs inert rather than raising.
+- **Scenario keyframes interpolate in straight lines, which is not anatomy.** A hand
+  raised hip-to-overhead in two keyframes passes within 0.09 m of its own shoulder,
+  collapsing and re-opening the shoulder-to-wrist distance and reading as a 3.3 m/s
+  extension. `benign_wave.yaml` carries a mid-raise keyframe holding the arm radius;
+  without it that negative control falsely confirms as a STRIKE.
 
 ### Config layout
 

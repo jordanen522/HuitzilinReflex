@@ -90,6 +90,15 @@ Cuts all motors immediately regardless of flight mode.
 - Retention: footage deleted after 30 days unless needed for analysis
 - Camera never pointed at anyone who has not explicitly consented
 - The warning payload (buzzer + LED) is a safety signal only — never used to harass or follow a person
+- **No facial recognition, face detection, person identification, re-identification,
+  persistent person tracking, or biometric data of any kind.** The action-escalation
+  subsystem accepts twelve body joints (COCO-17 minus the five face keypoints) and
+  refuses any frame carrying a face point, an image, an embedding or a stable
+  identifier. It records what was decided, never what was seen.
+- The action-escalation subsystem runs on the bench and in simulation only, with the
+  aircraft disarmed and props off. It has never run with an armed aircraft, and the
+  abort criterion below is unchanged by it: a person entering the test area is still
+  a land-immediately condition, not an occasion to observe them.
 
 ### Abort Criteria
 | Situation | Action |

@@ -15,6 +15,12 @@ name: tests
 # test_clock_guard IS run: clock_guard imports rclpy.clock only inside
 # install_clock_guard, and those tests skip themselves without it.
 #
+# huitzilin_action_escalation needs no exclusion either, and that is a
+# property of how its tests are written rather than luck: the two
+# invariant modules read node source as TEXT and parse it with ast, so
+# they check the nodes without importing them. If a test here ever needs
+# a live node, name it below rather than dropping the whole directory.
+#
 # Run the whole suite, that module included, on the Dell:
 #   ./scripts/run_tests.sh
 
@@ -41,9 +47,10 @@ jobs:
         env:
           # The tests import huitzilin_sim / huitzilin_perception by package
           # name, which colcon normally arranges.
-          PYTHONPATH: src/huitzilin_sim:src/huitzilin_perception
+          PYTHONPATH: src/huitzilin_sim:src/huitzilin_perception:src/huitzilin_action_escalation
         run: |
           python -m pytest -q \
             src/huitzilin_sim/test \
             src/huitzilin_perception/test \
+            src/huitzilin_action_escalation/test \
             --ignore=src/huitzilin_perception/test/test_evasion_params.py

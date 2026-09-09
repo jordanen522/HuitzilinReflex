@@ -113,6 +113,19 @@ independent of ball speed, so a 20 m/s dodge needs 21.1 m of reach on an 80 mm b
 the as-built OAK-D Lite caps the aircraft at ~3.2 m/s. The full derivation, the sensor
 spec it implies, and the sector cost are in `docs/RESULTS.md`.
 
+**Perception roadmap change.** A recognition-oriented capability was previously
+intended for a later phase. It is cancelled and replaced by **action detection**:
+the system recognises aggressive *motion*, never *who* a person is. Facial
+recognition, face detection, person identification, re-identification, persistent
+person tracking and biometric embeddings are permanent non-goals, recorded in
+`docs/requirements.md` and `docs/SAFETY_CASE.md`. The replacement subsystem is
+`huitzilin_action_escalation`, which can drive the warning lights and siren and
+nothing else; it is independent of the projectile pipeline and cannot command
+flight. It has no real input path yet: there is no pose estimator on the camera or
+the Pi, so it has only ever run against synthetic sequences. `docs/action_escalation.md`
+has the categories, the privacy contract, and the list of numbers that may not be
+claimed.
+
 **Weeks 7–9 are out of scope for the simulation phase.** They are the physical work: HITL
 and tethered hover, incremental real flight inside a netted enclosure with soft
 projectiles, and sim-versus-real validation. What hardware would have to settle is listed

@@ -45,6 +45,9 @@ was measured under, not as a constraint on every future envelope.
 | REQ-14 | System responds to link loss safely | `SAFETY_CASE.md` §1, §5; `test_supervisor.py` |
 | REQ-15 | Kill-switch cuts motors immediately | `SAFETY_CASE.md` §3, §5 |
 | REQ-16 | All faults land in a safe state | `SAFETY_CASE.md` §1, §5; `docs/state_machine.md`. Asserted over all states × faults × `armed` in `test_supervisor.py` |
+| REQ-17 | The action-escalation subsystem shall alert only on temporally confirmed aggressive motion | `escalation_policy.py`; `test_escalation_policy.py`. Exercised on synthetic scenarios only; **no measured false-positive or false-negative rate exists** |
+| REQ-18 | An escalation alert shall drive warning lights and siren only, and shall never command flight | `test_isolation.py` asserts no flight topic, service or dependency exists in the package |
+| REQ-19 | The action-escalation subsystem shall accept no face, identity or biometric data | `pose_frame.py` whitelist (COCO-17 minus keypoints 0-4); `test_privacy_invariants.py` |
 
 
 ## Non-Goals
@@ -52,3 +55,9 @@ was measured under, not as a constraint on every future envelope.
 - No event camera
 - No multi-layer LiDAR
 - No custom depth math (use on-chip DepthAI pipeline)
+- **No facial recognition, face detection, person identification,
+  re-identification, persistent person tracking, biometric embeddings, or
+  gait/soft-biometric matching.** This is permanent, not a sequencing decision.
+  Recognising *who* someone is has been replaced by recognising aggressive
+  *motion*; see `docs/action_escalation.md`.
+- No raw-video recording by default anywhere in the stack
