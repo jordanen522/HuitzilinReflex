@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# HuitzilinReflex — Week 2 Day 1 preflight checklist
-# Run this before any Week 2 work to confirm the Week 1 baseline is still green.
+# HuitzilinReflex — SITL preflight checklist (Gazebo, ArduPilot SITL, heartbeat).
+# The hardware counterpart, run on the Pi, is scripts/preflight_hw.sh.
 set -e
 
-echo "=== HuitzilinReflex Week 2 Preflight ==="
+echo "=== HuitzilinReflex SITL preflight ==="
 echo ""
 
 echo "[1/4] ROS 2 Jazzy..."

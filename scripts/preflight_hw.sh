@@ -141,9 +141,11 @@ python3 -c "import gpiod" 2>/dev/null && ok "gpiod importable" \
 RP1="$(gpiodetect 2>/dev/null | grep pinctrl-rp1 || true)"
 [ -n "$RP1" ] && ok "header chip: $RP1" \
   || warn "no pinctrl-rp1 chip in gpiodetect - siren_chip auto will not find the header"
-for g in dialout spi gpio; do
-  id -nG | grep -qw "$g" && ok "user in group $g" \
-    || warn "user not in group $g - sudo usermod -aG $g $USER, then log in again"
+# Access, not group names: which group owns these differs between images.
+for dev in /dev/spidev0.0 /dev/gpiochip*; do
+  [ -e "$dev" ] || continue
+  [ -w "$dev" ] && ok "can write $dev" \
+    || warn "cannot write $dev - add your user to its group: ls -l $dev"
 done
 echo ""
 

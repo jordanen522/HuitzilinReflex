@@ -1,10 +1,10 @@
-# hw_frame.parm - real vehicle (MicoAir H743 V2 AIO), Week 5 S5-3.
+# hw_frame.parm - real vehicle (MicoAir H743 V2 AIO).
 #
 # Load this file rather than typing parameters by hand. Hand entry is how a
 # safety parameter goes missing, and half of these are safety parameters.
 #
 #   MAVProxy:  param load hw_frame.parm
-#   readback:  ./scripts/hw_param_readback.py
+#   readback:  ./scripts/hw_param_readback.py   (docs/HARDWARE.md stage 2)
 #
 # NO INLINE COMMENTS. MAVProxy breaks on them, and parm_file.parse_parm
 # raises on them so the test suite catches it before the board does.
@@ -39,3 +39,8 @@ BATT_FS_LOW_ACT 2
 # Kill-switch: motor emergency stop on its own dedicated momentary switch,
 # never a shared or mode switch (SAFETY_CASE.md section 3).
 RC7_OPTION 31
+
+# GCS failsafe. mav_bridge heartbeats as system 255 at 1 Hz. If every
+# system-255 heartbeat stops while armed (companion or router dead), the FC
+# returns home -- which falls back to LAND while there is no position estimate.
+FS_GCS_ENABLE 1

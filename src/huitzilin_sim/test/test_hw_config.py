@@ -231,11 +231,50 @@ def test_hw_dodge_floor_is_raised_off_the_sim_value():
     assert hw["dodge_floor_m"] > sim["dodge_floor_m"]
 
 
-def test_hw_bridge_uses_a_stable_serial_path():
-    """/dev/ttyACM0 renumbers when anything else enumerates first. The real id
-    is unknown until H5-2, so only the shape can be asserted."""
+ROUTER_CONF = SIM.parent.parent / "hardware" / "mavlink-router.conf"
+
+
+def _router_sections():
+    import configparser
+    cp = configparser.ConfigParser()
+    cp.read_string(ROUTER_CONF.read_text(encoding="utf-8"))
+    return cp
+
+
+def _udpin_port(connection):
+    assert connection.startswith("udpin:"), connection
+    return int(connection.rsplit(":", 1)[1])
+
+
+def test_router_feeds_the_ports_bridge_and_patrol_listen_on():
+    """On hardware the only thing between the FC and each client is the
+    router. A port that disagrees looks exactly like a dead flight controller
+    (TimeoutError: no heartbeat)."""
+    cp = _router_sections()
+    bridge = params(load_yaml(SIM / "params" / "bridge.yaml"), "mav_bridge")
+    patrol = params(load_yaml(SIM / "params" / "patrol.yaml"), "patrol")
+    assert int(cp["UdpEndpoint bridge"]["Port"]) == _udpin_port(bridge["connection"])
+    assert int(cp["UdpEndpoint patrol"]["Port"]) == _udpin_port(patrol["connection"])
+
+
+def test_hw_bridge_does_not_reopen_the_serial_port():
+    """The router owns the serial device. A connection key in the overlay
+    would make the bridge fight it for the port."""
     hw = params(load_yaml(SIM / "params" / "hw_bridge.yaml"), "mav_bridge")
-    assert hw["connection"].startswith("/dev/serial/by-id/")
+    assert "connection" not in hw
+
+
+def test_router_uses_a_stable_serial_path():
+    """/dev/ttyACM0 renumbers when anything else enumerates first. The real id
+    is unknown until the board is flashed, so only the shape is asserted;
+    preflight_hw.sh flags the CHANGE-ME placeholder on the Pi."""
+    device = _router_sections()["UartEndpoint fc"]["Device"]
+    assert device.startswith("/dev/serial/by-id/")
+
+
+def test_gcs_failsafe_is_on_so_a_dead_companion_is_noticed():
+    parms = parse_parm((SIM / "params" / "hw_frame.parm").read_text(encoding="utf-8"))
+    assert parms["FS_GCS_ENABLE"] != 0
 
 
 def test_supervisor_fence_matches_the_flight_controller_fence():
