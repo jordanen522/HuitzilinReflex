@@ -1,10 +1,10 @@
-"""The warning-light and siren interface for the escalation alert.
+"""The warning-light and siren interface for the guard alarm.
 
 There is no GPIO backend here, and its absence is a safety decision rather
 than unfinished work.
 
 huitzilin_perception's payload_node already owns the physical annunciator:
-WS2812B data on GPIO 18, siren on gpiochip0 line 17. Linux GPIO line requests
+WS2812B data on SPI0 (GPIO 10), siren on GPIO 17. Linux GPIO line requests
 are EXCLUSIVE. If this node started first and took line 17, payload_node would
 fail to acquire it -- so a discretionary body-motion warning would have
 silently disabled the projectile threat annunciator, which is the
@@ -35,7 +35,7 @@ from typing import Callable, List, Optional, Tuple
 
 HARDWARE_REFUSAL = (
     "backend 'hardware' refused: payload_node already owns the WS2812B data "
-    "line (GPIO 18) and the siren line (gpiochip0 line 17), and Linux GPIO "
+    "line (SPI0, GPIO 10) and the siren line (GPIO 17), and Linux GPIO "
     "line requests are exclusive. A second process taking those lines would "
     "silently prevent the projectile alarm from firing. Hardware alerting "
     "needs payload_node to gain a second, lower-priority input; see "

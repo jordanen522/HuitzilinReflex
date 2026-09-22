@@ -1,6 +1,6 @@
 """Payload backend selection and the alarm latch.
 
-Neither rpi_ws281x nor gpiod is installed on the development machines, so the
+Neither spidev nor gpiod is installed on the development machines, so the
 degradation path is not a corner case here -- it is the default path, and that
 is deliberate. SAFETY_CASE.md section 1 rates a GPIO/payload fault Low: log and
 continue. A dead LED must never take the flight stack with it.
@@ -29,19 +29,19 @@ def test_auto_degrades_to_a_null_backend_without_the_libraries():
     backend, reasons = select_backend("auto", importer=raising(ImportError))
     assert isinstance(backend, NullBackend)
     assert len(reasons) == 2
-    assert any("rpi_ws281x" in r for r in reasons)
+    assert any("spidev" in r for r in reasons)
     assert any("gpiod" in r for r in reasons)
 
 
 def test_a_permission_error_degrades_rather_than_crashes():
-    """rpi_ws281x imports fine and then fails on /dev/mem unprivileged."""
+    """spidev imports fine and then fails opening /dev/spidev0.0 without the spi group."""
     backend, reasons = select_backend("ws2812", importer=raising(PermissionError))
     assert isinstance(backend, NullBackend)
     assert reasons
 
 
 @pytest.mark.parametrize("exc", [ImportError, OSError, PermissionError,
-                                 AttributeError, ValueError])
+                                 AttributeError, ValueError, TypeError])
 def test_every_plausible_hardware_error_degrades(exc):
     backend, _ = select_backend("auto", importer=raising(exc))
     assert isinstance(backend, NullBackend)

@@ -234,8 +234,8 @@ Full frame table and TF tree: `docs/frames.md`.
   transitions PATROL to EVADE on `/payload/alarm`, and that is the only edge into
   EVADE in the state machine, so publishing there would let a presence alarm
   command evasive flight.
-- **There is no GPIO backend, deliberately.** `payload_node` already holds GPIO 18
-  and gpiochip0 line 17, and Linux GPIO line requests are exclusive, so a second
+- **There is no GPIO backend, deliberately.** `payload_node` already holds SPI0 (GPIO 10)
+  and GPIO 17, and Linux GPIO line requests are exclusive, so a second
   process taking them would silently stop the projectile alarm firing.
   `backend: hardware` logs a refusal and runs inert rather than raising.
 - **Scenario keyframes interpolate in straight lines, which is not anatomy.** A hand

@@ -49,9 +49,9 @@ hardware; effort concentrates on the perception + evasion loop, de-risked in sim
 
 **Payload — warning systems**
 
-- **LEDs:** BTF-Lighting WS2812B strip (5 V, 144 LED/m), driven from Pi GPIO via
-  `rpi_ws281x`. Pi data line is 3.3 V vs the strip's ~5 V logic — add a 3.3→5 V level
-  shifter (e.g. 74AHCT125).
+- **LEDs:** BTF-Lighting WS2812B strip (5 V, 144 LED/m), driven from the Pi 5 SPI0 MOSI
+  (GPIO 10) via `spidev` (`rpi_ws281x` does not support the Pi 5). Pi data line is 3.3 V
+  vs the strip's ~5 V logic — add a 3.3→5 V level shifter (e.g. 74AHCT125).
 - **Siren:** Tokatuker 2–12 V piezo (120 dB @ 12 V), on a Pi GPIO through a transistor
   circuit; toggled the moment a threat vector is computed.
 

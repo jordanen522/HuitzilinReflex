@@ -210,8 +210,8 @@ narrower rules above rather than being dropped.
 
 ### No GPIO backend, deliberately
 
-`payload_node` already owns the WS2812B data line (GPIO 18) and the siren line (gpiochip0
-line 17), and **Linux GPIO line requests are exclusive**. A second process taking those lines
+`payload_node` already owns the WS2812B data line (SPI0, GPIO 10) and the siren line (GPIO
+17), and **Linux GPIO line requests are exclusive**. A second process taking those lines
 would silently stop the *projectile* alarm from firing — a discretionary intrusion warning
 disabling the safety-critical annunciator. That is a priority inversion and is not acceptable
 in either direction of timing luck.

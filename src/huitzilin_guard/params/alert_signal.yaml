@@ -6,7 +6,7 @@
 #          value.
 #   none - inert, for a dev box that should not even log.
 #   hardware - REFUSED, deliberately. payload_node already owns the WS2812B
-#          data line (GPIO 18) and the siren line (gpiochip0 line 17), and
+#          data line (SPI0, GPIO 10) and the siren line (GPIO 17), and
 #          Linux GPIO line requests are exclusive, so a second process taking
 #          those lines would silently stop the PROJECTILE alarm from firing.
 #          Selecting it logs the refusal and runs inert rather than raising:

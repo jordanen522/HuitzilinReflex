@@ -33,13 +33,13 @@ def test_the_none_backend_is_inert_and_silent():
 
 
 def test_the_hardware_backend_is_refused_and_says_why():
-    """A second process on gpiochip0 line 17 would silently stop the
+    """A second process on GPIO 17 would silently stop the
     PROJECTILE alarm from firing. The refusal has to name that, because a
     generic 'not supported' would read as unfinished work."""
     sink, reasons = select_alert_sink("hardware", publish=lambda on: None)
     assert isinstance(sink, NullAlertSink)
     assert len(reasons) == 1
-    for fragment in ("payload_node", "gpiochip0", "17", "18", "exclusive"):
+    for fragment in ("payload_node", "GPIO 10", "GPIO 17", "exclusive"):
         assert fragment in reasons[0], fragment
     assert "projectile" in reasons[0].lower()
 

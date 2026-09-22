@@ -41,9 +41,9 @@ class PayloadNode(Node):
 
         self.declare_parameter("alarm_topic", "/payload/alarm")
         self.declare_parameter("backend", "auto")   # auto | ws2812 | gpio | none
-        self.declare_parameter("led_pin", 18)
+        self.declare_parameter("led_spi_bus", 0)
         self.declare_parameter("led_count", 8)
-        self.declare_parameter("siren_chip", "gpiochip0")
+        self.declare_parameter("siren_chip", "auto")
         self.declare_parameter("siren_line", 17)
         self.declare_parameter("min_on_s", 0.5)
         self.declare_parameter("max_on_s", 5.0)
@@ -55,7 +55,7 @@ class PayloadNode(Node):
 
         self._backend, reasons = select_backend(
             want=p("backend"),
-            led_pin=int(p("led_pin")), led_count=int(p("led_count")),
+            led_spi_bus=int(p("led_spi_bus")), led_count=int(p("led_count")),
             siren_chip=p("siren_chip"), siren_line=int(p("siren_line")))
         for why in reasons:
             # Warning, not error: this is the expected state on any machine

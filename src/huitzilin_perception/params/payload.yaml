@@ -17,15 +17,19 @@ payload:
     # none  - no hardware at all; use on a dev box to silence the warnings
     backend: "auto"
 
-    # WS2812B data line. GPIO18 is the PWM-capable pin rpi_ws281x wants.
-    # The strip needs 5 V logic, so the data line goes through a 3.3->5 V
-    # level shifter (74AHCT125) before DIN -- the Pi's 3.3 V is out of spec
-    # driving the strip directly.
-    led_pin: 18
+    # WS2812B data line on SPI0 MOSI = GPIO10 (header pin 19), driven through
+    # spidev, because rpi_ws281x does not support the Pi 5. Needs
+    # dtparam=spi=on in config.txt. The strip needs 5 V logic, so the data line
+    # goes through a 3.3->5 V level shifter (74AHCT125) before DIN -- the Pi's
+    # 3.3 V is out of spec driving the strip directly.
+    led_spi_bus: 0
     led_count: 8
 
     # Piezo siren through an NPN transistor switch, never straight off a pin.
-    siren_chip: "gpiochip0"
+    # GPIO17 = header pin 11. "auto" finds the chip labelled pinctrl-rp1 (the
+    # Pi 5 header), whose /dev/gpiochipN number differs between kernels; name
+    # a chip explicitly only if `gpiodetect` says auto picked the wrong one.
+    siren_chip: "auto"
     siren_line: 17
 
     # A lone True must still produce a signal a human can see and hear.
