@@ -114,7 +114,8 @@ class PatrolNode(Node):
         # velocity mode publishes through the bridge's /huitzilin/cmd_vel topic.
         self.declare_parameter("connection", "udp:127.0.0.1:14550")
         if self.mode == "position":
-            self.mav = MavBridge(self.get_parameter("connection").value)
+            self.mav = MavBridge(self.get_parameter("connection").value,
+                                 log=self.get_logger().info)
             self.mav.connect()
         else:
             self.cmd_pub = self.create_publisher(Twist, "/huitzilin/cmd_vel", 10)

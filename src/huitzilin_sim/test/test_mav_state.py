@@ -48,49 +48,45 @@ class _FakeMaster:
         return self._msgs.pop(0) if self._msgs else None
 
 
-class _ArmFakeMaster:
-    """A link whose vehicle never arms -- i.e. a refused arm.
+class _LinkFakeMaster:
+    """A live link that keeps answering with the same autopilot heartbeat.
 
-    Models the case that actually mattered: ArduPilot answers heartbeats
-    normally, so the link is plainly alive, while never setting the armed bit
-    because a pre-arm check is failing. pymavlink's motors_armed_wait() loops
-    on exactly that forever.
+    With armed=False it models the case that actually mattered: ArduPilot
+    answers heartbeats normally, so the link is plainly alive, while never
+    setting the armed bit because a pre-arm check is failing. pymavlink's
+    motors_armed_wait() loops on exactly that forever.
     """
 
     def __init__(self, armed=False):
         self._armed = armed
-        self.heartbeats = 0
+        self.polls = 0
         self.sent = []
+        self.heartbeats_sent = []
         self.mav = self
+        self._toggle = False
 
     def command_long_send(self, *args):
         self.sent.append(args)
 
-    def wait_heartbeat(self, timeout=None):
-        self.heartbeats += 1
-        return object()
+    def heartbeat_send(self, *args):
+        self.heartbeats_sent.append(args)
 
-    def motors_armed(self):
-        return 128 if self._armed else 0
+    def recv_match(self, blocking=False, **_):
+        # One heartbeat per drain, then an empty socket.
+        self._toggle = not self._toggle
+        if not self._toggle:
+            return None
+        self.polls += 1
+        return _hb(base_mode=CUSTOM_MODE | (ARMED_FLAG if self._armed else 0))
 
 
 def _arm_bridge(armed=False):
-    b = object.__new__(MavBridge)
-    b._state = {}
-    b.master = _ArmFakeMaster(armed=armed)
-    b.target_system = AUTOPILOT_SYS
-    b.target_component = 1
-    return b
+    return MavBridge.offline(_LinkFakeMaster(armed=armed), AUTOPILOT_SYS)
 
 
 def _bridge(msgs, target_system=AUTOPILOT_SYS):
     """A MavBridge without a live link. __init__ would open a real socket."""
-    b = object.__new__(MavBridge)
-    b._state = {}
-    b.master = _FakeMaster(msgs)
-    b.target_system = target_system
-    b.target_component = 1
-    return b
+    return MavBridge.offline(_FakeMaster(msgs), target_system)
 
 
 def _hb(src=AUTOPILOT_SYS, base_mode=CUSTOM_MODE, system_status=MAV_STATE_ACTIVE,
@@ -206,18 +202,14 @@ def test_absent_telemetry_stays_absent():
 # arm: the bound, and the command it actually sends
 
 def test_a_refused_arm_times_out_instead_of_blocking_forever():
-    """The whole point of T3.
-
-    _srv_arm calls this from a service callback on a single-threaded executor,
-    so an unbounded wait does not just fail to arm -- it stops odom,
-    /huitzilin/state and the setpoint stream for the life of the process.
-    """
+    """An unbounded wait does not just fail to arm -- it holds the service
+    thread for the life of the process."""
     b = _arm_bridge(armed=False)
     t0 = time.monotonic()
     with pytest.raises(TimeoutError):
         b.arm(True, timeout=0.3)
     assert time.monotonic() - t0 < 5.0, "arm() did not honour its timeout"
-    assert b.master.heartbeats > 0, "never polled; the bound is vacuous"
+    assert b.master.polls > 0, "never polled; the bound is vacuous"
 
 
 def test_arm_returns_as_soon_as_the_vehicle_reports_armed():
@@ -241,3 +233,40 @@ def test_arm_never_sends_the_force_arm_magic_value():
     param2 = args[5]          # target_sys, target_comp, cmd, confirmation, p1, p2
     assert param2 == 0
     assert param2 != 21196
+
+
+# link health
+
+def test_fc_msgs_counts_only_the_autopilot():
+    """The node stops odom when this counter stops growing. A GCS or router
+    heartbeat must not keep a dead autopilot link looking alive."""
+    msgs = [_hb(), _hb(src=GCS_SYS, mav_type=MAV_TYPE_GCS),
+            _Msg("ATTITUDE", roll=0, pitch=0, yaw=0)]
+    assert _bridge(msgs).get_state()["fc_msgs"] == 2
+
+
+def test_fc_msgs_keeps_growing_across_drains():
+    b = _bridge([_hb(), _hb()])
+    b.get_state()
+    b.master._msgs.append(_hb())
+    assert b.get_state()["fc_msgs"] == 3
+
+
+def test_heartbeat_announces_an_onboard_controller():
+    """Not a GCS and not an autopilot: the flight controller must never mistake
+    the companion for a second vehicle."""
+    from pymavlink import mavutil
+    b = _arm_bridge()
+    b.send_heartbeat()
+    (args,) = b.master.heartbeats_sent
+    assert args[0] == mavutil.mavlink.MAV_TYPE_ONBOARD_CONTROLLER
+    assert args[1] == mavutil.mavlink.MAV_AUTOPILOT_INVALID
+
+
+def test_takeoff_confirms_from_shared_state_not_the_socket():
+    """takeoff() must not read the link itself -- that would steal the
+    ATTITUDE messages the telemetry thread needs. It polls get_state()."""
+    b = _arm_bridge()
+    b.master.recv_match = lambda blocking=False, **_: None
+    b._state.update(d=-2.0)
+    assert b.takeoff(2.0, timeout=1) is True

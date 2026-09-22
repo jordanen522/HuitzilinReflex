@@ -28,6 +28,15 @@ def test_position_round_trip():
     assert MavBridge.enu_to_ned(*MavBridge.ned_to_enu(n, e, d)) == (n, e, d)
 
 
+def test_position_axes_are_swapped_not_just_negated():
+    """A round trip cannot catch a bridge that forgot the North/East swap:
+    (x, y, -z) inverts itself just as well. Pin the absolute values."""
+    assert MavBridge.ned_to_enu(1.0, 0.0, 0.0) == (0.0, 1.0, -0.0)   # North -> +y
+    assert MavBridge.ned_to_enu(0.0, 1.0, 0.0) == (1.0, 0.0, -0.0)   # East  -> +x
+    assert MavBridge.ned_to_enu(0.0, 0.0, 1.0) == (0.0, 0.0, -1.0)   # Down  -> -z
+    assert MavBridge.enu_to_ned(0.0, 0.0, 2.0) == (0.0, 0.0, -2.0)   # +2 m = z -2
+
+
 def test_yaw_north():
     # NED yaw 0 = facing North = ENU +y
     fwd = _body_x_in_enu(0.0, 0.0, 0.0)

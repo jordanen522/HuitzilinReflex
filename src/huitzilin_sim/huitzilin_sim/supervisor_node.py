@@ -17,6 +17,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rcl_interfaces.srv import SetParameters
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
@@ -27,10 +28,10 @@ from std_srvs.srv import SetBool, Trigger
 from huitzilin_sim.clock_guard import ClockGuardError, install_clock_guard
 from huitzilin_sim.supervisor import (
     Limits,
-    Observation,
     State,
     edge_only,
     next_state,
+    observe,
     watched_topics,
 )
 
@@ -134,22 +135,8 @@ class SupervisorNode(Node):
         self._alarm_on = bool(msg.data)
 
     def _observe(self):
-        now = self._now_s()
-        n, e = self._fc.get("n"), self._fc.get("e")
-        radius = None if n is None or e is None else (n * n + e * e) ** 0.5
-        return Observation(
-            now_s=now,
-            armed=self._fc.get("armed"),
-            mode=self._fc.get("mode"),
-            alt_m=self._fc.get("alt"),
-            radius_m=radius,
-            batt_v=self._fc.get("batt_v"),
-            fc_failsafe=self._fc.get("fc_failsafe"),
-            landed=self._fc.get("armed") is False,
-            alarm_on=self._alarm_on,
-            state_age_s=now - self._entered_s,
-            ages={k: now - t for k, t in self._last.items()},
-        )
+        return observe(self._fc, self._alarm_on, self._now_s(),
+                       self._entered_s, self._last)
 
     # the tick
 
@@ -241,7 +228,7 @@ def main():
         rclpy.spin(node)
     except ClockGuardError:
         clock_failed = True
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

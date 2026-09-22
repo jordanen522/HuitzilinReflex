@@ -137,6 +137,34 @@ class Decision:
     start_patrol: Optional[bool] = None
 
 
+def observe(fc: Mapping, alarm_on: bool, now_s: float, entered_s: float,
+            last: Mapping[str, float]) -> Observation:
+    """Build an Observation from the bridge's /huitzilin/state JSON.
+
+    `arm_requested` follows the flight controller's own armed flag, however
+    the arm happened (the /huitzilin/arm service, an RC switch, a GCS). It used
+    to be left at its default, and nothing else ever set it outside the tests,
+    so the live node never left DISARMED -- where faults are not checked --
+    and none of the fault responses below ever ran on a real stack.
+    """
+    n, e = fc.get("n"), fc.get("e")
+    armed = fc.get("armed")
+    return Observation(
+        now_s=now_s,
+        armed=armed,
+        mode=fc.get("mode"),
+        alt_m=fc.get("alt"),
+        radius_m=None if n is None or e is None else (n * n + e * e) ** 0.5,
+        batt_v=fc.get("batt_v"),
+        fc_failsafe=fc.get("fc_failsafe"),
+        landed=armed is False,
+        arm_requested=armed is True,
+        alarm_on=alarm_on,
+        state_age_s=now_s - entered_s,
+        ages={k: now_s - t for k, t in last.items()},
+    )
+
+
 def _age(obs: Observation, key: str) -> float:
     """A missing topic reads as infinitely stale, never as fresh."""
     v = obs.ages.get(key)

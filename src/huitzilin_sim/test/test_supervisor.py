@@ -21,6 +21,7 @@ from huitzilin_sim.supervisor import (
     edge_only,
     fault_response,
     next_state,
+    observe,
     watched_topics,
 )
 
@@ -78,6 +79,41 @@ def with_fault(fault, **kw):
 def test_disarmed_to_arming_on_arm_request():
     assert next_state(State.DISARMED, Observation(arm_requested=True),
                       LIM).state is State.ARMING
+
+
+def test_an_armed_flight_controller_takes_the_machine_out_of_disarmed():
+    """The live node builds its Observation with observe(). Nothing used to
+    set arm_requested there, so the node sat in DISARMED -- where no fault is
+    checked -- for the life of the process."""
+    obs = observe({"armed": True, "mode": "GUIDED"}, False, 10.0, 0.0, {})
+    assert obs.arm_requested is True
+    assert next_state(State.DISARMED, obs, LIM).state is State.ARMING
+
+
+def test_a_disarmed_flight_controller_stays_disarmed():
+    for fc in ({}, {"armed": False}):
+        obs = observe(fc, False, 10.0, 0.0, {})
+        assert obs.arm_requested is False
+        assert next_state(State.DISARMED, obs, LIM).state is State.DISARMED
+
+
+def test_observe_derives_radius_ages_and_landed():
+    obs = observe({"n": 3.0, "e": 4.0, "alt": 2.0, "armed": False},
+                  True, 10.0, 7.5, {"odom": 9.5})
+    assert obs.radius_m == 5.0
+    assert obs.alt_m == 2.0
+    assert obs.state_age_s == 2.5
+    assert obs.ages == {"odom": 0.5}
+    assert obs.landed is True and obs.alarm_on is True
+
+
+def test_a_stale_link_faults_once_armed_via_observe():
+    """End to end through observe(): armed, odom 5 s old -> LINK_LOSS."""
+    obs = observe({"armed": True, "alt": 2.0}, False, 10.0, 0.0,
+                  {"odom": 5.0, "patrol_state": 10.0, "cloud": 10.0})
+    d = next_state(State.PATROL, obs, LIM)
+    assert d.state is State.FAILSAFE
+    assert d.fault is Fault.LINK_LOSS
 
 
 def test_arming_to_takeoff_once_armed():

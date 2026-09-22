@@ -39,13 +39,9 @@ class _FakeMav:
 
 def _bridge():
     """A MavBridge without a live link; __init__ would open a real socket."""
-    b = object.__new__(MavBridge)
-    b._state = {}
-    b.master = type("M", (), {})()
-    b.master.mav = _FakeMav()
-    b.target_system = 1
-    b.target_component = 1
-    return b
+    master = type("M", (), {})()
+    master.mav = _FakeMav()
+    return MavBridge.offline(master, target_system=1)
 
 
 # the masks themselves

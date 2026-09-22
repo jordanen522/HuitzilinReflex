@@ -13,6 +13,7 @@ to a logging no-op rather than propagating. A dead LED must not end a flight.
 import sys
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Bool
@@ -113,7 +114,7 @@ def main():
         rclpy.spin(node)
     except ClockGuardError:
         clock_failed = True
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

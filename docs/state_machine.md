@@ -19,7 +19,7 @@ State and fault names below are the `State` / `Fault` enum members in
 
 | From | Trigger | To |
 |---|---|---|
-| DISARMED | Arm command received, pre-arm checks pass | ARMING |
+| DISARMED | Flight controller reports armed (service, RC or GCS) | ARMING |
 | ARMING | Armed successfully | TAKEOFF |
 | TAKEOFF | Target altitude reached | PATROL |
 | PATROL | Threat detected | EVADE |
@@ -36,7 +36,14 @@ State and fault names below are the `State` / `Fault` enum members in
 `COMPANION_LOSS`, `FC_FAILSAFE`, `SETPOINT_STALL`, `UNKNOWN` — to `FAILSAFE`.
 
 `detect_faults()` returns nothing while disarmed: on the bench most watched topics are
-legitimately quiet. A watch whose timeout is `0.0` is skipped entirely, which is the only
+legitimately quiet. The supervisor leaves DISARMED on the flight controller's own armed
+flag (`observe()` in `supervisor.py`), however the arm happened, and from ARMING it
+requests GUIDED. Do not run it for a manual RC flight: it will switch the mode.
+
+Link loss is seen as odom going stale: `mav_bridge` stops publishing odom once the
+autopilot has been silent for `fc_timeout_s` (1.0 s), while `/huitzilin/state` keeps
+flowing with `fc_age_s` so the loss is visible. The bridge also heartbeats at 1 Hz, which
+is what lets the flight controller's own GCS failsafe notice a dead companion. A watch whose timeout is `0.0` is skipped entirely, which is the only
 way to say "this configuration does not publish that topic".
 
 Which fault each row answers, and why no fault path reaches EVADE: `docs/SAFETY_CASE.md` §2.
