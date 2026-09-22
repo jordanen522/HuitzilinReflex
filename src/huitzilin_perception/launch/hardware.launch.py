@@ -25,6 +25,7 @@ RC flying, pass with_supervisor:=false.
 """
 
 import os
+import time
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
@@ -94,7 +95,7 @@ def generate_launch_description():
                               default_value=sim_params("patrol.yaml")),
         DeclareLaunchArgument("telemetry_csv",
                               default_value=os.path.expanduser(
-                                  "~/huitzilin_logs/telemetry.csv"),
+                                  time.strftime("~/huitzilin_logs/telemetry_%Y%m%d_%H%M%S.csv")),
                               description="where telemetry_logger writes"),
         # Nominal mount from docs/frames.md, not yet measured on the airframe.
         DeclareLaunchArgument("camera_x", default_value="0.10"),

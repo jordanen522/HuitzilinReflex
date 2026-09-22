@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Log odom + cmd_vel to a timestamped CSV for quick plotting (proof artifact)."""
 import csv
+import os
 import time
 
 import sys
@@ -19,8 +20,12 @@ class TelemetryLogger(Node):
 
     def __init__(self):
         super().__init__("telemetry_logger")
-        self.declare_parameter("csv_path", f"week2_telemetry_{int(time.time())}.csv")
-        path = self.get_parameter("csv_path").value
+        self.declare_parameter("csv_path", f"telemetry_{int(time.time())}.csv")
+        path = os.path.expanduser(self.get_parameter("csv_path").value)
+        # A launch that points at a log directory must not die because the
+        # directory does not exist yet on a freshly imaged Pi.
+        if os.path.dirname(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
         self.f = open(path, "w", newline="")
         self.w = csv.writer(self.f)
         self.w.writerow(["t", "x", "y", "z", "vx", "vy", "vz",
