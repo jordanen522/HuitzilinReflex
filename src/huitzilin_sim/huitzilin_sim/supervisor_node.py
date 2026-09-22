@@ -147,10 +147,15 @@ class SupervisorNode(Node):
         if decision.state is not previous:
             self._state = decision.state
             self._entered_s = self._now_s()
-            log = (self.get_logger().error if decision.fault
-                   else self.get_logger().info)
-            log("%s -> %s (%s)" % (previous.value, decision.state.value,
-                                   decision.reason))
+            line = "%s -> %s (%s)" % (previous.value, decision.state.value,
+                                      decision.reason)
+            # Two call sites on purpose: rclpy raises ValueError if one call
+            # site logs at two severities, which killed the node on the first
+            # fault it ever saw -- the one transition that matters most.
+            if decision.fault:
+                self.get_logger().error(line)
+            else:
+                self.get_logger().info(line)
 
         if decision.start_patrol is not None:
             self._call_patrol(decision.start_patrol)
