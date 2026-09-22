@@ -1,4 +1,4 @@
-"""week7_rendered.launch.py — the evasion stack on a RENDERED long-range camera.
+"""rendered_lane.launch.py — the evasion stack on a RENDERED long-range camera.
 
     gz depth camera -> ros_gz_bridge -> depth_noise -> detector -> evasion
 
@@ -9,7 +9,7 @@ actually saw. The other three each cut the chain somewhere:
                     0.176 deg ball at 26 m -- 4 returns, one under
                     cluster_min_points -- which is the mechanism behind its
                     ~3.4 m practical reach.
-    week6_oracle    /threat/centroid ASSERTED from Gazebo truth. No perception.
+    oracle_lane.launch.py    /threat/centroid ASSERTED from Gazebo truth. No perception.
     week6_synthetic FABRICATED ball-only cloud into the real detector. Real
                     clustering, but no scene and no rendered geometry, so it
                     can say nothing about false positives.
@@ -55,7 +55,7 @@ this file can fly exactly that by pointing at the baseline world and camera:
 huitzilin_perception/worlds/huitzilin_runway.sdf
 
   # Terminal 3:
-  ros2 launch huitzilin_perception week7_rendered.launch.py \\
+  ros2 launch huitzilin_perception rendered_lane.launch.py \\
       with_patrol:=true \\
       gz_cloud_topic:=/gz/oak/depth/points \\
       sigma_ref_m:=0.0 \\
@@ -76,7 +76,7 @@ noise and ROI -- so it is a separate measurement, never a continuation:
 huitzilin_perception/worlds/huitzilin_runway_ar0234.sdf
 
   # Terminal 3 (all defaults are already the long-range arm):
-  ros2 launch huitzilin_perception week7_rendered.launch.py with_patrol:=true
+  ros2 launch huitzilin_perception rendered_lane.launch.py with_patrol:=true
 
   # Any escape or save measurement: HOVER. Patrol cannot deliver a hit at range.
   DRONE_MODEL=iris_ar0234 EXTRA_ARGS="-p hover_mode:=true" \\
@@ -107,7 +107,7 @@ is a confound in a save-rate measurement. This lane does publish /oak/points,
 so its cloud watch would in fact be satisfied -- it is pinned anyway so the
 lanes differ only where they are meant to.
 
-This file carries its OWN clock bridge: week2_sitl.launch.py has none, and
+This file carries its OWN clock bridge: sitl.launch.py has none, and
 without one every use_sim_time node here dies on the clock guard after its 5 s
 grace.
 """
@@ -215,7 +215,7 @@ def generate_launch_description() -> LaunchDescription:
 
     flight_stack = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(sim_pkg, "launch", "week2_sitl.launch.py")),
+            os.path.join(sim_pkg, "launch", "sitl.launch.py")),
         launch_arguments={
             "patrol_params": LaunchConfiguration("patrol_params"),
             "use_sim_time": use_sim_time,
@@ -239,14 +239,14 @@ def generate_launch_description() -> LaunchDescription:
 
 
 def _camera_tf() -> list:
-    """base_link -> camera_link -> camera_optical_frame, as week3_perception.
+    """base_link -> camera_link -> camera_optical_frame, as perception.launch.py.
 
     The detector needs this chain twice: to re-express the cloud in the fixed
     odom frame before differencing, and to transform the centroid back into
     base_link before publishing. Without it the detector silently drops to
     camera-frame differencing, which floods under patrol motion — the cause of
     the Week 3 60 %-recall regression. Same values and same optical rotation as
-    week3_perception.launch.py: this lane must not invent a second camera pose.
+    perception.launch.py: this lane must not invent a second camera pose.
     """
     return [
         Node(
@@ -282,7 +282,7 @@ def _cloud_bridge(context):
     OpaqueFunction because the gz topic is a launch argument and the bridge
     spec string has to be built from it.
 
-    Only the cloud is bridged. week3_perception also bridges the depth image
+    Only the cloud is bridged. perception.launch.py also bridges the depth image
     and camera_info; neither is read by anything in this chain, and at 800x650
     they are pure load on a box that renders depth at ~0.33 RTF.
     """

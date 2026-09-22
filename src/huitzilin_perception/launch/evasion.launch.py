@@ -1,14 +1,14 @@
 """
-week4_evasion.launch.py — HuitzilinReflex Week 4.
+evasion.launch.py — perception plus the evasion node, in SITL.
 
-One-command bring-up of the Week 4 evasion stack:
+One-command bring-up of the evasion stack:
   1. Week 3 live perception stack (bridges, TF, detector) — included
   2. evasion node (Kalman + dodge trigger)
   3. Gazebo dynamic-pose bridge -> /gz/dynamic_poses (battery ground truth)
 
 USAGE (Dell, after world + SITL are up — docs/dodge_battery_runbook.md)
 ---------------------------------------------------------------------
-  ros2 launch huitzilin_perception week4_evasion.launch.py with_patrol:=true
+  ros2 launch huitzilin_perception evasion.launch.py with_patrol:=true
 
   # then, in another terminal:
   ./scripts/run_dodge_battery.sh          # battery
@@ -65,7 +65,7 @@ def generate_launch_description() -> LaunchDescription:
                 get_package_share_directory("huitzilin_sim"),
                 "params", "week4_patrol.yaml"),
         ),
-        # Forwarded to week3_perception so a diagnostic run (debug_funnel,
+        # Forwarded to perception.launch.py so a diagnostic run (debug_funnel,
         # debug_dump_dir) can point the detector at a throwaway yaml instead of
         # editing the shipped one. --symlink-install makes the installed
         # detector.yaml a symlink back into src/, so "just edit the build copy"
@@ -78,7 +78,7 @@ def generate_launch_description() -> LaunchDescription:
 
     week3 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg, "launch", "week3_perception.launch.py")),
+            os.path.join(pkg, "launch", "perception.launch.py")),
         launch_arguments={
             "mode": "live",
             "with_patrol": LaunchConfiguration("with_patrol"),

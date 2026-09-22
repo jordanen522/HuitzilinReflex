@@ -51,7 +51,7 @@ def evaluate_clock(use_sim_time: bool,
                    grace_s: float = DEFAULT_GRACE_S) -> ClockCheck:
     """Classify a node's clock situation. Pure; the caller decides what to do.
 
-    The frozen-at-zero row is not hypothetical: week3_perception.launch.py
+    The frozen-at-zero row is not hypothetical: perception.launch.py
     documents a stack that blocks on a /clock which never advances, which is
     indistinguishable from a missing one as far as message stamps are concerned
     but very much distinguishable when you are trying to work out why.

@@ -14,7 +14,7 @@ cd ~/huitzilin_ws && colcon build --symlink-install   # once per checkout
 ./scripts/week3_world.sh
 # T2 — SITL: the standard fan-out, see CLAUDE.md
 # T3 — perception stack
-ros2 launch huitzilin_perception week3_perception.launch.py with_patrol:=true
+ros2 launch huitzilin_perception perception.launch.py with_patrol:=true
 # T4 — arm → takeoff → patrol (odom-polled climb)
 ./scripts/week3_flyup.sh
 ```
@@ -117,11 +117,11 @@ Budget a generous poll timeout (60 s+) rather than tuning per scenario, and give
 *pre*-poll delay margin too: a scenario with startup latency (T13's altitude check) can
 race `capture_scenario.sh`'s own label write, and a driver that sleeps a fixed amount
 first falls through to an un-anchored sleep. `wrench bridge never connected -- falling
-back to the CLI throw` is expected and benign on `week3_perception.launch.py`.
+back to the CLI throw` is expected and benign on `perception.launch.py`.
 
 ### The CLI throw path is canonical for this library
 
-Do not wire `week4_evasion.launch.py`'s wrench bridge into `week3_perception.launch.py` to
+Do not wire `evasion.launch.py`'s wrench bridge into `perception.launch.py` to
 get the faster same-physics-step `WrenchThrower`. The original 17 bags predate
 `WrenchThrower` (`37e0d34`) and use the CLI path by construction; the shared mechanism is
 what keeps the splits comparable. The CLI throw restores gravity ~0.25 s late and flattens

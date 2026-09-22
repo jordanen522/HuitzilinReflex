@@ -507,7 +507,7 @@ class DodgeBatteryNode(Node):
             self.get_logger().error(
                 "wrench bridge never connected — every throw would leave the "
                 "ball hanging motionless. Start the stack with "
-                "week4_evasion.launch.py (it launches wrench_bridge).")
+                "evasion.launch.py (it launches wrench_bridge).")
             return 1
         if not self._battery_f.exists():
             self.get_logger().error(f"battery config not found: {self._battery_f}")
@@ -542,7 +542,7 @@ class DodgeBatteryNode(Node):
         if not self._wait_wall_for(lambda: self._pose_stream_seen,
                                    POSE_STREAM_TIMEOUT_WALL_S):
             self.get_logger().error(
-                "no /gz/dynamic_poses — launch week4_evasion.launch.py "
+                "no /gz/dynamic_poses — launch evasion.launch.py "
                 "(it bridges /world/<world>/dynamic_pose/info)")
             return 1
 

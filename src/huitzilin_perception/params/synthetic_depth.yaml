@@ -55,7 +55,7 @@ synthetic_depth_publisher:
     ball_name_prefixes: ["ball_", "projectile_"]
 
     # base_link -> camera_link, and it MUST equal the static TF the launch file
-    # publishes (week6_synthetic_depth.launch.py drives both from the same
+    # publishes (synthetic_depth_lane.launch.py drives both from the same
     # camera_link_x/y/z arguments). detector_node transforms its centroid back
     # through that chain, so a mismatch leaves a fixed bias the oracle lane does
     # not have.
@@ -141,7 +141,7 @@ synthetic_depth_publisher:
     # A MIRROR of the detector's diff_threshold_m. This node does no
     # differencing; it uses this for exactly one thing — computing the floor
     # above and printing it as a startup WARN, so that failure cannot be met in
-    # silence. week6_synthetic_depth.launch.py overrides it from the detector
+    # silence. synthetic_depth_lane.launch.py overrides it from the detector
     # params file it is actually launching, so the two cannot drift apart.
     bg_diff_threshold_m: 0.10
 

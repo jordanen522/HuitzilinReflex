@@ -1,7 +1,7 @@
-"""week6_synthetic_depth.launch.py — the evasion stack with the REAL detector
+"""synthetic_depth_lane.launch.py — the evasion stack with the REAL detector
 fed by a synthetic long-range cloud.
 
-Same chain as week6_oracle.launch.py with ONE substitution: instead of
+Same chain as oracle_lane.launch.py with ONE substitution: instead of
 oracle_detector asserting /threat/centroid from Gazebo truth, this file starts
 synthetic_depth_publisher (truth -> /oak/points) plus the real, unmodified
 detector (cloud -> /threat/centroid). Everything after /threat/centroid is
@@ -18,13 +18,13 @@ INPUT, and no number from this lane is evidence that a real camera sees 26 m.
 WHY IT IS A SEPARATE FILE, and what it must never include
 ---------------------------------------------------------
 Two publishers on /threat/centroid feed the tracker two uncorrelated views of
-one ball. This file therefore never includes week3_perception (which would
+one ball. This file therefore never includes perception.launch.py (which would
 start a SECOND detector and the ros_gz depth bridges alongside it) and never
 starts oracle_detector. Making that structural rather than a boolean means the
 mistake cannot be made halfway. Never launch this alongside
-week6_oracle.launch.py either.
+oracle_lane.launch.py either.
 
-It does start the two static TF publishers week3_perception owns
+It does start the two static TF publishers perception.launch.py owns
 (base_link -> camera_link -> camera_optical_frame), because the detector needs
 that chain twice: to re-express the cloud in the fixed odom frame before
 differencing, and to transform the centroid back into base_link before
@@ -38,13 +38,13 @@ fact be satisfied — but it is pinned anyway so this lane and the oracle lane
 differ ONLY in the detection path. An extra state machine that can command
 LOITER/RTL is a confound in a save-rate measurement, not a feature of one.
 
-This file carries its OWN clock bridge: week2_sitl.launch.py has none — in the
-Week 3/4 path week3_perception owns it — and without one every use_sim_time
+This file carries its OWN clock bridge: sitl.launch.py has none — in the
+Week 3/4 path perception.launch.py owns it — and without one every use_sim_time
 node here dies on the clock guard after its 5 s grace.
 
 USAGE (Dell, after the world + SITL are up — docs/dodge_battery_runbook.md)
 --------------------------------------------------------------------------
-  ros2 launch huitzilin_perception week6_synthetic_depth.launch.py \
+  ros2 launch huitzilin_perception synthetic_depth_lane.launch.py \
       with_patrol:=true detection_range_m:=26.0
 
   # Any escape or save measurement: HOVER. Patrol cannot deliver a hit at range.
@@ -52,7 +52,7 @@ USAGE (Dell, after the world + SITL are up — docs/dodge_battery_runbook.md)
 
   # Fidelity gate FIRST — see below. It needs all THREE sensor axes, not just
   # detection_range_m:
-  ros2 launch huitzilin_perception week6_synthetic_depth.launch.py \
+  ros2 launch huitzilin_perception synthetic_depth_lane.launch.py \
       with_patrol:=true detection_range_m:=3.4 sensor_rate_hz:=15.0 \
       sensor_params:=$(ros2 pkg prefix huitzilin_perception)/share/\
 huitzilin_perception/params/synthetic_depth_oakd_gate.yaml
@@ -187,12 +187,12 @@ def generate_launch_description() -> LaunchDescription:
 
     flight_stack = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(sim_pkg, "launch", "week2_sitl.launch.py")),
+            os.path.join(sim_pkg, "launch", "sitl.launch.py")),
         launch_arguments={
             "patrol_params": LaunchConfiguration("patrol_params"),
             "use_sim_time": use_sim_time,
             # Pinned off, not merely defaulted off — see the module docstring.
-            # week2_sitl declares with_supervisor, so leaving it unset would let
+            # sitl.launch.py declares with_supervisor, so leaving it unset would let
             # it be passed through from this file's command line.
             "with_supervisor": "false",
         }.items(),
@@ -212,11 +212,11 @@ def generate_launch_description() -> LaunchDescription:
 
 
 def _camera_tf() -> list:
-    """base_link -> camera_link -> camera_optical_frame, as week3_perception.
+    """base_link -> camera_link -> camera_optical_frame, as perception.launch.py.
 
     The detector needs this chain to difference in the fixed odom frame and to
     transform its centroid back into base_link. Same values and same optical
-    rotation (roll=-pi/2, yaw=-pi/2) as week3_perception.launch.py — this lane
+    rotation (roll=-pi/2, yaw=-pi/2) as perception.launch.py — this lane
     must not invent a second camera pose.
     """
     return [

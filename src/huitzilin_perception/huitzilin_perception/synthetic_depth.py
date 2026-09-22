@@ -88,7 +88,7 @@ def required_roi_max_range_m(
     Grows faster than the reach because sigma goes as z^2: 26 m needs 27.2 m of
     ceiling, 30 m needs 31.6 m. Raising detection_range_m without raising the
     detector's ceiling delivers a shorter sensor than the cell's label;
-    `week6_synthetic_depth.launch.py` refuses to start on it.
+    `synthetic_depth_lane.launch.py` refuses to start on it.
     """
     return float(detection_range_m) + n_sigma * float(
         depth_sigma_m(detection_range_m, sigma_ref_m, ref_range_m))

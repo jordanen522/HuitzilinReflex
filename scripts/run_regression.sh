@@ -72,7 +72,7 @@ trap cleanup EXIT
 
 # Static TF chain base_link -> camera_link -> camera_optical_frame.
 # The bags do NOT record /tf_static, and this harness bypasses
-# week3_perception.launch.py (which normally publishes these), so without them
+# perception.launch.py (which normally publishes these), so without them
 # the detector's final transform-to-base_link fails on EVERY frame and no
 # centroid is ever published -> 0% recall no matter what the thresholds are.
 # Offsets must match the launch-file defaults (camera_link_x/y/z, optical rot).

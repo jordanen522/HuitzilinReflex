@@ -521,7 +521,7 @@ scenarios:
   #
   # DIFFERENT SENSOR, DIFFERENT WORLD, DIFFERENT PREFIX. Captured on
   # worlds/huitzilin_runway_ar0234.sdf against the AR0234 + 10 mm M12
-  # (+/-13.5 x 11.0 deg, 0.2-35 m clip) through week7_rendered.launch.py on
+  # (+/-13.5 x 11.0 deg, 0.2-35 m clip) through rendered_lane.launch.py on
   # params/rendered_detector.yaml. These are NOT Week 3 data and must not be
   # named as though they were:
   #     BAG_PREFIX=heldout_ ./scripts/capture_scenario.sh H01

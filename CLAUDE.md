@@ -35,7 +35,7 @@ sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON \
   --add-param-file=$HOME/huitzilin_ws/src/huitzilin_sim/params/sitl_frame.parm \
   --out udp:127.0.0.1:14551 --out udp:127.0.0.1:14552 --out udp:127.0.0.1:14553
 
-ros2 launch huitzilin_sim week2_sitl.launch.py
+ros2 launch huitzilin_sim sitl.launch.py
 ```
 
 After takeoff — service types matter, all three exactly as below:
@@ -47,10 +47,10 @@ ros2 service call /huitzilin/start_patrol std_srvs/srv/SetBool '{data: true}'
 
 Optional nodes (neither runs by default):
 ```bash
-# The supervisor needs perception: it watches /oak/points, which week2_sitl
-# does not publish. Started from a bare week2_sitl it sits in permanent
+# The supervisor needs perception: it watches /oak/points, which sitl.launch.py
+# does not publish. Started from a bare sitl.launch.py it sits in permanent
 # SENSOR_DROPOUT. Use a week3/week4 entry point — both forward the argument:
-ros2 launch huitzilin_perception week4_evasion.launch.py \
+ros2 launch huitzilin_perception evasion.launch.py \
   with_patrol:=true with_supervisor:=true
 
 ros2 run huitzilin_perception payload --ros-args \
@@ -73,7 +73,7 @@ To fly the box as well as guard it, point patrol at the same config. The five
 `box_*` values are repeated under both node names in `guard.yaml` and
 `test_guard_params.py` fails the build if they disagree:
 ```bash
-ros2 launch huitzilin_sim week2_sitl.launch.py \
+ros2 launch huitzilin_sim sitl.launch.py \
   patrol_params:=src/huitzilin_guard/params/guard.yaml
 ```
 
@@ -88,7 +88,7 @@ The oracle lane — a synthetic far-range sensor, used for every result in `docs
 # This command pins reach only. The other two axes stay at their yaml
 # defaults silently (params/oracle_detector.yaml: rate_hz 14.5,
 # fov_half_angle_deg 45.0, detection_range_m 12.0) -- pin and quote all three.
-ros2 launch huitzilin_perception week6_oracle.launch.py \
+ros2 launch huitzilin_perception oracle_lane.launch.py \
   with_patrol:=true detection_range_m:=26.0
 
 # Battery modes: week6 (oracle) | week6depth (real detector) |
@@ -144,7 +144,7 @@ Full frame table and TF tree: `docs/frames.md`.
 - **The bag library is saturated** (recall 100%). It cannot referee threshold changes — a change that helps or hurts will read as no-change.
 - **Bags recorded before `b0eedd5` lack attitude in `/huitzilin/odom`** — the detector falls back to camera-frame differencing. Never score against pre-`b0eedd5` bags.
 - **Never derive velocity from `/gz/dynamic_poses` arrival times** — arrival is not emission; use the pose stamps.
-- **`oracle_detector` and `detector` must never run together.** Both publish `/threat/centroid`, so the tracker would get two uncorrelated views of one ball. `week6_oracle.launch.py` never includes `week3_perception`, and pins `with_supervisor:=false` because it publishes no `/oak/points` to watch.
+- **`oracle_detector` and `detector` must never run together.** Both publish `/threat/centroid`, so the tracker would get two uncorrelated views of one ball. `oracle_lane.launch.py` never includes `perception.launch.py`, and pins `with_supervisor:=false` because it publishes no `/oak/points` to watch.
 - **A sensor is reach, sector AND rate.** Quoting only `detection_range_m` leaves `rate_hz` and `fov_half_angle_deg` (or the depth lane's `fov_half_*_deg` + `image_*_px`) at defaults, which silently describes a different instrument: ±13.5°/60 Hz optics against a ±33.65°/15 Hz reference is 16.6% of the solid angle and ~1.6 clouds/throw against ~2.8, versus `min_track_updates: 3`. Match all three axes, not just rate.
 - **`detection_range_m` is an INPUT, not a result**, and it is read once at startup. `oracle_detector_node.py.__init__` reads it into an attribute and installs no parameter callback — `ros2 param set` is accepted and ignored. Every range change needs a full stack restart. Pass it as a float: `detection_range_m:=5` is inferred as an integer and rejected.
 - **An oracle cell must raise `offset_forward_m` with its range** — `offset_forward_m ≥ detection_range_m + 8.5` at 20 m/s, or the ball enters the gate from inside it and the cell delivers a shorter sensor than its label. Verify per run: `first_det_range_m` in the CSV must match the launched `detection_range_m` to ~0.2 m.

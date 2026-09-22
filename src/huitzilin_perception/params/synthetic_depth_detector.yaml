@@ -165,7 +165,7 @@ detector:
     # Egomotion compensation
     # Requires odom with a valid orientation quaternion AND the
     # base_link -> camera_link -> camera_optical_frame static TF chain, which
-    # week6_synthetic_depth.launch.py publishes for exactly this reason. Without
+    # synthetic_depth_lane.launch.py publishes for exactly this reason. Without
     # the chain the detector silently falls back to camera-frame differencing.
     compensate_egomotion: true
     odom_topic: "/huitzilin/odom"

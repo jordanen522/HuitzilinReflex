@@ -145,7 +145,7 @@ def test_the_guard_is_specific_to_this_lanes_noise_structure():
                  spans only ~5 px at 26 m, so the patch is STRETCHED rather
                  than displaced: 1.6 sigma peak-to-peak, hence 0.080+1.6*0.30.
 
-    week6_synthetic_depth.launch.py therefore does not call this guard, and
+    synthetic_depth_lane.launch.py therefore does not call this guard, and
     wiring it in there would make a measured lane's config fail a check written
     for a different error model -- where the "fix" would be editing a
     configuration after its results were already recorded.

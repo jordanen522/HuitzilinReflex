@@ -1,7 +1,7 @@
 """
-week3_perception.launch.py — HuitzilinReflex Week 3, W3-20.
+perception.launch.py — live perception stack on Gazebo depth.
 
-One-command bring-up of the full Week 3 perception stack:
+One-command bring-up of the perception stack:
   1. ros_gz_image bridge   — /gz/oak/depth → /oak/depth (sensor_msgs/Image)
   2. ros_gz_bridge         — /gz/oak/depth/points → /oak/points (PointCloud2)
                            — /gz/oak/depth/camera_info → /oak/camera_info
@@ -12,13 +12,13 @@ One-command bring-up of the full Week 3 perception stack:
 USAGE
 -----
   # Full stack (depth bridge + TF + detector):
-  ros2 launch huitzilin_perception week3_perception.launch.py
+  ros2 launch huitzilin_perception perception.launch.py
 
   # With optional patrol (add drone flight):
-  ros2 launch huitzilin_perception week3_perception.launch.py with_patrol:=true
+  ros2 launch huitzilin_perception perception.launch.py with_patrol:=true
 
   # Offline scoring only (detector + scorer, no Gazebo bridge):
-  ros2 launch huitzilin_perception week3_perception.launch.py mode:=score \
+  ros2 launch huitzilin_perception perception.launch.py mode:=score \
       bag_dir:=/data/huitzilin_bags split:=test
 
 MACHINE NOTE (from CLAUDE.md environment section)
@@ -62,16 +62,16 @@ def generate_launch_description() -> LaunchDescription:
                               description="live | score"),
         DeclareLaunchArgument("with_patrol", default_value="false",
                               description="Also launch the Week 2 patrol stack"),
-        # Passed straight through to week2_sitl so Week 4 can fly a longer loop
+        # Passed straight through to sitl.launch.py so Week 4 can fly a longer loop
         # (see huitzilin_sim/params/week4_patrol.yaml). Defaults to the 5 m
         # Week 2 demo square, so week3 on its own is unchanged.
         DeclareLaunchArgument(
             "patrol_params",
             default_value=os.path.join(pkg_sim, "params", "patrol.yaml")),
-        # Forwarded to week2_sitl. The supervisor watches /oak/points, which
-        # only this launch file publishes -- starting it from a bare week2_sitl
+        # Forwarded to sitl.launch.py. The supervisor watches /oak/points, which
+        # only this launch file publishes -- starting it from a bare sitl.launch.py
         # gives a permanent SENSOR_DROPOUT. Needs with_patrol:=true, because
-        # the supervisor node lives inside the week2_sitl include.
+        # the supervisor node lives inside the sitl.launch.py include.
         DeclareLaunchArgument("with_supervisor", default_value="false",
                               description="run supervisor_node (requires "
                                           "with_patrol:=true)"),
@@ -215,7 +215,7 @@ def generate_launch_description() -> LaunchDescription:
     # Optional: Week 2 patrol stack
     patrol_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_sim, "launch", "week2_sitl.launch.py")
+            os.path.join(pkg_sim, "launch", "sitl.launch.py")
         ),
         launch_arguments={
             "patrol_params": LaunchConfiguration("patrol_params"),
@@ -223,7 +223,7 @@ def generate_launch_description() -> LaunchDescription:
             # Must be forwarded explicitly. Without it the Week 2 flight nodes
             # fell back to their own default and ran on the wall clock while
             # everything else here ran on sim time, so stamps could not be
-            # joined across the two. week2_sitl now defaults to true on its
+            # joined across the two. sitl.launch.py now defaults to true on its
             # own, but this keeps use_sim_time:=false actually reaching them.
             "use_sim_time": LaunchConfiguration("use_sim_time"),
         }.items(),

@@ -1,4 +1,4 @@
-# Rendered battery for week7_rendered.launch.py — the 20 m/s question asked
+# Rendered battery for rendered_lane.launch.py — the 20 m/s question asked
 # through the whole real pipeline: /threat/centroid is computed by the unmodified
 # detector_node.py from a cloud a Gazebo depth camera actually rendered, with
 # depth_noise_node's modelled stereo error applied. Never run it alongside the
@@ -24,7 +24,7 @@
 #
 # Running it:
 #   # gate: baseline world, noise off, patrol
-#   ros2 launch huitzilin_perception week7_rendered.launch.py with_patrol:=true \
+#   ros2 launch huitzilin_perception rendered_lane.launch.py with_patrol:=true \
 #       gz_cloud_topic:=/gz/oak/depth/points sigma_ref_m:=0.0 \
 #       detector_params:=.../params/detector.yaml
 #   DRONE_MODEL=iris_depth ./scripts/run_dodge_battery.sh week7

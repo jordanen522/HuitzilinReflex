@@ -78,6 +78,6 @@ Bring-up commands, the service calls, and the traps that bite (`sitl_frame.parm`
 The full documentation index is the Documentation table in `README.md`.
 
 ## Acceptance Criteria
-- `ros2 launch huitzilin_sim week2_sitl.launch.py` + the three service calls fly a
+- `ros2 launch huitzilin_sim sitl.launch.py` + the three service calls fly a
   closed patrol loop with logged telemetry (`/huitzilin/odom` publishing throughout).
 - Perception: `/oak/points` stable at 15 Hz sim; `run_regression.sh … test` exits 0.

@@ -1,7 +1,7 @@
 """rendered_lane.py — configuration invariants for the rendered long-range lane.
 
 Pure python: no ROS, no rclpy, no launch. That is the whole reason it exists
-apart from week7_rendered.launch.py, which is where this logic naturally wants
+apart from rendered_lane.launch.py, which is where this logic naturally wants
 to live and where it cannot be tested. A launch file imports `launch` and
 `launch_ros`, so CI's ROS-free subset cannot import it at all, and a guard that
 no test can reach is not a guard -- it is a comment that raises.

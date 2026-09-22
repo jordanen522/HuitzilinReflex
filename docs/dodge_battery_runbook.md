@@ -12,7 +12,7 @@ rules live in `docs/RESULTS.md`.
 ./scripts/week3_world.sh
 # T2 — SITL: the standard fan-out, see CLAUDE.md
 # T3 — evasion stack (perception + evasion + ground-truth pose bridge)
-ros2 launch huitzilin_perception week4_evasion.launch.py with_patrol:=true
+ros2 launch huitzilin_perception evasion.launch.py with_patrol:=true
 # T4 — arm → takeoff → patrol, per CLAUDE.md
 ```
 
@@ -96,7 +96,7 @@ Far-range cells need `oracle_detector`, which replaces the real detector with gr
 out to a settable range:
 
 ```bash
-ros2 launch huitzilin_perception week6_oracle.launch.py \
+ros2 launch huitzilin_perception oracle_lane.launch.py \
   with_patrol:=true detection_range_m:=20.0
 ```
 
@@ -181,7 +181,7 @@ ArduPilot lurches on resume and the frames after it flood the detector's egomoti
 Instead the ball's link ships `<gravity>false</gravity>` so it hangs motionless until
 thrown, and the impulse plus a persistent `-mass*g` gravity-restore wrench are published
 together from warm ROS publishers (`spawn_projectile.WrenchThrower` via `wrench_bridge` in
-`week4_evasion.launch.py`) so both land on the same physics step. A throw that flies dead
+`evasion.launch.py`) so both land on the same physics step. A throw that flies dead
 straight means the gravity wrench was dropped; one that dives at ~2 g means a **duplicate**
 wrench bridge is delivering it twice. `spawn_projectile.gz_spawn` does all of this.
 

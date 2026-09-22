@@ -32,7 +32,7 @@ Each is a `console_scripts` entry point in `huitzilin_perception/setup.py`.
 
 **`oracle_detector` and `detector` must never run together** — both publish
 `/threat/centroid`, so the tracker would fuse two uncorrelated views of one ball.
-`week6_oracle.launch.py` never includes `week3_perception` for exactly this reason.
+`oracle_lane.launch.py` never includes `perception.launch.py` for exactly this reason.
 
 An oracle number describes the tracker, trigger and airframe given a sensor of that
 reach — never the real detector. `docs/RESULTS.md` §10 has the scoring rules.
@@ -41,12 +41,12 @@ reach — never the real detector. `docs/RESULTS.md` §10 has the scoring rules.
 
 | Launch file | Graph it brings up |
 |---|---|
-| `huitzilin_sim/week2_sitl.launch.py` | Flight only: `mav_bridge` + `patrol_node`. Publishes no `/oak/points`, so a supervisor started here sits in permanent SENSOR_DROPOUT |
-| `week3_perception.launch.py` | Adds the camera bridge + `detector_node` |
-| `week4_evasion.launch.py` | Adds `evasion_node`; forwards `with_patrol:=` and `with_supervisor:=` |
-| `week6_oracle.launch.py` | Oracle lane: `oracle_detector` instead of `detector`. Pins `with_supervisor:=false` — it publishes no `/oak/points` to watch |
-| `week6_synthetic_depth.launch.py` | Depth lane fed by `synthetic_depth_publisher` rather than a rendered camera |
-| `week7_rendered.launch.py` | Rendered long-range lane: `iris_ar0234` + `depth_noise` into the real detector |
+| `huitzilin_sim/sitl.launch.py` | Flight only: `mav_bridge` + `patrol_node`. Publishes no `/oak/points`, so a supervisor started here sits in permanent SENSOR_DROPOUT |
+| `perception.launch.py` | Adds the camera bridge + `detector_node` |
+| `evasion.launch.py` | Adds `evasion_node`; forwards `with_patrol:=` and `with_supervisor:=` |
+| `oracle_lane.launch.py` | Oracle lane: `oracle_detector` instead of `detector`. Pins `with_supervisor:=false` — it publishes no `/oak/points` to watch |
+| `synthetic_depth_lane.launch.py` | Depth lane fed by `synthetic_depth_publisher` rather than a rendered camera |
+| `rendered_lane.launch.py` | Rendered long-range lane: `iris_ar0234` + `depth_noise` into the real detector |
 
 ## Diagram
 

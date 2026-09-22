@@ -2,7 +2,7 @@
 # capture_scenario.sh <SCENARIO_ID> — record one labeled Week 3 rosbag (W3-10).
 #
 # Prereqs (all running, drone AIRBORNE and patrolling):
-#   T1 gz sim · T2 sim_vehicle.py · T3 week3_perception.launch.py with_patrol:=true
+#   T1 gz sim · T2 sim_vehicle.py · T3 perception.launch.py with_patrol:=true
 #   and THIS shell sourced (ros2 jazzy + workspace overlay).
 #
 # Writes the label, fires the projectile ~SPAWN_LEAD s in, then hands the

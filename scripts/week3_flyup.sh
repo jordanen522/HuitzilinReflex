@@ -4,7 +4,7 @@
 # Chains arm+takeoff so ArduCopter's DISARM_DELAY auto-disarm never fires
 # (arming then sitting idle on the ground ~10 s disarms — you must take off
 # immediately), polls odom until the climb completes, then starts the patrol
-# loop. Run AFTER the perception stack (T3, week3_perception.launch.py) is up.
+# loop. Run AFTER the perception stack (T3, perception.launch.py) is up.
 #
 # Prereq: ROS 2 Jazzy + workspace overlay sourced in THIS shell.
 #

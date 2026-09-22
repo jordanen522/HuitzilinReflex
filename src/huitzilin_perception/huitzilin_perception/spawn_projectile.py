@@ -15,7 +15,7 @@ USAGE (CLI):
       -p offset_vertical_m:=0.0
 
 USAGE (from scenario_matrix.yaml via launch file):
-  See week3_perception.launch.py — the scenario runner iterates the matrix
+  See perception.launch.py — the scenario runner iterates the matrix
   and calls this node for each positive scenario.
 
 DETERMINISM
@@ -224,7 +224,7 @@ class WrenchThrower:
     that restores gravity (/world/<world>/wrench/persistent). The `gz` CLI
     cannot do that — each call costs ~0.5 s of sim time — so both are
     published from ROS publishers that are already matched to
-    ros_gz_bridge's ROS->gz bridge (launched by week4_evasion.launch.py).
+    ros_gz_bridge's ROS->gz bridge (launched by evasion.launch.py).
 
     Verified: ball held dead still at z=3.000 across five polls
     after create, then a 8 m/s vertical throw apexed at 6.08+ m against 6.26
@@ -278,7 +278,7 @@ class WrenchThrower:
                 or self._gravity_pub.get_subscription_count() == 0):
             return False, ("wrench bridge not connected — is parameter_bridge "
                            "running for /world/<world>/wrench{,/persistent}? "
-                           "(week4_evasion.launch.py starts it)")
+                           "(evasion.launch.py starts it)")
         force = [self._mass * float(v) / self._step for v in velocity]
         self._impulse_pub.publish(self._msg(model_name, link_name, force))
         self._gravity_pub.publish(self._msg(

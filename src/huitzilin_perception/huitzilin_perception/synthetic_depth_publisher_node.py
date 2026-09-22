@@ -12,7 +12,7 @@ Out: /oak/points (PointCloud2, frame camera_optical_frame, gz FLU convention)
 Design rules:
   * Mutually exclusive with oracle_detector and with a second detector — two
     publishers on /threat/centroid give the tracker two uncorrelated views of
-    one ball. week6_synthetic_depth.launch.py enforces it by never starting
+    one ball. synthetic_depth_lane.launch.py enforces it by never starting
     both; there is no interlock here.
   * The cloud holds the ball and nothing else — no ground, no clutter. Background
     differencing runs (every return is novel) but rejects nothing, so this lane
@@ -281,7 +281,7 @@ class SyntheticDepthPublisherNode(Node):
         # A MIRROR of the detector's diff_threshold_m, used for nothing except
         # computing and logging the minimum detectable closing speed. This node
         # does no differencing; the detector does, and it is the pairing of the
-        # two configs that creates the floor. week6_synthetic_depth.launch.py
+        # two configs that creates the floor. synthetic_depth_lane.launch.py
         # overrides this from the launched detector params file so the two
         # cannot drift.
         self.declare_parameter("bg_diff_threshold_m", 0.10)

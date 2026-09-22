@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Week 2 launch: starts mav_bridge, patrol, and telemetry_logger together.
+SITL flight stack: mav_bridge, patrol, telemetry_logger, optional supervisor.
 
 Usage:
   Terminal 1 (sim):  ros2 launch ardupilot_gz_bringup iris_runway.launch.py
-  Terminal 2 (ours): ros2 launch huitzilin_sim week2_sitl.launch.py
+  Terminal 2 (ours): ros2 launch huitzilin_sim sitl.launch.py
 
 Keeping the sim in its own terminal makes failures easier to read.
 """
@@ -43,11 +43,11 @@ def generate_launch_description():
         #
         # NOTE: supervisor.yaml watches /oak/points, which THIS launch file
         # never publishes -- nothing here starts perception. Enabling the
-        # supervisor from a bare week2_sitl therefore gives a permanent
+        # supervisor from a bare sitl.launch.py therefore gives a permanent
         # SENSOR_DROPOUT the moment the aircraft arms. Launch it through
-        # week3_perception / week4_evasion instead (with_patrol:=true
+        # perception.launch.py / evasion.launch.py instead (with_patrol:=true
         # with_supervisor:=true); both forward this argument and do publish the
-        # cloud. Bare week2_sitl + supervisor is only valid with
+        # cloud. Bare sitl.launch.py + supervisor is only valid with
         # sensor_timeout_s: 0.0.
         DeclareLaunchArgument("with_supervisor",
                               default_value="false",

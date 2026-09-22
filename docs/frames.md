@@ -29,7 +29,7 @@ is the mistake that makes a body velocity command come out rotated.
 
 ## Static Transforms
 
-Both are published by `week3_perception.launch.py` (and duplicated in
+Both are published by `perception.launch.py` (and duplicated in
 `run_regression.sh`, which builds the same two `static_transform_publisher` calls).
 
 | Parent → child | Translation (m) | Rotation (rpy, rad) |

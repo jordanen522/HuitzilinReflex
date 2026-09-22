@@ -1,6 +1,6 @@
 # Synthetic-oracle battery — the 20 m/s question, asked in sim.
 #
-# RUN THIS ONLY UNDER week6_oracle.launch.py. Every row here assumes
+# RUN THIS ONLY UNDER oracle_lane.launch.py. Every row here assumes
 # /threat/centroid comes from oracle_detector (Gazebo truth at a configured
 # range), NOT from the depth detector. Under the real detector the 20 m/s rows
 # are a foregone 0/N: the ball is first seen at ~3.2-3.6 m, which is 0.17 s of

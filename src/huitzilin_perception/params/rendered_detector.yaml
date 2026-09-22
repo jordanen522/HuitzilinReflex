@@ -13,7 +13,7 @@
 #
 # WHAT LANE THIS IS, because the repo now has four and they are never merged:
 #   week4 (baseline)  rendered OAK-D, SDF per-pixel noise, patrol, ~3.4 m
-#   week6_oracle      /threat/centroid asserted from Gazebo truth
+#   oracle_lane.launch.py      /threat/centroid asserted from Gazebo truth
 #   week6_synthetic   fabricated ball-only cloud -> real detector
 #   THIS ONE          rendered geometry -> modelled stereo error -> real
 #                     detector. No asserted centroid and no fabricated cloud:
@@ -57,7 +57,7 @@
 #       Caught by test_rendered_lane.py before the first flight, not after:
 #       rendered_lane.assert_gates_clear_the_rendered_range sizes the
 #       requirement off the ceiling the config itself declares, and
-#       week7_rendered.launch.py refuses to start on a config that fails it.
+#       rendered_lane.launch.py refuses to start on a config that fails it.
 #       RAISE THIS WHENEVER roi_max_range_m IS RAISED; the two move together.
 #
 # use_persistent_bg STAYS TRUE, unlike the synthetic lane. That lane turns it
@@ -128,7 +128,7 @@ detector:
     # a TRANSPORT failure wearing a perception failure's clothes, and it would
     # have been scored as the latter.
     #
-    # week7_rendered.launch.py passes this same value to depth_noise_node so the
+    # rendered_lane.launch.py passes this same value to depth_noise_node so the
     # two ends of /oak/points cannot disagree; a reliability mismatch leaves the
     # subscription unconnected while the topic still looks alive. It must also
     # equal depth_noise_node.DEFAULT_CLOUD_RELIABLE, and test_rendered_lane.py
@@ -238,7 +238,7 @@ detector:
     # Egomotion compensation
     # Needs odom with a valid orientation quaternion AND the
     # base_link -> camera_link -> camera_optical_frame static TF chain, which
-    # week7_rendered.launch.py publishes for exactly this reason. Without the
+    # rendered_lane.launch.py publishes for exactly this reason. Without the
     # chain the detector silently drops to camera-frame differencing.
     compensate_egomotion: true
     odom_topic: "/huitzilin/odom"

@@ -1,21 +1,21 @@
 """
-week6_oracle.launch.py — the evasion stack with a synthetic far-range sensor.
+oracle_lane.launch.py — the evasion stack with a synthetic far-range sensor.
 
-Same chain as week4_evasion.launch.py with ONE substitution: oracle_detector
+Same chain as evasion.launch.py with ONE substitution: oracle_detector
 replaces detector. Everything after /threat/centroid is identical, which is
 the point — it isolates "how far can we see" from "what do we do about it".
 
 WHY IT IS A SEPARATE FILE. Two publishers on /threat/centroid would feed the
 tracker two uncorrelated views of the same ball, so the real detector and the
 oracle must never run together. Making that a separate launch file rather than
-a boolean on week4_evasion means the mistake cannot be made halfway: this file
-never includes week3_perception, so there is no detector to disable. It also
+a boolean on evasion.launch.py means the mistake cannot be made halfway: this file
+never includes perception.launch.py, so there is no detector to disable. It also
 starts none of the depth machinery (image bridge, cloud bridge, camera TF),
 because nothing here consumes a point cloud.
 
 USAGE (Dell, after the world + SITL are up — docs/dodge_battery_runbook.md)
 --------------------------------------------------------------------------
-  ros2 launch huitzilin_perception week6_oracle.launch.py with_patrol:=true
+  ros2 launch huitzilin_perception oracle_lane.launch.py with_patrol:=true
 
   # then, in another terminal:
   ./scripts/run_dodge_battery.sh week6        # the 20 m/s battery
@@ -26,7 +26,7 @@ USAGE (Dell, after the world + SITL are up — docs/dodge_battery_runbook.md)
   # pinned to 3.4 m still failed once because it flew the proposed optics and
   # rate against a reference flown on different ones. `oracle_rate_hz` and
   # `fov_half_angle_deg` (params/oracle_detector.yaml) default silently.
-  ros2 launch huitzilin_perception week6_oracle.launch.py \
+  ros2 launch huitzilin_perception oracle_lane.launch.py \
       with_patrol:=true detection_range_m:=3.4 oracle_rate_hz:=14.5
 
 THE SUPERVISOR IS PINNED OFF, not merely defaulted off — see the include
@@ -34,8 +34,8 @@ below. supervisor.yaml watches /oak/points, which this file never publishes,
 and a watch on a topic nothing publishes is a permanent SENSOR_DROPOUT the
 moment the aircraft arms (CLAUDE.md).
 
-This file carries its OWN clock bridge: week2_sitl.launch.py has none — in the
-Week 3/4 path week3_perception owns it — and without one every use_sim_time
+This file carries its OWN clock bridge: sitl.launch.py has none — in the
+Week 3/4 path perception.launch.py owns it — and without one every use_sim_time
 node here dies on the clock guard after its 5 s grace.
 """
 
@@ -112,11 +112,11 @@ def generate_launch_description() -> LaunchDescription:
 
     flight_stack = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(sim_pkg, "launch", "week2_sitl.launch.py")),
+            os.path.join(sim_pkg, "launch", "sitl.launch.py")),
         launch_arguments={
             "patrol_params": LaunchConfiguration("patrol_params"),
             "use_sim_time": use_sim_time,
-            # Pinned off, not merely defaulted off. week2_sitl declares
+            # Pinned off, not merely defaulted off. sitl.launch.py declares
             # with_supervisor, so leaving it unset would let it be passed
             # through from this file's command line -- and supervisor.yaml
             # watches /oak/points, which nothing here publishes, so it would

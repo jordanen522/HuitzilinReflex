@@ -2,7 +2,7 @@
 # Week 4 dodge battery / sweep — Dell only (live Gazebo depth required).
 #
 # Prereqs (docs/dodge_battery_runbook.md): depth world + SITL up, drone flying
-# patrol under `ros2 launch huitzilin_perception week4_evasion.launch.py
+# patrol under `ros2 launch huitzilin_perception evasion.launch.py
 # with_patrol:=true`.
 #
 # Usage:
@@ -14,7 +14,7 @@
 #   DRONE_MODEL=iris_ar0234 ./scripts/run_dodge_battery.sh week7
 #   EXTRA_ARGS="-p run_window_s:=6.0" ./scripts/run_dodge_battery.sh
 #
-# week6 mode requires week6_oracle.launch.py, NOT week4_evasion: its rows
+# week6 mode requires oracle_lane.launch.py, NOT evasion.launch.py: its rows
 # assume /threat/centroid comes from oracle_detector at a configured range.
 # Run the fidelity gate first — see the header of
 # config/week6_synthetic_battery.yaml.
@@ -28,13 +28,13 @@
 # the fully matched sensor returned 2/6 and 6/6 against a Week 4 reference of
 # 0/17 and 78/78. For week6depth the three axes are detection_range_m,
 # sensor_params (params/synthetic_depth_oakd_gate.yaml) and sensor_rate_hz; the
-# full command is in that file's header and in week6_synthetic_depth.launch.py.
+# full command is in that file's header and in synthetic_depth_lane.launch.py.
 # For week6 they are detection_range_m, oracle_rate_hz, and fov_half_angle_deg
 # via oracle_params — but note the oracle models sector as a SINGLE CONE
 # half-angle, so it cannot express the rendered camera's rectangular frustum at
 # all; the depth lane's gate is the one that can.
 #
-# week6depth mode requires week6_synthetic_depth.launch.py, and NEITHER of the
+# week6depth mode requires synthetic_depth_lane.launch.py, and NEITHER of the
 # other two: its rows assume /threat/centroid is COMPUTED by the real,
 # unmodified detector from a synthetic cloud on /oak/points. The two week6
 # lanes are mutually exclusive — both ends reach /threat/centroid. It is a
@@ -44,7 +44,7 @@
 # script. A named mode keeps it explicit, matching the week6 precedent above.
 # Fidelity gate first, then hover:
 #   EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6depth
-# week7 mode requires week7_rendered.launch.py and NEITHER week6 lane: its rows
+# week7 mode requires rendered_lane.launch.py and NEITHER week6 lane: its rows
 # assume /threat/centroid is computed by the real detector from a cloud the
 # renderer actually produced. It is the only lane whose reach is an OUTPUT
 # rather than an input, so there is no detection_range_m to pin here — the

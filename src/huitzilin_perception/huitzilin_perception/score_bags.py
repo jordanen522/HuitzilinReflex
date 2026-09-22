@@ -107,7 +107,7 @@ NOTES
 -----
 - Must be run with use_sim_time:=true (set in launch or via --ros-args).
 - Requires ros2 bag play and the detector node in the same session.
-  The launch file week3_perception.launch.py handles this setup.
+  The launch file perception.launch.py handles this setup.
 """
 
 from __future__ import annotations

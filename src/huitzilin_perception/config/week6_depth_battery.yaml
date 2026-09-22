@@ -1,8 +1,8 @@
-# Synthetic-depth battery for week6_synthetic_depth.launch.py — the 20 m/s
+# Synthetic-depth battery for synthetic_depth_lane.launch.py — the 20 m/s
 # question asked through the real detector. Every row assumes /threat/centroid
 # is computed by the unmodified detector_node.py from a PointCloud2 on
 # /oak/points published by synthetic_depth_publisher_node.py. Never run it under
-# week6_oracle.launch.py, which asserts the centroid from Gazebo truth and
+# oracle_lane.launch.py, which asserts the centroid from Gazebo truth and
 # shares no clustering code, and never with both stacks up: two publishers on
 # /threat/centroid give the tracker two uncorrelated views of one ball.
 #
@@ -37,7 +37,7 @@
 #   1. Fidelity gate, D11/D12 on patrol, with the modelled sensor pinned to the
 #      OAK-D Lite Week 4 actually flew on all three axes:
 #
-#        ros2 launch huitzilin_perception week6_synthetic_depth.launch.py \
+#        ros2 launch huitzilin_perception synthetic_depth_lane.launch.py \
 #            with_patrol:=true detection_range_m:=3.4 sensor_rate_hz:=15.0 \
 #            sensor_params:=$(ros2 pkg prefix huitzilin_perception)/share/\
 #      huitzilin_perception/params/synthetic_depth_oakd_gate.yaml
@@ -91,7 +91,7 @@
 # and depth sigma grows as z^2, so the ceiling must clear the reach by
 # 4 * sigma(reach) — 26 m needs 27.2 m against the 28.00 m
 # synthetic_depth_detector.yaml ships, and 30 m would need 31.6 m.
-# week6_synthetic_depth.launch.py refuses to start on a violation rather than
+# synthetic_depth_lane.launch.py refuses to start on a violation rather than
 # delivering a short sensor under a long label.
 #
 # Report split by ball speed; 8, 14 and 20 are never blended.

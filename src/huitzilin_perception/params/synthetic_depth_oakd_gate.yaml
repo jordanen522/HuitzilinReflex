@@ -54,13 +54,13 @@
 #     the tracker needs to commit.
 #
 # THE LAUNCH FILE OVERRIDES TWO OF THE THREE — READ THIS BEFORE USING THE FILE.
-# week6_synthetic_depth.launch.py passes detection_range_m and rate_hz from its
+# synthetic_depth_lane.launch.py passes detection_range_m and rate_hz from its
 # OWN launch arguments (detection_range_m, sensor_rate_hz) in a dict AFTER this
 # params file, so under that launch file the two values below are inert and its
 # defaults (26.0 m, 60.0 Hz) win unless overridden on the command line. The
 # gate command must therefore carry all three axes explicitly:
 #
-#   ros2 launch huitzilin_perception week6_synthetic_depth.launch.py \
+#   ros2 launch huitzilin_perception synthetic_depth_lane.launch.py \
 #       with_patrol:=true detection_range_m:=3.4 sensor_rate_hz:=15.0 \
 #       sensor_params:=$(ros2 pkg prefix huitzilin_perception)/share/huitzilin_perception/params/synthetic_depth_oakd_gate.yaml
 #
@@ -167,7 +167,7 @@ synthetic_depth_publisher:
     rate_hz: 15.0
 
     # A MIRROR of the detector's diff_threshold_m, used for nothing but
-    # computing and logging the slow-ball floor. week6_synthetic_depth.launch.py
+    # computing and logging the slow-ball floor. synthetic_depth_lane.launch.py
     # overrides it from the detector params file it is actually launching, so
     # the two cannot drift apart.
     bg_diff_threshold_m: 0.10
