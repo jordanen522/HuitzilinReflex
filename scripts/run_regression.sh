@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_regression.sh — Week 3, W3-18
+# run_regression.sh — detector regression over the labelled bag library.
 # One-command regression: replays the bag library through the detector and
 # exits non-zero if recall drops below the 95% floor.
 #

@@ -263,4 +263,4 @@ in git history under `lab/results/`: `git show 3cf0bbb:lab/results/<file>`.
 The §8 patrol table has no surviving per-throw CSV — a 20-row reference subset exists at
 `git show 3cf0bbb:lab/results/ref_week4_battery.csv`, and the per-battery breakdown is
 recorded in `git show 8e7bde3:docs/JOURNAL.md`. A fresh battery of the same kind:
-`./scripts/run_dodge_battery.sh week4`.
+`./scripts/run_dodge_battery.sh` (the default battery; there is no `week4` mode).

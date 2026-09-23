@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_tests.sh — the whole unit-test suite, both packages.
+# run_tests.sh — the whole unit-test suite, all three packages.
 #
 # USAGE:
 #   ./scripts/run_tests.sh              # everything

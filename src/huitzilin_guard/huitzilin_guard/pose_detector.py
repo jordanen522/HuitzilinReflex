@@ -13,18 +13,17 @@ caller supplies, so every branch of it is testable with no model file, no
 camera and no ROS. pose_detector_node.py owns the session.
 
 RANGE. A monocular camera has no depth, and this subsystem needs metric range:
-LUNGE and SHOVE both require closing speed, and a pipeline reporting a constant
-Z would score every approach as zero. Two modes:
+whether a person is inside the box depends on how far away they are, and a
+pipeline reporting a constant Z would place everyone at one distance. Two modes:
 
   depth      - sample an aligned depth image at the joint pixel. Correct, and
                the path an OAK-D would use. Unverified: no camera exists yet.
   monocular  - estimate range from bounding-box height against an assumed
-               standing subject height. Works today with any camera and gives a
-               real approach signal, because a closing person grows in frame.
+               standing subject height. Works today with any camera.
                It assumes a standing adult seen full length, and degrades
                exactly when that is false: a crouching, seated, partially
                occluded or unusually tall subject gets a proportionally wrong
-               range and therefore a wrong closing speed. It is a scale
+               range and can land on the wrong side of a box edge. It is a scale
                estimate, not a measurement.
 """
 
@@ -129,8 +128,8 @@ def range_from_bbox_height(bbox_h_px: float, focal: float,
     Similar triangles: a subject of known height H at range Z projects to
     f*H/Z pixels. Returning None outside the clamp is deliberate. A person who
     is crouching, seated or cut off by the frame edge produces a short box and
-    therefore an absurdly large range, and feeding that to the tracker would
-    manufacture a closing speed out of a posture change.
+    therefore an absurdly large range, which would move a person across a box
+    edge because of a posture change.
     """
     cfg = config or DetectorConfig()
     if bbox_h_px <= 1.0 or focal <= 0.0:
@@ -173,9 +172,8 @@ def to_metric(joints_px, bbox, image_wh: Tuple[int, int],
     the image centre when no CameraInfo is supplied.
 
     Returns {} when no range can be established. An empty frame is correct
-    here: without range there is no closing speed, and publishing joints with
-    a fabricated Z would let the recogniser score an approach that was never
-    measured.
+    here: without range there is no box placement, and publishing joints with
+    a fabricated Z would place a person nobody measured.
     """
     cfg = config or DetectorConfig()
     if not joints_px:

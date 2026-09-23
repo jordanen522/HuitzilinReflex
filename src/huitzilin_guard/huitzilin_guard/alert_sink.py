@@ -21,7 +21,7 @@ with a loud warning.
 The correct hardware design, deferred and deliberately not built here:
 payload_node grows a SECOND, lower-priority input, so one process continues to
 own the line and the projectile alarm always wins arbitration. Implementing
-that from this package would put escalation logic inside the projectile
+that from this package would put guard logic inside the projectile
 package and destroy the isolation this subsystem exists to keep.
 
 Until then the alert is observable as a ROS topic and in the log, which is
@@ -44,7 +44,7 @@ HARDWARE_REFUSAL = (
 
 
 class AlertSink:
-    """Anything the escalation alert can be driven into."""
+    """Anything the guard alarm can be driven into."""
 
     def set(self, on: bool) -> None:
         raise NotImplementedError
@@ -111,7 +111,7 @@ def select_alert_sink(want: str = "sim",
 class AlertLatchPolicy:
     # A lone True must still produce a perceptible signal.
     min_on_s: float = 2.0
-    # Dead-man. The recogniser publishes a clear, but it may die first.
+    # Dead-man. The guard publishes a clear, but it may die first.
     max_on_s: float = 12.0
     # Silence means the publisher is gone, not that the alert should persist.
     stale_off_s: float = 3.0
@@ -124,8 +124,8 @@ class AlertLatch:
     never re-drives a sink already in the right state.
 
     Duplicates payload.AlarmLatch on purpose -- see the module docstring. The
-    dead-man here is longer than the projectile one because an escalation
-    alert is not bounded by a dodge duration.
+    dead-man here is longer than the projectile one because a guard
+    alarm is not bounded by a dodge duration.
     """
 
     def __init__(self, policy: Optional[AlertLatchPolicy] = None):

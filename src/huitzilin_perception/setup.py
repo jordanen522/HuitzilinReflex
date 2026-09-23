@@ -31,7 +31,7 @@ setup(
     zip_safe=True,
     maintainer="Jordan",
     maintainer_email="j602eng1z@gmail.com",
-    description="HuitzilinReflex Weeks 3-4: perception pipeline + Kalman evasion.",
+    description="Projectile detection, Kalman tracking, evasion, payload and the simulation lanes.",
     license="MIT",
     tests_require=["pytest"],
     entry_points={

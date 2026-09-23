@@ -47,6 +47,7 @@ reach — never the real detector. `docs/RESULTS.md` §10 has the scoring rules.
 | `oracle_lane.launch.py` | Oracle lane: `oracle_detector` instead of `detector`. Pins `with_supervisor:=false` — it publishes no `/oak/points` to watch |
 | `synthetic_depth_lane.launch.py` | Depth lane fed by `synthetic_depth_publisher` rather than a rendered camera |
 | `rendered_lane.launch.py` | Rendered long-range lane: `iris_ar0234` + `depth_noise` into the real detector |
+| `hardware.launch.py` | The real aircraft: wall clock, no Gazebo; each node's yaml plus its `hw_*` overlay. Bridge, supervisor, payload and logger always; `with_camera:=` (depthai-ros + detector), `with_evasion:=`, `with_patrol:=` opt in. See `docs/HARDWARE.md` |
 
 ## Diagram
 

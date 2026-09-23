@@ -26,6 +26,11 @@
   <depend>std_srvs</depend>
 
   <exec_depend>python3-yaml</exec_depend>
+  <!-- pose_detector keypoint math; cv2 for the camera frame in
+       pose_detector_node. onnxruntime has no rosdep key and is installed by
+       hand (CLAUDE.md), so it is not listed. -->
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
   <!-- Scenario and params files are resolved through the ament index. -->
   <exec_depend>ament_index_python</exec_depend>
   <!-- clock_guard only. Nothing else from huitzilin_sim is imported. -->

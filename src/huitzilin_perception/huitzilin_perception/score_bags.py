@@ -1,5 +1,5 @@
 """
-score_bags.py — HuitzilinReflex Week 3, W3-16 + W3-17.
+score_bags.py — score the detector against the labelled bag library.
 
 Offline regression harness: replays each labeled rosbag through the detector
 and scores detection recall and false-positive rate against the label sidecars.

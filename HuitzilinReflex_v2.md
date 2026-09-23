@@ -104,7 +104,8 @@ Completed milestones:
 | ROS 2 to pymavlink bridge and patrol | Autonomous closed patrol loop with logged telemetry: 43 laps, mean 29.51 s. Airframe fidelity deferred |
 | Perception pipeline | Simulated OAK-D depth, synthetic scenarios, detection node, 17-bag labelled library and regression harness; held-out recall 100% |
 | Evasion logic and Kalman filter in the loop | Predictive Kalman filter, multi-hypothesis tracker and dodge trigger, closing detection to intercept to velocity spike to alarm (mocked GPIO) over a 7-scenario battery. The resulting envelope is bounded by sensing |
-| Software lane | Supervisor state machine, payload node, clock guard, hardware config overlays, hardware preflight |
+| Software lane | Supervisor state machine, payload node, clock guard, hardware config overlays |
+| Hardware readiness | `hardware.launch.py`, mavlink-router config, Pi 5 payload drivers, hardware preflight and parameter readback, `docs/HARDWARE.md`. Exercised against SITL only |
 | Sensor-requirement study | The reach and rate a 20 m/s dodge needs, measured in simulation ahead of the hardware |
 
 The sensor-requirement study is the one that answers the project's central question:
@@ -114,22 +115,21 @@ the as-built OAK-D Lite caps the aircraft at ~3.2 m/s. The full derivation, the 
 spec it implies, and the sector cost are in `docs/RESULTS.md`.
 
 **Perception roadmap change.** A recognition-oriented capability was previously
-intended for a later phase. It is cancelled and replaced by **action detection**:
-the system recognises aggressive *motion*, never *who* a person is. Facial
-recognition, face detection, person identification, re-identification, persistent
-person tracking and biometric embeddings are permanent non-goals, recorded in
-`docs/requirements.md` and `docs/SAFETY_CASE.md`. The replacement subsystem is
-`huitzilin_action_escalation`, which can drive the warning lights and siren and
-nothing else; it is independent of the projectile pipeline and cannot command
-flight. It has no real input path yet: there is no pose estimator on the camera or
-the Pi, so it has only ever run against synthetic sequences. `docs/action_escalation.md`
-has the categories, the privacy contract, and the list of numbers that may not be
-claimed.
+intended for a later phase. It is cancelled and replaced by the **guard alarm**
+(`huitzilin_guard`): it reports that a person is inside the patrolled box, never *who*
+they are. Facial recognition, face detection, person identification, re-identification,
+persistent person tracking and biometric embeddings are permanent non-goals, recorded in
+`docs/requirements.md` and `docs/SAFETY_CASE.md`. The guard can drive the warning lights
+and siren and nothing else; it is independent of the projectile pipeline and cannot
+command flight. No camera has ever been connected to it, so it has only run against
+hand-published detections. `docs/guard.md` has the privacy contract and the limits.
 
-**Weeks 7–9 are out of scope for the simulation phase.** They are the physical work: HITL
-and tethered hover, incremental real flight inside a netted enclosure with soft
-projectiles, and sim-versus-real validation. What hardware would have to settle is listed
-in `docs/RESULTS.md` §9.
+**Next: hardware bring-up.** `docs/HARDWARE.md` covers Pi setup and six props-off bench
+stages. **Any flight is blocked on a position source**: the BOM has no GPS or optical
+flow, and ArduPilot needs one for GUIDED, the fence, LOITER and RTL. After the bench comes
+the physical work: HITL and tethered hover, incremental real flight inside a netted
+enclosure with soft projectiles, and sim-versus-real validation. What hardware has to
+settle is listed in `docs/RESULTS.md` §9.
 
 ---
 

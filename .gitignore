@@ -18,8 +18,13 @@ logs/
 mav.parm
 eeprom.bin
 terrain/
+telemetry_*.csv
 week2_telemetry_*.csv
 
-# Pose model weights: fetched by scripts/fetch_pose_model.sh, never tracked.
-models/
+# Pose model weights: fetched by scripts/fetch_pose_model.sh (into ~/models,
+# outside the repo), never tracked. Not a bare `models/` pattern: that also
+# matched src/huitzilin_perception/models/, where Gazebo models are tracked.
 *.onnx
+
+# Per-user Claude Code settings.
+.claude/

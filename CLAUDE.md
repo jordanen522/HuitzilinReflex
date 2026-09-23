@@ -11,10 +11,11 @@ who checks this out and runs it.
 Stack: ROS 2 **Jazzy** · Gazebo **Harmonic** · ArduPilot Copter 4.5+ **SITL** · pymavlink ·
 Python 3.12 · Ubuntu 24.04.
 
-Simulation and software work is complete; hardware bring-up is the next phase and has not
-started. The patrol loop, detection pipeline, tracker and dodge trigger are done and
-measured (`docs/RESULTS.md`). The rendered long-range sensor lane is left with
-characterised recall and fire-rate limitations rather than a solution
+Simulation and software work is complete; hardware bring-up is the next phase. The stack is
+ready for it (`docs/HARDWARE.md`, `hardware.launch.py`), and nothing has run on the real
+aircraft yet, so no hardware number exists. The patrol loop, detection pipeline, tracker
+and dodge trigger are done and measured (`docs/RESULTS.md`). The rendered long-range sensor
+lane is left with characterised recall and fire-rate limitations rather than a solution
 (`docs/KNOWN_ISSUES.md`) — read that before quoting a rendered-lane number.
 
 Two measurement lanes exist and are never mixed: the **oracle** lane (synthetic sensor,
@@ -49,9 +50,11 @@ Optional nodes (neither runs by default):
 ```bash
 # The supervisor needs perception: it watches /oak/points, which sitl.launch.py
 # does not publish. Started from a bare sitl.launch.py it sits in permanent
-# SENSOR_DROPOUT. Use a week3/week4 entry point — both forward the argument:
-ros2 launch huitzilin_perception evasion.launch.py \
-  with_patrol:=true with_supervisor:=true
+# SENSOR_DROPOUT. Use evasion.launch.py, with the two sim overrides explained
+# under "Timing and rendering" below:
+ros2 launch huitzilin_perception evasion.launch.py with_patrol:=true \
+  with_supervisor:=true sensor_timeout_s:=5.0 \
+  patrol_params:=$(ros2 pkg prefix huitzilin_sim)/share/huitzilin_sim/params/patrol.yaml
 
 ros2 run huitzilin_perception payload --ros-args \
   --params-file src/huitzilin_perception/params/payload.yaml
@@ -99,11 +102,26 @@ ros2 launch huitzilin_perception oracle_lane.launch.py \
 EXTRA_ARGS="-p hover_mode:=true" ./scripts/run_dodge_battery.sh week6
 ```
 
-Unit tests: `./scripts/run_tests.sh` (both packages; forwards pytest args).
+Unit tests: `./scripts/run_tests.sh` (all three packages; forwards pytest args).
 `.github/workflows/tests.yml` runs the ROS-free subset on every push.
 Preflight: `./scripts/preflight_check.sh`.
 Perception stack (depth world + detector, Dell only): `docs/bag_capture_runbook.md`.
 Dodge batteries: `docs/dodge_battery_runbook.md`.
+
+## Hardware (Raspberry Pi 5)
+
+`docs/HARDWARE.md` owns Pi setup and the six props-off bench stages. The shape of it:
+mavlink-router owns the flight controller's USB port and forwards to the SITL ports
+(`hardware/mavlink-router.conf`), so `bridge.yaml` and `patrol.yaml` run unchanged.
+```bash
+./scripts/preflight_hw.sh                  # checklist, never a gate
+./scripts/hw_param_readback.py             # live FC params vs hw_frame.parm
+ros2 launch huitzilin_perception hardware.launch.py                  # FC link
+ros2 launch huitzilin_perception hardware.launch.py with_camera:=true \
+  with_evasion:=true                                                 # full bench
+```
+**No position source is fitted** (no GPS, no optical flow), so GUIDED, the fence, LOITER
+and RTL cannot work in flight. The bench stages do not need one; any flight does.
 
 ## Frame convention (critical)
 
@@ -138,6 +156,17 @@ Full frame table and TF tree: `docs/frames.md`.
 - **`use_sim_time` is a launch argument only, never a yaml key.** A node started with `use_sim_time:=true` and no `/clock` logs FATAL and exits 1 after a 5 s grace window instead of silently freezing at t=0 (`huitzilin_sim/clock_guard.py`). `test_hw_config.py` fails if anyone re-adds the key to a params file.
 - **`run_regression.sh`'s clock warm-up is load-bearing — do not delete it.** It plays a bag with `--topics /clock --loop` before starting the detector, then kills it once the guard passes. Without it the detector dies at startup and every bag replays into a dead node: `TP=0`, recall 0.0% — never a detection regression, never a reason to touch `detector.yaml`. It works because the guard is one-shot, so a temporary clock suffices.
 - **`debug_dump_dir` costs ~40 ms/frame.** No latency number from a dumping run is valid.
+- **`supervisor.yaml` carries the aircraft's limits, and two of them trip in SITL.** Under
+  the full stack (depth world + SITL + perception) the Dell delivers `/oak/points` with gaps
+  of up to ~3 s sim time, so the 1.0 s cloud watch fires SENSOR_DROPOUT during takeoff.
+  And `evasion.launch.py` defaults to `week4_patrol.yaml`, whose loop reaches 12 m from
+  home, past the 10 m supervisor fence, so FENCE_BREACH fires on the first leg. A
+  supervised sim run widens the one and flies the 5 m square:
+  ```bash
+  ros2 launch huitzilin_perception evasion.launch.py with_patrol:=true \
+    with_supervisor:=true sensor_timeout_s:=5.0 \
+    patrol_params:=$(ros2 pkg prefix huitzilin_sim)/share/huitzilin_sim/params/patrol.yaml
+  ```
 
 ### Perception and scoring
 
@@ -152,6 +181,29 @@ Full frame table and TF tree: `docs/frames.md`.
 - **Score saves on the counterfactual, never on `dodged`.** A throw is on a hit course only if `counterfactual_min_m` ≤ 0.30 m. A fire count and a save rate are different numbers, and a cell with no on-course throws measured nothing — never report it as 0/N.
 - **`counterfactual_min_m` is blank on `NO_DODGE` rows, and that blank is a trap.** Join on it naively and every no-fire leaves the denominator, turning a save rate into a rate over only the throws that fired — on the 26 m / 20 m/s cell, a true 21/30 (70%) reads as 21/21 (100%). When no dodge fired the drone never deviated, so the actual path *is* the counterfactual: substitute `counterfactual_min_m := actual_min_m` and count a `NO_DODGE` inside the hit radius as a loss. `scripts/hz_counterfactual.py` emits the blank on purpose so recorded CSVs stay reproducible; the substitution belongs in whatever scores them.
 - **Kill lab stacks by installed path, never a guessed `_node` name.** `evasion_nod[e]`/`patrol_nod[e]` match nothing, and surviving stacks return plausible numbers with no error. The decisive contamination check is the implied rate `(track_updates - 1) / track_age_s` reading above the launched oracle rate.
+
+### Hardware
+
+- **One serial port, two MAVLink clients: the router owns the port.** `mav_bridge` and
+  `patrol` each open a MAVLink link, and a serial device can only be opened once. On the Pi
+  `mavlink-router` holds the FC's USB port and forwards to the same UDP ports SITL's
+  `--out` feeds (14552, 14553; tools 14554; GCS 14550). Never put a serial path in
+  `hw_bridge.yaml`; `test_hw_config.py` fails if one appears.
+- **The supervisor switches flight mode as soon as the FC reports armed**, however the arm
+  happened (DISARMED -> ARMING -> TAKEOFF requests GUIDED). For a manual RC flight launch
+  with `with_supervisor:=false`. Until 2026-09 the node never left DISARMED at all, so no
+  fault response had ever run live before this was fixed.
+- **Link loss shows as odom stopping, not as a flag.** `mav_bridge` stops publishing odom
+  once the autopilot has been silent for `fc_timeout_s` (1.0 s); `/huitzilin/state` keeps
+  publishing with a growing `fc_age_s`. `alt` and odom stay absent until the FC has a
+  position estimate, which on this BOM (no GPS, no flow) is never.
+- **The bridge heartbeats as GCS system 255**, which arms the FC's GCS failsafe
+  (`FS_GCS_ENABLE 1` in `hw_frame.parm`). QGroundControl uses the same system id, so a
+  connected QGC keeps the failsafe from firing when the companion dies.
+- **The LED strip is on SPI, not GPIO 18.** `rpi_ws281x` does not support the Pi 5, so
+  `payload.py` drives the WS2812B over SPI0 MOSI (GPIO 10) with `spidev`
+  (`dtparam=spi=on`). The siren is GPIO 17 on the chip labelled `pinctrl-rp1`, found by
+  label because its `/dev/gpiochipN` number differs between kernels.
 
 ### Guard alarm
 
@@ -208,8 +260,9 @@ Full frame table and TF tree: `docs/frames.md`.
   decision path with no camera and no drone.
 - **Monocular range is a scale estimate, not a measurement.** It assumes a standing
   adult of 1.70 m seen full length. A crouching, seated or partly framed subject gets a
-  proportionally wrong range and therefore a wrong closing speed. Out-of-range values
-  are dropped rather than clamped, so a posture change cannot manufacture an approach.
+  proportionally wrong range and can land on the wrong side of a box edge. Out-of-range
+  values are dropped rather than clamped, so a posture change cannot move a person
+  across an edge.
   The `depth` mode is the correct path and has never run: there is no camera.
 - **`ros2 topic echo` truncates long strings**, so a JSON payload on a `String` topic
   comes back ending in `...` and a grep over it silently finds nothing. Use
@@ -238,16 +291,15 @@ Full frame table and TF tree: `docs/frames.md`.
   and GPIO 17, and Linux GPIO line requests are exclusive, so a second
   process taking them would silently stop the projectile alarm firing.
   `backend: hardware` logs a refusal and runs inert rather than raising.
-- **Scenario keyframes interpolate in straight lines, which is not anatomy.** A hand
-  raised hip-to-overhead in two keyframes passes within 0.09 m of its own shoulder,
-  collapsing and re-opening the shoulder-to-wrist distance and reading as a 3.3 m/s
-  extension. `benign_wave.yaml` carries a mid-raise keyframe holding the arm radius;
-  without it that negative control falsely confirms as a STRIKE.
 
 ### Config layout
 
 - **Never edit a shipped yaml for a diagnostic.** `--symlink-install` makes the installed copy a symlink into `src/`, so you are editing the real config. Copy to `/tmp` and `sed` that.
 - **Hardware config lives in `hw_*` files, never as edits.** `params/hw_bridge.yaml`, `hw_frame.parm`, `hw_detector.yaml`, `hw_evasion.yaml` are overlays; the sim files stay the regression path. `test_hw_config.py` asserts each overlay's node name and keys exist in the file it overlays — in ROS 2 a mistyped node name silently loads *nothing*.
+- **Renaming or deleting an installed file breaks the next `--symlink-install` build.**
+  `build/<pkg>/` keeps a link to the old name and colcon fails with `can't copy
+  '.../week2_sitl.launch.py': doesn't exist or not a regular file`. After pulling a rename:
+  `rm -rf build/huitzilin_* install/huitzilin_*` and rebuild.
 - **`set -u` breaks `/opt/ros/jazzy/setup.bash`.** Source ROS first, then enable it.
 - **`supervisor_node` reports no faults while disarmed.** Half the watched topics are legitimately silent on the bench. Faults are gated on `armed`, and no fault path can reach EVADE — asserted over all states × faults × `armed`. (EVADE *is* reachable disarmed via the threat edge, but commands nothing.)
 - **A supervisor watch on a topic nothing publishes is a permanent fault.** `_age` reads a never-seen topic as infinitely stale — correctly, since that is how a publisher which died before its first message is caught. A timeout of `0.0` is the only way to say "this configuration does not produce that topic". `cmd_vel_timeout_s` ships `0.0` because `patrol.yaml` runs `mode: "position"`, where `patrol_node` sends setpoints over its own MAVLink connection and never creates the `/huitzilin/cmd_vel` publisher. Watching it drove `SETPOINT_STALL → FAILSAFE → LOITER → RTL_LAND` one second after every arm. Set it to `1.0` only alongside `mode: "velocity"`.

@@ -6,7 +6,7 @@
 #
 # NOTE for hardware: these are sim-derived. The topic timeouts are generous
 # against sim publisher rates, and the real delivered depth rate is not
-# measured until S6-4. sensor_timeout_s in particular must be re-checked
+# measured yet (docs/HARDWARE.md stage 5). sensor_timeout_s in particular must be re-checked
 # against the real camera, not carried over.
 
 supervisor:

@@ -131,7 +131,7 @@ def foreground_mask(current: np.ndarray, background: np.ndarray,
     """
     Bool mask of current points farther than `threshold` from ANY background
     point. cKDTree NN query — the old (N, M, 3) broadcast was ~40 GB at
-    30k x 120k points and OOM-killed the node (see W3-13 commit e4e1086).
+    30k x 120k points and OOM-killed the node (commit e4e1086).
     """
     if background.shape[0] == 0:
         return np.ones(len(current), dtype=bool)

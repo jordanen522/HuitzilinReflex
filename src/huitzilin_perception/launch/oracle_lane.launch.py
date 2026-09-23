@@ -30,7 +30,7 @@ USAGE (Dell, after the world + SITL are up — docs/dodge_battery_runbook.md)
       with_patrol:=true detection_range_m:=3.4 oracle_rate_hz:=14.5
 
 THE SUPERVISOR IS PINNED OFF, not merely defaulted off — see the include
-below. supervisor.yaml watches /oak/points, which this file never publishes,
+below. the supervisor watches /oak/points, which this file never publishes,
 and a watch on a topic nothing publishes is a permanent SENSOR_DROPOUT the
 moment the aircraft arms (CLAUDE.md).
 

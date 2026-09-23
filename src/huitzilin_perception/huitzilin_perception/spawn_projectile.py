@@ -1,5 +1,5 @@
 """
-spawn_projectile.py — HuitzilinReflex Week 3, W3-08.
+spawn_projectile.py — throw a simulated ball at the drone.
 
 Spawns a projectile in Gazebo and applies an initial velocity impulse so it
 flies a repeatable path at (or past) the drone.

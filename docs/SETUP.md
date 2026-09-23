@@ -66,7 +66,7 @@ source install/setup.bash
 
 ## 7. Check the build
 ```bash
-./scripts/run_tests.sh          # whole unit suite, both packages
+./scripts/run_tests.sh          # whole unit suite, all three packages
 ./scripts/preflight_check.sh    # SITL environment, 4 checks
 ```
 

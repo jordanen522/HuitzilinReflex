@@ -1,4 +1,4 @@
-# hw_detector.yaml - detector against the real OAK-D Lite, Week 5 S5-2.
+# hw_detector.yaml - detector overlay for the real OAK-D Lite.
 #
 # A NEW FILE, never an edit to detector.yaml (--symlink-install makes the
 # installed copy a symlink into src/). detector.yaml stays the sim path.
@@ -8,7 +8,7 @@
 #     --params-file .../params/detector.yaml \
 #     --params-file .../params/hw_detector.yaml -p use_sim_time:=false
 #
-# STAGED IN WEEK 5, VERIFIED IN WEEK 6 (S6-3). Both flips below are read off
+# NOT YET VERIFIED (docs/HARDWARE.md stage 5). Both flips below are read off
 # the DepthAI contract, not off a real stream. Confirm them against live
 # topics before trusting a detection result.
 

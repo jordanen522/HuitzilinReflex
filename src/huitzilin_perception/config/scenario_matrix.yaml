@@ -1,4 +1,4 @@
-# scenario_matrix.yaml — Week 3, W3-09
+# scenario_matrix.yaml — labelled scenarios and splits for bag scoring.
 #
 # Enumerated set of scenarios for the labeled rosbag library.
 # Each entry drives spawn_projectile.py and labels the resulting rosbag.

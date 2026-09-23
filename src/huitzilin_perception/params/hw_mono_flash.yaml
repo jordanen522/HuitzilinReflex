@@ -13,7 +13,7 @@
 # every key in this file exists in the file it overlays; one that does not is
 # silently ignored by ROS 2 at runtime).
 #
-# THE VALUES BELOW ARE PLACEHOLDERS AND MUST BE REPLACED AT BRING-UP (S6-3).
+# THE VALUES BELOW ARE PLACEHOLDERS AND MUST BE REPLACED AT BRING-UP (docs/HARDWARE.md stage 5).
 # They are written as an overlay now so that step is "paste the calibration"
 # rather than "work out where it goes".
 

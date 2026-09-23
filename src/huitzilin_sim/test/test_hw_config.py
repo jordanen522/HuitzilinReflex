@@ -194,7 +194,7 @@ def test_the_node_name_check_catches_a_name_no_node_declares():
 
 
 def test_no_params_yaml_bakes_in_use_sim_time():
-    """Permanent enforcement of the S5-4 clock audit. A yaml that pins
+    """Permanent enforcement of the clock audit. A yaml that pins
     use_sim_time overrides the launch argument and re-creates exactly the
     silent wrong-clock failure the guard exists to prevent."""
     offenders = []
@@ -225,7 +225,7 @@ def test_patrol_handoff_exceeds_cmd_timeout(bridge_name, evasion_name):
 def test_hw_dodge_floor_is_raised_off_the_sim_value():
     """The sim floor of 1.0 m exists because a descending throw drove the
     drone into the runway at 2 m AGL. The real value comes from the enclosure
-    (H8-1); only the direction can be asserted today."""
+    (docs/HARDWARE.md section 6); only the direction can be asserted today."""
     sim = params(load_yaml(PERCEPTION / "params" / "evasion.yaml"), "evasion")
     hw = params(load_yaml(PERCEPTION / "params" / "hw_evasion.yaml"), "evasion")
     assert hw["dodge_floor_m"] > sim["dodge_floor_m"]

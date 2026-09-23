@@ -142,14 +142,14 @@ class EvasionNode(Node):
         self.declare_parameter("patrol_handoff_s", 0.8)
         self.declare_parameter("evade_cmd_rate_hz", 20.0)
         self.declare_parameter("auto_resume_patrol", True)
-        # Phase 5: acceleration feedforward (default off = old behaviour)
+        # Acceleration feedforward. Off: a 12-trial A/B measured no gain.
         self.declare_parameter("evade_accel_topic", "/cmd/evade_accel")
         self.declare_parameter("evade_accel_ff_mps2", 0.0)
-        # Phase 6: cue-gated confirmation (inert with no cue publisher)
+        # Cue-gated confirmation. Inert unless something publishes cue_topic.
         self.declare_parameter("cue_topic", "/threat/cue")
         self.declare_parameter("alert_min_track_updates", 2)
         self.declare_parameter("cue_timeout_s", 2.0)
-        # Phase 7: vertical escape (default off = old behaviour)
+        # Vertical escape. Off: a measured null (hw_evasion.yaml).
         self.declare_parameter("allow_upward_escape", False)
         self.declare_parameter("escape_ceiling_m", 5.0)
 

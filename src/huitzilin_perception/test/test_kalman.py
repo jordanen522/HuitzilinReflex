@@ -834,8 +834,8 @@ def test_the_multi_hypothesis_tracker_forwards_covariance_and_source():
 # cue-gated confirmation
 
 def test_no_cue_ever_published_means_the_patrol_threshold():
-    """The inertness guarantee. Nothing publishes /threat/cue today, and until
-    something does this feature must be invisible."""
+    """The inertness guarantee. Only mono_flash_detector publishes /threat/cue,
+    and no launch file starts it; until one does, this feature must be invisible."""
     assert effective_min_updates(100.0, None, cue_timeout_s=2.0,
                                  patrol_updates=3, alert_updates=2) == 3
 

@@ -25,6 +25,11 @@
   <!-- gz_pose_bridge is a shipped entry point and publishes TFMessage directly,
        so an undeclared tf2_msgs is a runtime break, not just a build one. -->
   <depend>tf2_msgs</depend>
+  <!-- gz_pose_bridge stamps with builtin_interfaces Time; score_bags and
+       truth_score_heldout read bags (rosbag2_py) and their /clock. -->
+  <depend>builtin_interfaces</depend>
+  <depend>rosgraph_msgs</depend>
+  <exec_depend>rosbag2_py</exec_depend>
 
   <!-- Gazebo bridge (depth image + point cloud) -->
   <depend>ros_gz_image</depend>

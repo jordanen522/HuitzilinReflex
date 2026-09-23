@@ -1,7 +1,7 @@
 """The perception-side hardware overlay, checked as data.
 
-Both flips asserted here are staged in Week 5 from the DepthAI contract and
-verified against a live stream in Week 6 (S6-3). Getting either wrong produces
+Both flips asserted here are read off the DepthAI contract and are still to
+be verified against a live stream (docs/HARDWARE.md stage 5). Getting either wrong produces
 a topic that looks alive and a detector that receives nothing, which is an
 expensive thing to debug on an aircraft.
 """
@@ -48,7 +48,7 @@ def test_no_diagnostic_flag_ships_in_the_hardware_config():
 def test_the_detector_overlay_does_not_re_open_a_measured_null():
     """roi_max_range_m 5->8 and cluster_min_points 5->3 were each measured over
     a full battery with the baseline best on every column. They may only be
-    re-opened once S6-4 has measured a materially different range or frame
+    re-opened once the real camera has measured a materially different range or frame
     rate, and then deliberately."""
     for null in ("roi_max_range_m", "cluster_min_points"):
         assert null not in hw()

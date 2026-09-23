@@ -214,13 +214,13 @@ class PoseDetectorNode(Node):
                                depth_m=self._depth)
         if not metric:
             # No believable range. Publishing joints with a fabricated Z would
-            # let the recogniser score an approach that was never measured.
+            # place a person in or out of the box on a range nobody measured.
             self.get_logger().warn(
                 "no usable range for this frame; dropping it",
                 throttle_duration_sec=10.0)
             return
 
-        # The source message stamp, never arrival time: the recogniser's
+        # The source message stamp, never arrival time: the guard's
         # staleness and confirmation windows are denominated in it.
         payload = pdet.frame_payload(
             metric, self._stamp_to_sec(msg.header.stamp),

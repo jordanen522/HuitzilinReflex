@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# capture_scenario.sh <SCENARIO_ID> — record one labeled Week 3 rosbag (W3-10).
+# capture_scenario.sh <SCENARIO_ID> — record one labelled scenario rosbag.
 #
 # Prereqs (all running, drone AIRBORNE and patrolling):
 #   T1 gz sim · T2 sim_vehicle.py · T3 perception.launch.py with_patrol:=true

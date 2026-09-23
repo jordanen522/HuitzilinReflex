@@ -17,16 +17,13 @@ USAGE
   # With optional patrol (add drone flight):
   ros2 launch huitzilin_perception perception.launch.py with_patrol:=true
 
-  # Offline scoring only (detector + scorer, no Gazebo bridge):
-  ros2 launch huitzilin_perception perception.launch.py mode:=score \
-      bag_dir:=/data/huitzilin_bags split:=test
+Bag scoring does not go through this file: use scripts/run_regression.sh,
+which carries the /clock warm-up the detector needs (CLAUDE.md).
 
-MACHINE NOTE (from CLAUDE.md environment section)
---------------------------------------------------
+MACHINE NOTE
+------------
 Gazebo depth rendering requires the native Dell Inspiron (UHD 630).
 The WSL2/Iris Xe laptop cannot render depth frames at rate.
-Run this launch file on the native-Ubuntu box for any scenario that
-requires live Gazebo depth — bag replay / scoring can run anywhere.
 
 COORDINATE FRAMES
 -----------------
@@ -49,7 +46,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EqualsSubstitution, LaunchConfiguration
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -58,8 +55,6 @@ def generate_launch_description() -> LaunchDescription:
     pkg_sim = get_package_share_directory("huitzilin_sim")
 
     args = [
-        DeclareLaunchArgument("mode", default_value="live",
-                              description="live | score"),
         DeclareLaunchArgument("with_patrol", default_value="false",
                               description="Also launch the Week 2 patrol stack"),
         # Passed straight through to sitl.launch.py so Week 4 can fly a longer loop
@@ -86,21 +81,9 @@ def generate_launch_description() -> LaunchDescription:
             "detector_params",
             default_value=os.path.join(pkg_perception, "params", "detector.yaml"),
         ),
-
-        DeclareLaunchArgument("bag_dir", default_value="/data/huitzilin_bags"),
-        DeclareLaunchArgument("split", default_value="test"),
-        DeclareLaunchArgument(
-            "scenario_matrix",
-            default_value=os.path.join(pkg_perception, "config",
-                                       "scenario_matrix.yaml"),
-        ),
-        DeclareLaunchArgument("recall_floor", default_value="0.95"),
-        DeclareLaunchArgument("score_output",
-                              default_value="/tmp/week3_regression.txt"),
     ]
 
     use_sim_time = LaunchConfiguration("use_sim_time")
-    mode         = LaunchConfiguration("mode")
     with_patrol  = LaunchConfiguration("with_patrol")
 
     # 1. ros_gz_image bridge — depth image
@@ -112,8 +95,6 @@ def generate_launch_description() -> LaunchDescription:
         arguments=["/gz/oak/depth"],
         remappings=[("/gz/oak/depth", "/oak/depth")],
         parameters=[{"use_sim_time": use_sim_time}],
-        # Only in live mode — scoring replays bags that already have /oak topics
-        condition=_eq_condition(mode, "live"),
     )
 
     # 2. ros_gz_bridge — point cloud + camera_info
@@ -131,7 +112,6 @@ def generate_launch_description() -> LaunchDescription:
             ("/gz/oak/depth/camera_info",  "/oak/camera_info"),
         ],
         parameters=[{"use_sim_time": use_sim_time}],
-        condition=_eq_condition(mode, "live"),
     )
 
     # 2b. Clock bridge — gz /clock → ROS /clock (sim time source)
@@ -139,15 +119,13 @@ def generate_launch_description() -> LaunchDescription:
     # detector) blocks on a /clock that never advances (frozen at t=0), so the
     # detector never fires /threat/centroid and /clock is absent from recorded
     # bags (breaks score_bags sim-time math). No use_sim_time here on purpose:
-    # a clock *source* must run on wall time. Live mode only; bag replay already
-    # carries /clock inside the bag.
+    # a clock *source* must run on wall time.
     clock_bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
         name="clock_bridge",
         output="screen",
         arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
-        condition=_eq_condition(mode, "live"),
     )
 
     # 3+4. Static TF: base_link → camera_link → camera_optical_frame
@@ -195,23 +173,6 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    # Optional: score_bags node (score mode)
-    scorer = Node(
-        package="huitzilin_perception",
-        executable="score_bags",
-        name="score_bags",
-        output="screen",
-        parameters=[{
-            "use_sim_time": use_sim_time,
-            "bag_dir":          LaunchConfiguration("bag_dir"),
-            "scenario_matrix":  LaunchConfiguration("scenario_matrix"),
-            "split":            LaunchConfiguration("split"),
-            "recall_floor":     LaunchConfiguration("recall_floor"),
-            "output_file":      LaunchConfiguration("score_output"),
-        }],
-        condition=_eq_condition(mode, "score"),
-    )
-
     # Optional: Week 2 patrol stack
     patrol_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -238,17 +199,6 @@ def generate_launch_description() -> LaunchDescription:
             tf_base_to_camera,
             tf_camera_to_optical,
             detector,
-            scorer,
             patrol_launch,
         ]
     )
-
-
-# Helper: string equality condition
-# Returns a ready-to-use Condition (do NOT wrap the result in IfCondition again).
-# EqualsSubstitution + IfCondition is the supported Jazzy pattern; the older
-# LaunchConfigurationEquals is deprecated and slated for removal.
-
-
-def _eq_condition(lc: LaunchConfiguration, value: str) -> IfCondition:
-    return IfCondition(EqualsSubstitution(lc, value))

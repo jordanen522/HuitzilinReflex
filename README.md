@@ -11,8 +11,10 @@ Ubuntu 24.04.
 
 ## Status
 
-Simulation and software work is complete; hardware bring-up is the next phase and has
-not started. The patrol loop, a detection pipeline scored against a labelled bag
+Simulation and software work is complete; hardware bring-up is the next phase. The
+hardware launch file, router config, Pi 5 payload drivers and a props-off bench runbook
+are ready ([`docs/HARDWARE.md`](docs/HARDWARE.md)); nothing has run on the aircraft yet,
+and any flight waits on a position source the BOM does not include. The patrol loop, a detection pipeline scored against a labelled bag
 library, and a Kalman filter plus dodge trigger are done and measured end to end (see
 [Results](#results)). The rendered long-range sensor lane is left with known
 limitations rather than a solution: its recall and fire-rate problems are characterised
@@ -109,7 +111,7 @@ Full install from scratch: [`docs/SETUP.md`](docs/SETUP.md).
 ## Test
 
 ```bash
-./scripts/run_tests.sh            # whole unit suite, both packages
+./scripts/run_tests.sh            # whole unit suite, all three packages
 ./scripts/run_tests.sh -k clock   # pytest args are forwarded
 ```
 
@@ -156,6 +158,10 @@ scratch. Read the sharp-edges list before the first run:
 several failure modes are silent, notably `FRAME_CLASS=0`, where the aircraft arms,
 accepts takeoff and produces no lift.
 
+On the aircraft, one launch file replaces all three terminals:
+`ros2 launch huitzilin_perception hardware.launch.py`. Set the Pi up and work through
+the bench stages in [`docs/HARDWARE.md`](docs/HARDWARE.md) first.
+
 ## Documentation
 
 | Doc | Contents |
@@ -163,11 +169,12 @@ accepts takeoff and produces no lift.
 | [`docs/RESULTS.md`](docs/RESULTS.md) | Measured envelopes, the tca law, the sensor-reach requirement |
 | [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Open problems in the rendered long-range sensor lane |
 | [`CLAUDE.md`](CLAUDE.md) | Bring-up commands and sharp edges |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md) | Pi 5 setup and props-off bench bring-up |
 | [`HuitzilinReflex_v2.md`](HuitzilinReflex_v2.md) | Objectives, BOM, roadmap |
 | [`docs/architecture.md`](docs/architecture.md) | Node graph, message and service contracts |
 | [`docs/frames.md`](docs/frames.md) | Coordinate frames and TF tree |
 | [`docs/state_machine.md`](docs/state_machine.md) | Supervisor states and transitions |
-| [`docs/requirements.md`](docs/requirements.md) | REQ-01 … REQ-16 and non-goals |
+| [`docs/requirements.md`](docs/requirements.md) | REQ-01 … REQ-21 and non-goals |
 | [`docs/SAFETY_CASE.md`](docs/SAFETY_CASE.md) | FMEA, geofence/RTL, kill-switch, operating rules |
 | [`docs/SETUP.md`](docs/SETUP.md) | Install from scratch |
 | [`docs/optics_probe.md`](docs/optics_probe.md) | Rendered-camera reach probe; the AR0234 and depth-noise measurements |

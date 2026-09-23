@@ -23,7 +23,7 @@ setup(
     zip_safe=True,
     maintainer="Jordan",
     maintainer_email="j602eng1z@gmail.com",
-    description="HuitzilinReflex Week 2: pymavlink bridge + patrol loop in SITL.",
+    description="MAVLink bridge, patrol, supervisor and flight config, for SITL and the real FC.",
     license="MIT",
     tests_require=["pytest"],
     entry_points={

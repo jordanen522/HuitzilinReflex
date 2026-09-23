@@ -1,10 +1,10 @@
-"""Drives the warning lights and siren from the escalation alert request.
+"""Drives the warning lights and siren from the guard alarm request.
 
 In:  /guard/alarm_request (std_msgs/Bool, RELIABLE)
 Out: /guard/alarm_state   (std_msgs/Bool, RELIABLE)
 
-Separate from action_recognizer on purpose. The recogniser decides; this node
-actuates, and holds its own dead-man so that a recogniser which dies mid-alert
+Separate from guard_node on purpose. The guard decides; this node
+actuates, and holds its own dead-man so that a guard which dies mid-alarm
 cannot leave a siren latched on. That is the same split payload_node has from
 evasion_node, and for the same reason.
 
@@ -12,7 +12,7 @@ There is no GPIO here. See alert_sink.py: payload_node already owns the LED
 and siren lines, Linux GPIO line requests are exclusive, and a second process
 taking them would silently disable the projectile alarm.
 
-QoS is RELIABLE to match the recogniser's publisher. The alert is a single
+QoS is RELIABLE to match the guard's publisher. The alert is a single
 edge rather than a stream, so a BEST_EFFORT subscription that dropped the
 clear would hold the alert until the dead-man expired.
 """
