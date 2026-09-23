@@ -3,7 +3,7 @@
 <package format="3">
   <name>huitzilin_perception</name>
   <version>0.4.0</version>
-  <description>HuitzilinReflex — Week 3: depth camera bridge, TF, projectile detection node, scenario tools.</description>
+  <description>HuitzilinReflex — projectile detection, Kalman tracking, evasion, payload and the simulation lanes.</description>
   <maintainer email="j602eng1z@gmail.com">Jordan</maintainer>
   <license>MIT</license>
 

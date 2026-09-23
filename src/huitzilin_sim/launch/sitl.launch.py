@@ -24,8 +24,8 @@ from ament_index_python.packages import get_package_share_directory
 def generate_launch_description():
     pkg = get_package_share_directory("huitzilin_sim")
     bridge_params = os.path.join(pkg, "params", "bridge.yaml")
-    # Overridable so Week 4 can fly a longer loop without changing the Week 2
-    # demo geometry, which is the 5 m square.
+    # Overridable so evasion runs can fly a longer loop without changing the
+    # default geometry, which is the 5 m square.
     default_patrol_params = os.path.join(pkg, "params", "patrol.yaml")
     supervisor_params = os.path.join(pkg, "params", "supervisor.yaml")
     with open(supervisor_params) as fh:
@@ -43,7 +43,7 @@ def generate_launch_description():
         DeclareLaunchArgument("patrol_params",
                               default_value=default_patrol_params,
                               description="patrol node params yaml"),
-        # Off by default: the Week 3/4 regression path and every recorded
+        # Off by default: the regression path and every recorded
         # battery ran without a supervisor, and a fault monitor that starts
         # commanding modes mid-battery would change what those numbers mean.
         # Opt in explicitly for HITL and flight work.

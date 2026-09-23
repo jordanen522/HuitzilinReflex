@@ -145,7 +145,7 @@ def generate_launch_description() -> LaunchDescription:
     args = [
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("with_patrol", default_value="false",
-                              description="Also launch the Week 2 flight stack"),
+                              description="Also launch the SITL flight stack (sitl.launch.py)"),
         # Unchanged from the baseline on purpose: huitzilin_runway_ar0234.sdf
         # keeps <world name>huitzilin_runway so the wrench and pose topics stay
         # where spawn_projectile and gz_pose_bridge already address them.

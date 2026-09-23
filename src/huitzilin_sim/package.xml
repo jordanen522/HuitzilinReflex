@@ -3,7 +3,7 @@
 <package format="3">
   <name>huitzilin_sim</name>
   <version>0.2.0</version>
-  <description>HuitzilinReflex — Week 2 sim stack: pymavlink bridge, patrol node, telemetry logger.</description>
+  <description>HuitzilinReflex — MAVLink bridge, patrol, supervisor and flight config, for SITL and the real FC.</description>
   <maintainer email="j602eng1z@gmail.com">Jordan</maintainer>
   <license>MIT</license>
 

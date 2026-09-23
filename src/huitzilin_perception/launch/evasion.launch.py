@@ -37,7 +37,7 @@ def generate_launch_description() -> LaunchDescription:
     args = [
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("with_patrol", default_value="false",
-                              description="Also launch the Week 2 flight stack"),
+                              description="Also launch the SITL flight stack (sitl.launch.py)"),
         # This is the launch file the supervisor is meant to run under: the only
         # one that starts both the flight stack and the depth cloud it watches.
         # Off by default because every recorded battery ran without it, and a

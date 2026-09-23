@@ -64,7 +64,7 @@ def generate_launch_description() -> LaunchDescription:
     args = [
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("with_patrol", default_value="false",
-                              description="Also launch the Week 2 flight stack"),
+                              description="Also launch the SITL flight stack (sitl.launch.py)"),
         DeclareLaunchArgument("world_name", default_value="huitzilin_runway"),
         DeclareLaunchArgument("gz_pose_bridge", default_value="true",
                               description="Bridge Gazebo dynamic poses — the "

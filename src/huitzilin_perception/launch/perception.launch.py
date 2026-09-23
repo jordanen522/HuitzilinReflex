@@ -56,10 +56,10 @@ def generate_launch_description() -> LaunchDescription:
 
     args = [
         DeclareLaunchArgument("with_patrol", default_value="false",
-                              description="Also launch the Week 2 patrol stack"),
-        # Passed straight through to sitl.launch.py so Week 4 can fly a longer loop
-        # (see huitzilin_sim/params/week4_patrol.yaml). Defaults to the 5 m
-        # Week 2 demo square, so week3 on its own is unchanged.
+                              description="Also launch the SITL flight stack (sitl.launch.py)"),
+        # Passed straight through to sitl.launch.py so evasion can fly a longer loop
+        # (see huitzilin_sim/params/week4_patrol.yaml). Defaults to the
+        # 5 m demo square (patrol.yaml).
         DeclareLaunchArgument(
             "patrol_params",
             default_value=os.path.join(pkg_sim, "params", "patrol.yaml")),
@@ -173,7 +173,7 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    # Optional: Week 2 patrol stack
+    # Optional: SITL flight stack
     patrol_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_sim, "launch", "sitl.launch.py")
@@ -181,7 +181,7 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "patrol_params": LaunchConfiguration("patrol_params"),
             "with_supervisor": LaunchConfiguration("with_supervisor"),
-            # Must be forwarded explicitly. Without it the Week 2 flight nodes
+            # Must be forwarded explicitly. Without it the flight nodes
             # fell back to their own default and ran on the wall clock while
             # everything else here ran on sim time, so stamps could not be
             # joined across the two. sitl.launch.py now defaults to true on its
